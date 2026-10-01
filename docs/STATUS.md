@@ -6,8 +6,8 @@ Last updated: 2026-10-01.
 
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
 **Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
-**Phase 3 — prover**: the engine is ported; both acceptance tests are run (report
-below). Open: forward expansion, definitions, and the questions of `DESIGN.md`.
+**Phase 3 — prover**: the engine is ported, in both directions; both acceptance tests
+are run (report below). Open: definitions, and the questions of `DESIGN.md`.
 
 ### Phase 1 acceptance
 
@@ -146,9 +146,19 @@ set.mm, 3 are proved. With 10 s or 3,000,000 nodes, on a sample of every tenth t
 sample at 1 s), still by proofs of at most four steps. More in `DESIGN.md`, "The search
 test".
 
-What is not done of the engine model of the brief: the tree grows from the goal only
-(forward expansion is a layer of its own in Russell, question 2 below), and definitions
-are not unfolded (set.mm has none, question 3).
+What is not done of the engine model of the brief: definitions are not unfolded
+(set.mm has none; a proposal is in `DESIGN.md`).
+
+The forward direction (`forward.flow`) was ported after the baseline. On a sample of
+every tenth theorem of the two sections, 1 s per theorem:
+
+| | propositional (154) | predicate (127) |
+| - | - | - |
+| backward, breadth first | 91 | 43 |
+| forward alone | 28 | 10 |
+| both in turn | 108 | 49 |
+
+All proofs found are accepted by the verifier.
 
 ## Decisions (2026-10-01)
 
@@ -169,7 +179,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-792 checks, 0 failures, in 12 seconds:
+817 checks, 0 failures, in 13 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -252,21 +262,22 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
    corpus script removes it. Our reader reads the current layout only, so `setmm.mmb`
    dumps with generated names (`T5198`); the real names are in `setmm.mm0`.
-4. **Phase 3, six questions** (`DESIGN.md`, "The prover", "Questions"):
-   1. whether a condition on a name that nothing above can replace may be taken as
-      settled (the conditions on bound variables are carried, as the brief says);
-   2. whether forward expansion (`forward.flow`) is ported next;
-   3. what to do about definitions and `Unfold`, which set.mm does not need;
-   4. whether answer substitutions need a command of their own;
+4. **Phase 3** (`DESIGN.md`, "The prover", "Questions"; answered on 2026-10-01: forward
+   expansion is ported; unfolding is to be an inference step that looks like an
+   assertion to the layer above):
+   1. when a disjoint-variable condition on a fresh setvar may be dropped;
+   3. what to do about an unfolding inside a variable of the goal;
+   4. whether answer substitutions need a command, and how their proofs are checked;
    5. whether keeping one proof per visible substitution, where Russell keeps one per
       whole substitution, is acceptable;
-   6. three places in the Russell source that look unintended: `ruCheckDisjs` in
-      `ruAddProof`, the variable set in `ruMakeFresherSubst`, the argument order of
-      `ruSuperRule` in `unify_var`.
+   6. three places in the Russell source that look unintended (for the author to
+      investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
+      `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`.
 
 ## Next steps
 
-1. The answers to the questions above; forward expansion if it is wanted in this phase.
-2. `ruUnifySubsProd` (`unify/prod.flow`), for assertion nodes whose premises have many
-   proofs each: the plain product is walked now.
-3. Phase 4 is designed only after the search baseline is accepted.
+1. The answers to the questions above.
+2. Unfolding as an inference step, once the proposal in `DESIGN.md` is agreed.
+3. The cost of joins in a search in both directions (see the forward report above):
+   which joins a strategy admits is the lever that Russell's tactic layer has.
+4. Phase 4 is designed only after the search baseline is accepted.
