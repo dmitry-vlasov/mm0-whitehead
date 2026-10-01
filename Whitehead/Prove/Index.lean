@@ -23,6 +23,12 @@ What differs from Russell:
   assertions of MM0 share their numbers but not their types;
 - an expression is put in by one walk down and one pass over its applications, not by
   recursion; the sets `ends` and `lens` come out the same;
+- everything stored has a *rank*, and a lookup can be limited to the ranks below a
+  bound; a node knows the smallest rank stored under it, so the walk leaves out the
+  branches that have nothing below the bound. The rank of an assertion is its place in
+  the file: a theorem may use only what is declared before it. Russell builds an index
+  for each theorem to be proved from the assertions that precede it
+  (`ruInitTheoremAssertionsIndex`); one index with ranks gives the same answers;
 - a variable is bound to an expression whose type fits it, and of two variables the more
   general is bound to the more special. Russell asks `ruSuperRule` here, with the two
   types in the other order than in `ruAdd2Subst1`.
@@ -30,6 +36,9 @@ What differs from Russell:
 import Whitehead.Prove.Unify
 
 namespace Whitehead.Prove
+
+/-- The rank of a node under which nothing is stored yet: more than any real rank. -/
+def noRank : Nat := 0x3FFFFFFFFFFFFFFF
 
 /-- `RuIndexNode` -/
 structure IndexNode (α : Type) where
@@ -44,8 +53,11 @@ structure IndexNode (α : Type) where
   ends : Array Nat := #[]
   /-- The lengths (as in `Node.len`) of the subexpressions that end here. -/
   lens : Array Nat := #[]
-  /-- What is stored for the expressions that end here. -/
+  /-- What is stored for the expressions that end here, each with its rank. -/
   data : Array α := #[]
+  ranks : Array Nat := #[]
+  /-- The smallest rank of anything stored here or below. -/
+  minRank : Nat := noRank
   deriving Inhabited
 
 /-- `RuIndex`. Node 0 is the root, which stands for no node of an expression. -/
@@ -71,8 +83,8 @@ def findChild (ix : Index α) (kids : Array Nat) (key : Nat) : Option Nat :=
 def findRule (ix : Index α) (parent : Nat) (id : Nat) : Option Nat :=
   ix.nodes[parent]!.rules.find? fun c => Node.appId ix.nodes[c]!.key == id
 
-/-- `ruSetIndex`: stores `data` under the expression `key`. -/
-def insert (ix : Index α) (key : Exp) (data : α) : Index α := Id.run do
+/-- `ruSetIndex`: stores `data` under the expression `key`, with a rank. -/
+def insert (ix : Index α) (key : Exp) (data : α) (rank : Nat := 0) : Index α := Id.run do
   let mut nodes := ix.nodes
   -- the path of the expression, a node of the trie for each of its nodes
   let mut path : Array Nat := Array.mkEmpty key.size
@@ -91,7 +103,9 @@ def insert (ix : Index α) (key : Exp) (data : α) : Index α := Id.run do
         if isVar then { p with vars := p.vars.push c } else { p with rules := p.rules.push c }
       cur := c
     path := path.push cur
-  nodes := nodes.modify cur fun p => { p with data := p.data.push data }
+  nodes := nodes.modify cur fun p => { p with data := p.data.push data, ranks := p.ranks.push rank }
+  for c in path do
+    if rank < nodes[c]!.minRank then nodes := nodes.modify c fun p => { p with minRank := rank }
   -- where the subexpressions start and end
   for i in [0:key.size] do
     let n := key.nodes[i]!
@@ -133,7 +147,7 @@ structure Unified (α : Type) where
 mutual
 
 /-- `ruDoUnifyIndex`: node `i` of `e` against the children of node `at_` of the trie. -/
-partial def unifyAt (ix : Index α) (e : Exp) (i at_ : Nat) (sub : Subst)
+partial def unifyAt (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub : Subst)
     (acc : Array (Unified α)) : Array (Unified α) := Id.run do
   if i ≥ e.size then return acc
   let n := e.nodes[i]!
@@ -142,24 +156,29 @@ partial def unifyAt (ix : Index α) (e : Exp) (i at_ : Nat) (sub : Subst)
   if !Node.isVar n then
     -- the same term in the trie
     if let some c := ix.findRule at_ (Node.appId n) then
-      acc := unifyNode ix e i c sub acc
+      if ix.nodes[c]!.minRank < limit then
+        acc := unifyNode ix limit e i c sub acc
     -- a variable of the trie takes the whole subexpression
     if !here.vars.isEmpty then
       let ex := e.sub i
       for c in here.vars do
-        acc := bindVar ix e (i + Node.len n) c ix.nodes[c]!.key ex sub acc
+        if ix.nodes[c]!.minRank < limit then
+          acc := bindVar ix limit e (i + Node.len n) c ix.nodes[c]!.key ex sub acc
   else
     -- the variable of `e` takes every subexpression that starts here
     for c in here.rules do
-      for last in ix.nodes[c]!.ends do
-        acc := bindVar ix e i last n (ix.subexpr c last) sub acc
+      if ix.nodes[c]!.minRank < limit then
+        for last in ix.nodes[c]!.ends do
+          if ix.nodes[last]!.minRank < limit then
+            acc := bindVar ix limit e i last n (ix.subexpr c last) sub acc
     for c in here.vars do
-      acc := bindVar ix e i c ix.nodes[c]!.key (Exp.ofVar n) sub acc
+      if ix.nodes[c]!.minRank < limit then
+        acc := bindVar ix limit e i c ix.nodes[c]!.key (Exp.ofVar n) sub acc
   return acc
 
 /-- `unify_var` and `unify_step` of `ruDoUnifyIndex`: binds `v` to `ex`, or unifies `ex`
 with what `v` is bound to, and goes on after position `j`, from node `at_` of the trie. -/
-partial def bindVar (ix : Index α) (e : Exp) (j at_ : Nat) (v : Nat) (ex : Exp) (sub : Subst)
+partial def bindVar (ix : Index α) (limit : Nat) (e : Exp) (j at_ : Nat) (v : Nat) (ex : Exp) (sub : Subst)
     (acc : Array (Unified α)) : Array (Unified α) :=
   -- which of the two is bound, if `ex` is a variable of a more general type
   let (v, ex, ok) :=
@@ -173,23 +192,25 @@ partial def bindVar (ix : Index α) (e : Exp) (j at_ : Nat) (v : Nat) (ex : Exp)
       | some ex1 => unifyExps #[ex1, ex] sub
       | none => sub.add v ex
     match next with
-    | some s => unifyNode ix e j at_ s acc
+    | some s => unifyNode ix limit e j at_ s acc
     | none => acc
 
 /-- `ruDoUnifyIndexNode`: position `i` of `e` has been matched and led to node `at_`. -/
-partial def unifyNode (ix : Index α) (e : Exp) (i at_ : Nat) (sub : Subst)
+partial def unifyNode (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub : Subst)
     (acc : Array (Unified α)) : Array (Unified α) :=
   if i + 1 == e.size then
     let instance_ := sub.apply e
-    ix.nodes[at_]!.data.foldl (init := acc) fun acc d => acc.push ⟨sub, d, instance_⟩
-  else unifyAt ix e (i + 1) at_ sub acc
+    let node := ix.nodes[at_]!
+    (node.data.zip node.ranks).foldl (init := acc) fun acc (d, rank) =>
+      if rank < limit then acc.push ⟨sub, d, instance_⟩ else acc
+  else unifyAt ix limit e (i + 1) at_ sub acc
 
 end
 
 /-- `ruUnifyIndex`: everything stored under an expression that unifies with `e`, under
-an extension of `sub`. -/
-def unify (ix : Index α) (e : Exp) (sub : Subst := {}) : Array (Unified α) :=
-  unifyAt ix e 0 0 sub #[]
+an extension of `sub`; with `limit`, only what has a rank below it. -/
+def unify (ix : Index α) (e : Exp) (sub : Subst := {}) (limit : Nat := noRank) : Array (Unified α) :=
+  unifyAt ix limit e 0 0 sub #[]
 
 /-- `ruIndexValues` -/
 def values (ix : Index α) : Array α :=

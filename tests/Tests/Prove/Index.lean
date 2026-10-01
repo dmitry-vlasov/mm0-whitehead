@@ -57,6 +57,13 @@ def indexTests : TestM Unit := do
   checkEq "index: under a substitution given in advance"
     (((ix.unify (g.exp "(wi p q)") (g.sub [("p", "(wn ps)")])).map (·.data)).qsort (· < ·)).toList
     ["(wi (wn a) (wi a b))", "(wi a (wi b a))", "(wi a a)", "a"]
+  -- ranks: only what is stored with a rank below the limit
+  let ranked : Index String := (keys.zipIdx).foldl (init := {}) fun ix (k, r) => ix.insert (g.exp k) k r
+  checkEq "index: a limit on the rank" (((ranked.unify (g.exp "p") {} 3).map (·.data)).qsort (· < ·)).toList
+    ["(wi (wn a) (wi a b))", "(wi a (wi b a))", "(wi a a)"]
+  checkEq "index: the limit on an application"
+    (((ranked.unify (g.exp "(wi ps ps)") {} 2).map (·.data)).qsort (· < ·)).toList []
+  checkEq "index: without a limit" (ranked.unify (g.exp "p")).size keys.length
   -- two expressions under one key
   let ix2 := (ix.insert (g.exp "(wi a a)") "again")
   checkEq "index: two data under one expression" (found g ix2 "(wi ps ps)") ["(wi a a)", "a", "again"]

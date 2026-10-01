@@ -18,7 +18,7 @@ task's theorem, or the one that `only` names. -/
 def candidates (env : Env) (h : Nat) (only : Option Only) : Array (Index.Unified Nat) :=
   let e := env.hyps[h]!.expr
   match only with
-  | none => (env.assertions.unify e).filter (·.data < env.task.limit)
+  | none => env.assertions.unify e {} env.task.limit
   | some (.assertion id) =>
     match unifyExps #[e, env.db.asserts[id]!.concl] {} with
     | some s => #[⟨s, id, s.apply e⟩]

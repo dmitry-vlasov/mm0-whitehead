@@ -155,9 +155,9 @@ def varName (id : Nat) : String :=
 def showExp (db : Db) (e : Exp) (names : Array String := #[]) : String :=
   e.toSexp (db.termName names) varName
 
-/-- The index of the conclusions of all assertions. -/
+/-- The index of the conclusions of all assertions, each ranked by its number. -/
 def index (db : Db) : Index Nat :=
-  db.asserts.foldl (init := {}) fun ix a => ix.insert a.concl a.id
+  db.asserts.foldl (init := {}) fun ix a => ix.insert a.concl a.id a.id
 
 end Db
 
