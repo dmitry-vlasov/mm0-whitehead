@@ -17,19 +17,25 @@ Lean.
 ## Usage
 
     mm0-whitehead dump file.mm0          # print the parsed statements, normalized
+    mm0-whitehead join file.mm0          # the same, with every import included
     mm0-whitehead bench file.mm0 ...     # time the parser
 
 `dump` for `.mmb` files, `verify` and `prove` are not implemented yet.
 
-## The reference verifier
+## Reference tools and test corpus
 
-Differential testing uses `mm0-c` from the MM0 repository as the oracle:
+The tests compare against `mm0-rs`, the reference implementation, and the acceptance
+tests run on proof files that have to be built first. Neither is kept in this repository:
 
-    scripts/build-oracles.sh /path/to/mm0     # builds .tools/bin/mm0-c and mm0-c-np
+    scripts/build-oracles.sh [--with-hs] /path/to/mm0    # mm0-rs, mm0-c, mm0-hs -> .tools/bin
+    SET_MM=/path/to/set.mm scripts/build-corpus.sh /path/to/mm0    # pairs -> .tools/corpus
+
+`mm0-rs` needs a recent stable Rust; `--with-hs` builds `mm0-hs`, which is needed only
+for the set.mm translation and takes about ten minutes.
 
 ## Documents
 
 - [docs/MMB-NOTES.md](docs/MMB-NOTES.md) — the `.mmb` format as we understand it, and where
-  the spec and `mm0-c` disagree
+  the formal semantics, `mm0-rs` and mm0-c differ
 - [docs/DESIGN.md](docs/DESIGN.md) — how the code is built and why
 - [docs/STATUS.md](docs/STATUS.md) — what passes, what is open
