@@ -196,16 +196,18 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
    corpus script removes it. Our reader reads the current layout only, so `setmm.mmb`
    dumps with generated names (`T5198`); the real names are in `setmm.mm0`.
+4. **Phase 3, four questions** (`DESIGN.md`, "The prover", "Questions"): where undecided
+   disjoint-variable conditions are kept; whether forward expansion comes after the
+   backward engine; what to do about definitions; whether answer substitutions for
+   metavariables in the goal need a test in this phase. Each has a proposed default, and
+   work proceeds on the parts that do not depend on the answers.
 
 ## Next steps
 
-Phase 3 starts with reading, not with code:
+Phase 3. The plan of the port is in `DESIGN.md`, "The prover", written from the Flow9
+source and the paper.
 
-1. Russell's engine in `russell-flow/src/ru/prover/core/` and its unifier and index
-   (`src/ru/unify/`, `src/ru/subst.flow`, `src/ru/index.flow`), together with
-   `docs/proof_search_algo.pdf`; the data structures and the algorithm written down in
-   `DESIGN.md`, with the Flow9 file and function for each part.
-2. Where MM0 forces a change — bound variables and their dependency constraints,
-   definitions and `Unfold` — how the change relates to the completeness proof, as a
-   question before any code.
-3. Then the replay test first: it needs the unifier and `.mmb` emission, not the search.
+1. Expressions, substitutions, unification and the index (`Prove/Exp`, `Subst`, `Unify`,
+   `Index`), each with tests on hand-written cases and on the statements of set.mm.
+2. The tree, the two passes and proof extraction; emission of a proof body.
+3. The replay test, then the search baseline.

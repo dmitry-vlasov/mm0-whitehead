@@ -477,6 +477,216 @@ from the translated file. The names of the set.mm statements are still available
 
 ## The prover
 
-Nothing exists yet. Phase 3 is a port of Russell's engine (`CLAUDE.md`, "Russell — the
-reference implementation of the prover"); its data structures will be described here from
-the Flow9 source when that phase starts.
+No code yet. This section is the plan of the port, written after reading the Flow9
+source and `docs/proof_search_algo.pdf` ("the paper"), and before writing Lean. It says
+what is ported from where, how MM0 maps onto Russell's deductive system, and where MM0
+forces something that the paper does not cover. The questions that need an answer are
+collected at the end and repeated in `STATUS.md`.
+
+### What the engine is, in Russell's source
+
+The paper's algorithm, with the names of the source (`src/ru/prover/core/`):
+
+- **The proof variant tree.** `RuProverRoot`/`RuProverExp` are the expression nodes,
+  `RuProverProp` the assertion nodes (`tree.flow`). A `RuProverProp` carries the
+  assertion and the unifier split in two: `outer`, on the variables of the assertion,
+  and `sub`, on the variables of the goal that the unification had to instantiate.
+- **Upward pass.** `ruExpandHyp` (`expand.flow`) unifies an expression node with every
+  assertion of the index, renames the assertion's variables that the unifier left free
+  with fresh ones (`ruMakeFresherSubst`), and makes one `RuProverProp` per result.
+  `ruExpandProp` makes the child expression nodes `outer(sub(h_i))`, matches each against
+  the premises (`unifyPremise`, giving the one-node trees `RuProverProofTop`), and
+  expands each child at once. So the leaves that a strategy chooses among are assertion
+  nodes.
+- **Downward pass.** `ruAddProof` (`proofs.flow`): when a child gets a new proof, take the
+  product of it with the proofs of the siblings, and for each tuple the most general
+  unifier of their substitutions (`ruUnifySubs`, `unify/exps.flow`); compose it with the
+  node's `sub` (`ruCompose`), check the disjointness conditions of the assertion
+  (`ruCheckDisjs`), and store the result as a `RuProverProofProp`. `ruBuildPropProofs` and
+  `ruBuildExpProofs` carry new proofs to the parent, up to the root, where
+  `ruBuildRootProofs` hands them out. `ruMakeProofTree` (`tree.flow`) reads the proof off.
+- **Unification** is `ruUnifyExps` (any number of expressions, under a substitution) and
+  `ruUnifyIndex` (`unify/index.flow`: one expression against a discrimination tree,
+  `ru/index.flow`). Both are two-sided: variables on either side are bound. The
+  variables of the statement being proved are turned into constants first
+  (`ruConstProverTask`, `util.flow`) — the paper's "non-replaceable" variables — and
+  back at the end.
+- **The loop** (`prove.flow`) asks a tactic which leaves to expand (`RuTacticExpand`) and
+  expands them (`ruProveProp` = `ruExpandProp` + `ruBuildPropProofs`); the breadth-first
+  tactic returns all leaves, which is the fair strategy of the completeness theorem.
+
+Things the source does that the paper does not mention, and that the port keeps:
+candidates are ordered by the size of the unifier; an assertion must precede the theorem
+being proved; proofs of one node with the same substitution are kept once
+(`ruProofSubKey`); a found proof is verified before it is accepted
+(`ruMakeProofFromSteps`), and a proof that fails is dropped while the search goes on.
+
+Not ported in the first step, because the acceptance tests of this phase do not need
+them and each is a layer of its own in the source: proof fragments (`fragment.flow`),
+the forward closure and the forward front (`forward_closure.flow`, `forward.flow`), the
+variant-admission hook, statistics, concurrency, the tactic language, and
+`ruUnifySubsProd` (`unify/prod.flow`), which computes the same unifiers as the plain
+product in `ruAddProof` but faster for large products.
+
+### Planned modules
+
+| Lean module | Flow9 source | Contents |
+| ----------- | ------------ | -------- |
+| `Prove/Exp.lean` | `ru/src.flow` (`RuExp`), `ru/util/exp.flow` | expressions as flat arrays of nodes in prefix order, each application with the length of its arguments |
+| `Prove/Subst.lean` | `ru/subst.flow` | `RuSubst`: `ruApplySubst`, `ruAdd2Subst`, `ruCompose`, `ruUnsafeCompose`, `ruMatchExp`, `ruMergeSubst` |
+| `Prove/Unify.lean` | `ru/unify/exps.flow` | `ruUnifyExps`, `ruUnifySubs` |
+| `Prove/Index.lean` | `ru/index.flow`, `ru/unify/index.flow` | `RuIndex`, `ruSetIndex`, `ruUnifyIndex` |
+| `Prove/Db.lean` | `ru/prover/core/util.flow` | the assertions of a proof file as expressions, the index, the task with its constants |
+| `Prove/Tree.lean` | `core/tree.flow` | the nodes of the tree and the proofs on them, `ruMakeProofTree` |
+| `Prove/Expand.lean`, `Prove/Proofs.lean`, `Prove/Prove.lean` | `core/expand.flow`, `core/proofs.flow`, `core/prove.flow` | the two passes and the loop |
+| `Prove/Emit.lean` | — | a proof tree as the proof body of a `.mmb` file |
+| `Prove/Strategy/*.lean` | `tactics/breadth_first.flow`, `tactics/oracle.flow` | breadth-first search; replay of a known proof |
+
+### MM0 as a deductive system of the paper
+
+- **Language.** A sort is a non-terminal; `term f (a: s1) ... (z: sn): s` is the
+  production `s → f s1 ... sn`. Expressions are term trees, so the grammar is trivially
+  unambiguous. There is no subtyping between sorts: an MM0 coercion is a term like any
+  other.
+- **Assertions.** An axiom or theorem is `h1, ..., hk ⊢ c` over its binders. As in
+  Metamath, a binder need not occur in the conclusion (`ph` in `ax_mp`); these are the
+  variables that `ruExpandHyp` renames to fresh ones.
+- **Definitions** are, in the set.mm translation, axioms (`df_an`): its 1,436 terms
+  include no `def`, and its 15.6 million proof commands include no conversion. Both
+  acceptance tests of this phase therefore run without `Unfold`. See question 3.
+
+### Where MM0 differs: bound variables
+
+MM0 has two kinds of binders. A regular one, `(ph: wff x)`, stands for any expression of
+its sort. A bound one, `{x: setvar}`, stands for a variable only, and comes with
+conditions on a substitution `σ` for the binders of an assertion (`safe_subst` in
+`mm0.lean`, `argsFault` in our verifier):
+
+1. `σ(x)` is a bound variable of the proof: a bound binder of the theorem being proved,
+   or a dummy.
+2. For bound `x` and any other binder `v`, the variable `σ(x)` does not occur in `σ(v)` —
+   unless `v` is regular and declares the dependency (`v: s ... x ...`). "Occurs"
+   includes, for a regular variable of the theorem being proved, the bound variables it
+   is declared to depend on.
+
+Both fit the paper's framework, in the two places where the paper already leaves room.
+
+**Condition 1 is subtyping.** The paper lets a variable `v : n` be replaced by `e : m`
+when `n → m` is derivable in the grammar, and names the class/set relation of set theory
+as the example; the source implements it with `ruSuperRule`. For MM0, give every sort
+`s` a second non-terminal `s̄`, "the names of sort `s`", with the production `s → s̄` and
+no other production for `s̄`. A bound binder is a variable of type `s̄`; a regular binder
+is a variable of type `s`; an argument position of a term that is declared with braces
+has type `s̄`. Then condition 1 is the typing rule of substitutions, and nothing in the
+algorithm or its proofs changes. In the code this is one bit in the type of a variable,
+and the test where Russell calls `ruSuperRule`; unlike Russell, no coercion node is
+inserted, because `s → s̄` has no symbol.
+
+In the set.mm translation this matters: of its 46,520 + 959 binders of sort `setvar`,
+959 are regular (`cv (x: setvar): class` takes a regular one), so "sort `setvar`" alone
+does not tell whether a variable may be replaced by a regular variable of the theorem.
+
+**Condition 2 is the disjoint variable restriction** that the paper sets aside on its
+last page ("the only thing which is necessary to track during traversing of PVT are
+these restrictions"), and that the source checks in `ruAddProof` with `ruCheckDisjs`.
+From the binders of an assertion we get its set of pairs:
+
+    D(A) = { (x, v) : x a bound binder of A, v another binder of A,
+                      and not (v regular and x among the declared dependencies of v) }
+
+and the condition on a substitution `θ` is: for each pair, the name `θ(x)` does not occur
+in `θ(v)`.
+
+How this relates to the three theorems of the paper. A substitution proof tree now
+stands for a proof *under conditions*: the pairs of all its assertion nodes, with its
+substitution applied. Write `C(T)` for them.
+
+- *Correctness.* If `η` instantiates the remaining variables of `π(T)` and satisfies
+  `η(C(T))`, then `η(π(T))` is a valid MM0 proof. This is the paper's theorem 1 plus the
+  observation that MM0 asks nothing else of a proof step.
+- *Generality and completeness.* Let `π'` be a valid proof. The paper gives a tree `T`
+  congruent to it with `π' = ε(π(T))`. The conditions that `π'` satisfies at its steps
+  are exactly `ε(C(T))`. So `C(T)` is satisfiable, and `T` is lost only if the engine
+  discards a tree whose conditions are still satisfiable. Hence the rule: **a tree may
+  be discarded only when a condition is violated for every instantiation** — the name
+  `θ(x)` already occurs in `θ(v)`, as a bound variable of the theorem, as a dependency of
+  one of its regular variables, or as the same metavariable. A condition that could
+  still go either way (because `θ(v)` contains a metavariable, or `θ(x)` is one) must be
+  kept, not decided.
+
+The source is on the safe side of this rule for conditions between a set variable and
+anything else, and discards a little too much for Metamath's conditions between two
+class or wff variables (two expressions that share a metavariable are rejected, although
+the metavariable could still become a closed term). MM0 has no such conditions: one
+side of a pair is always a name.
+
+What is left to choose is where the undecided conditions live (question 1).
+
+**Dummies and leftover variables.** When a proof reaches the root, variables may remain
+that nothing determined. In Russell they become variables of the proof
+(`ruMakeProofFromSteps`). In MM0:
+
+- a leftover name becomes a `Dummy` of its sort, a different one for each; this
+  satisfies every condition that was still open on it;
+- a leftover regular variable must be given an expression, because MM0 has no dummy
+  that is not a bound variable. Any expression of the sort will do that keeps the open
+  conditions true: a variable of the theorem, or a term without arguments that is
+  declared before the theorem. If there is none, this variant gives no proof and the
+  search goes on.
+
+### Emission
+
+A proof tree with its final substitution becomes the body of a theorem in the `.mmb`
+format: `Hyp` for the premises, `Dummy` for the leftover names, and for each assertion
+node the expressions of *all* its binders (`Term`/`Ref`), the subproofs, and `Thm`.
+Expressions and subproofs that occur twice are saved once (`TermSave`, `ThmSave`) and
+referred to, as `ruMakeLinearProof` shares steps with the same statement. The emitted
+body is checked by our verifier before it is reported, which is the port of the
+verification in `ruMakeProofFromSteps`, and the files of the acceptance tests are
+checked with mm0-c as well.
+
+### The two acceptance tests
+
+- **Replay.** A proof body of the `.mmb` file gives, in the order of its `Thm` commands,
+  the assertions used and how the subproofs nest; everything else — every expression —
+  is forgotten. The oracle strategy (after `tactics/oracle.flow`) expands, at each
+  expression node, only the assertion that the known proof uses there. The engine
+  must find all substitutions by unification. The output is a `.mmb` file with the same
+  tables and the reconstructed bodies, checked by mm0-c against `setmm.mm0`.
+- **Search.** Breadth-first search with a time budget on the first sections of set.mm,
+  each theorem proved from the assertions before it.
+
+### Questions
+
+1. **Where do undecided disjointness conditions live?**
+   (a) As in Russell: `ruAddProof` checks the pairs of its own assertion and discards
+   what is violated for certain; nothing is remembered. A proof that reaches the root is
+   checked as a whole (by the verifier, on the emitted body), and dropped if a condition
+   that was open earlier turned out false. Sound output, complete search, but a tree
+   that is already doomed can keep growing until the root.
+   (b) Each proof on a node carries its open conditions next to its substitution; they
+   are instantiated and re-checked whenever substitutions are unified. Then every proof
+   at the root is valid up to the choice of leftover variables, and doomed trees stop
+   early; the cost is a set of pairs per proof variant.
+   The brief says the constraints are "carried as constraints on the substitution and
+   discharged consistently", which is (b). My plan is to port (a) first, because it is
+   what the source does and the verifier is there anyway, measure how many root proofs
+   it loses to the final check on set.mm, and add (b) as a refinement of `ruAddProof` if
+   the number is not negligible. Is that order acceptable, or do you want (b) from the
+   start?
+2. **Forward expansion.** The brief describes a tree that grows in both directions; the
+   paper and the core of the source grow it from the goal, and `forward.flow` (915 lines,
+   with its join to the backward tree) is a recent layer on top. I plan the backward
+   engine and both acceptance tests first, then `forward.flow` as a separate step. Is
+   that the intended order?
+3. **Definitions.** Not needed for set.mm. For MM0 libraries that use `def` (peano,
+   x86), unfolding is not an inference by an assertion, and unification modulo
+   unfolding would give up the unique most general unifier that the paper relies on.
+   The alternative that stays inside the paper is to search on fully unfolded
+   statements and to add the `Conv`/`Unfold` steps mechanically at emission; dummies of
+   definitions then need care (two unfoldings must be able to share or to separate
+   their bound variables). I propose to leave this until the set.mm baseline exists.
+4. **Which variables of a task are replaceable.** The brief wants metavariables in the
+   goal and the premises, with answer substitutions. The source supports it (the
+   theorem's `meta` variables are not turned into constants), and so will the port; the
+   acceptance tests do not use it. Is a test for it wanted in this phase?
