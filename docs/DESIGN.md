@@ -12,6 +12,9 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Mm0/Parser.lean` | tokens → statements (the grammar of `mm0.md`) |
 | `Whitehead/Mm0/Print.lean` | statements → normalized `.mm0` text |
 | `Whitehead/Mm0/Load.lean` | a specification with its `import`s resolved |
+| `Whitehead/Mm0/Env.lean` | the elaborated specification: sorts, terms, statements, expression trees |
+| `Whitehead/Mm0/Math.lean` | the secondary parser: tokens, notations, coercions, formulas |
+| `Whitehead/Mm0/Elab.lean` | statements → `Env` |
 | `Whitehead/Mmb/Types.lean` | the data of a `.mmb` file: tables, commands, statements, patterns |
 | `Whitehead/Mmb/Reader.lean` | opening a `.mmb` file; decoding binders, unify streams and proof bodies on demand |
 | `Whitehead/Mmb/Encode.lean` | command streams back to bytes |
@@ -20,7 +23,9 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
 | `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
+| `tests/Tests/Mm0/Elab.lean` | formulas, notations and declarations on hand-written specifications |
 | `tests/Tests/Mm0/Corpus.lean` | the parser and loader over the `.mm0` files of the MM0 repository |
+| `tests/Tests/Mm0/Pairs.lean` | every elaborated statement against its counterpart in a `.mmb` file |
 | `tests/Tests/Mmb/Reader.lean` | the reader on two small files, and on corruptions of one of them |
 | `tests/Tests/Mmb/Corpus.lean` | the reader over real `.mmb` files, with the round trip |
 | `tests/fixtures/mmbasm.py` | a hand assembler for small `.mmb` files, used by the `gen.py` scripts |
@@ -34,10 +39,10 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 ### Two parsing levels
 
 `mm0.md` has a primary grammar (statements) and a secondary one (the contents of
-`$ ... $`, which depends on the notations declared in the file). The code that exists is
-the primary level: a math string is kept in the tree as its raw text and its span. The
-secondary parser will be a separate module that takes the statements in order, maintains
-the notation environment and turns each `MathString` into an expression tree.
+`$ ... $`, which depends on the notations declared in the file). The primary parser keeps
+a math string in the syntax tree as its raw text and its span. The elaborator then takes
+the statements in order, maintains the notation environment, and turns each math string
+into an expression tree with the secondary parser.
 
 ### Lexing on bytes
 
@@ -150,6 +155,90 @@ verbatim. It is the `dump` output for `.mm0` files, the `join` output, and the r
 check: printing a parsed file and parsing the result must give text that prints
 identically.
 
+### Math strings
+
+`Math.lean` is "Secondary parsing" of `mm0.md`.
+
+- **Tokens.** A math string is split at whitespace, after every left delimiter and before
+  every right delimiter. `(` and `)` are tokens only if that splitting produces them, so
+  a specification that wants `(a)` to work declares them as delimiters.
+- **The grammar, exactly.** Parsing is precedence climbing in which every parsed
+  expression carries its *level*, the precedence of its outermost construct: `max` for a
+  variable, a parenthesized expression and a term without arguments; 1024 for a term
+  applied to arguments; the notation's precedence for a notation. An infix operator at
+  precedence `q` is taken only if the left operand's level is at least `q` (left
+  associative) or `q + 1` (right associative), which is what the productions
+  `expression(q) -> expression(q) OP expression(q+1)` and
+  `expression(q+1) OP expression(q)` say. `mm0-rs` and mm0-c do not track the level of
+  the left operand; their loops agree with the grammar as long as no precedence level
+  has both a left and a right associative operator, and accept strings the grammar does
+  not derive otherwise.
+- **Terms take as many arguments as they have.** `f a b` reads exactly the arity of `f`
+  arguments, each at `max`, as the production `FUNC expression(max){n}` says (`mm0-rs`
+  reads all that follow and checks the count later; the valid inputs are the same).
+- **A notation constant is never read as a name.** If a token is a declared constant, it
+  is that constant, even where a variable or term of the same spelling would fit; this
+  is the behaviour of `mm0-rs`. A token may be both a prefix and an infix constant, at
+  one precedence.
+- **Typing on the way.** Each argument is checked against the binder it goes into when
+  the term is built. For a regular binder a coercion is inserted if the sorts differ.
+  For a bound binder the argument must be a bound variable of that sort (a parenthesized
+  variable is still a variable, as in the formal specification). A whole formula is then
+  coerced to the sort it must have: the result sort for a `def`, some provable sort for
+  a hypothesis or conclusion.
+- **Coercions** are kept closed under composition: adding `t: s1 > s2` adds a path from
+  everything that reaches `s1` to everything reachable from `s2`. A cycle, two paths
+  between the same sorts, or two provable sorts reachable from one sort are errors at
+  the declaration, as in `mm0-rs`. (`mm0-rs` and mm0-c do not compose a path that goes
+  through both a predecessor of `s1` and a successor of `s2`; this code does.)
+
+Tokens are cut out as strings, one allocation each, and looked up in hash maps. That is
+the main cost of elaboration today: `setmm.mm0` (20 MB) loads and elaborates in 0.94 s,
+of which parsing the statements is 0.20 s. If phase 2 needs it faster, this is where to
+look first.
+
+### Elaboration
+
+`Elab.lean` turns statements into an `Env` (`Env.lean`): the sorts, terms, axioms and
+theorems in order, with binders resolved (sort, bound or regular, dependencies as indices
+of variables) and formulas as `Expr` trees over variable and term indices. This is the
+environment of the formal specification (`Elaborate` in `mm0.mm0`), with names kept.
+Terms are numbered in the order of the specification; a proof file numbers its local
+definitions too, so the two numberings differ and have to be mapped.
+
+Statements are elaborated one at a time against what was declared before
+(`Elab.elabStmt`), so the elaborator can also be driven statement by statement.
+
+What is checked: names (sorts, terms and theorems declared once; variables once per
+declaration), the shape of binders (variables before hypotheses; dependencies only on
+bound variables of earlier binders; none on a bound variable or a dummy), arities, sorts
+and coercions in formulas, and the validity of notation declarations. What is left to
+the verifier: the conditions of a well-formed environment (`strict`, `pure`, `free`, the
+free variables of a definition).
+
+A Lean detail that matters at this size: the functions that add a declaration take the
+state apart with a pattern match and build a new one (`ElabState.pushThm`). Written as
+`{ st with env := { st.env with thms := st.env.thms.push t } }` the array would be shared
+at the time of the `push` and copied each time, which is quadratic over 49,156 theorems.
+
+Where the sources differ on elaboration:
+
+| Point | `mm0.md` | formal spec | `mm0-rs` | Here |
+| ----- | -------- | ----------- | -------- | ---- |
+| precedence of a term application | 1024; arguments at `max` | the comparison in `ptCheckFunc` is the other way round | as `mm0.md` | as `mm0.md` |
+| a term without arguments | — | at 1024 like any application | at `max` | at `max` (also what mmb.md says for printing) |
+| several anonymous variables (`_`, arrows) | allowed | `lookupVar` treats `_` as a name, so a second one fails | allowed | allowed |
+| a variable binder after a hypothesis | grammar allows it | rejected | rejected | rejected |
+| a token that is both prefix and infix | "must not be shared" | allowed | allowed | allowed |
+| a coercion that creates a second path | graph must stay a forest | allowed; a formula with two parses fails | error at the declaration | error at the declaration |
+| the binders of a `notation` | "annotated with types" | used for the names only | number checked | number checked |
+| precedence values | at least up to 2046 | any number | below 2^32 | any number |
+| `def` keyword in the grammar | `def` | `parseDef` asks for the token `theorem` | `def` | `def` |
+
+The rows where the formal specification stands alone (the inverted comparison, `_`, the
+`theorem` token) read like slips in it; in each of them `mm0.md` and `mm0-rs` agree with
+each other and are followed.
+
 ## The `.mmb` reader
 
 The format and what the reader accepts are in `MMB-NOTES.md` (sections 1–5, 7 and 10).
@@ -186,6 +275,16 @@ the set.mm translation is 15.6 million lines (390 MB), written in 3.5 s.
   with `@` in the source and names a fragment of the expected message, so both where and
   what are checked.
 - Import tests run on the small files in `tests/fixtures/imports`.
+- Elaborator tests put a formula on top of a small signature and compare the resulting
+  tree, as an s-expression, with the expected one; rejections are checked for position
+  and message as above.
+- The pair test is the elaborator's strongest check. For a `.mm0`/`.mmb` pair it compares
+  every statement elaborated from the `.mm0` text with the statement the proof file
+  declares at the same place: modifiers of sorts, binders and return types bit for bit,
+  and every formula against the tree of its unify stream. The two were produced
+  independently (ours by parsing notation; theirs by `mm0-rs` or `mm0-hs`). It runs on
+  the fixtures of this repository, on the pairs of the MM0 repository, and on the built
+  corpus including the set.mm translation.
 - Corpus tests need a checkout of the MM0 repository, named by `MM0_REPO`; without it they
   are reported as skipped. Every `.mm0` file there must parse and round-trip; every file
   of `tests/mm0_mmu/fail` must be rejected, except the one that is grammatical and wrong

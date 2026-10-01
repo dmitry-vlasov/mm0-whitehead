@@ -10,7 +10,7 @@ def usage : String :=
   dump <file.mmb>                print a decoded proof file: statements and proofs
   verify <file.mm0> <file.mmb>   check a proof file against its specification  (phase 2)
   prove ...                      automated proof search                        (phase 3)
-  bench <file> ...               time the .mm0 parser or the .mmb reader on the given files"
+  bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
 /-- Exit codes: 0 success, 1 the input was rejected, 2 the command line is wrong or asks
 for something that does not exist yet. -/
@@ -73,7 +73,23 @@ def benchMm0 (path : String) : IO UInt32 := do
   let micros := nanos / 1000
   let mbPerSec := if nanos == 0 then 0 else src.size * 1000 / nanos
   IO.println s!"{path}: {src.size} bytes, {count} statements, \
-    {micros / 1000}.{(micros % 1000) / 100} ms, {mbPerSec} MB/s"
+    parse {micros / 1000}.{(micros % 1000) / 100} ms, {mbPerSec} MB/s"
+  -- the whole front end: imports resolved, every formula parsed
+  let start ← IO.monoNanosNow
+  let spec ←
+    match ← Mm0.load path with
+    | .ok spec => pure spec
+    | .error e =>
+      IO.eprintln e.format
+      return 1
+  match Mm0.elaborate spec with
+  | .error e =>
+    IO.eprintln e.format
+    return 1
+  | .ok env =>
+    let micros := ((← IO.monoNanosNow) - start) / 1000
+    IO.println s!"{path}: load and elaborate {micros / 1000}.{(micros % 1000) / 100} ms: \
+      {env.sorts.size} sorts, {env.terms.size} terms, {env.thms.size} axioms and theorems"
   return 0
 
 /-- Times opening a `.mmb` file and decoding every stream in it. -/
