@@ -660,8 +660,8 @@ those of its expression under the substitution of the proof.
 The first version did less, which is what Russell does in effect (change 3 below): it
 discarded what was violated for certain and remembered nothing. On the logic fixture
 the search for `alrimi` then sent one proof to the verifier to be rejected; now that
-proof stops in the tree. In the search test on set.mm the two versions do not differ in
-what they prove: there the verifier rejected nothing in either.
+proof stops in the tree. On the predicate calculus of set.mm the first version sent 361
+proofs to the verifier to be rejected; now none gets there ("The search test").
 
 ### Where the code does something else than the source
 
@@ -777,7 +777,67 @@ all substitutions by unification.
 
 ### The search test
 
-BASELINE
+    scripts/search-baseline.sh          # mm0-whitehead prove search, per section
+
+Every theorem of a section is proved from scratch: the engine is given the statement
+and the assertions that precede it, and no proof. The strategy is breadth first, all
+leaves round by round, with nothing to rank them. The limit is 1 s per theorem. A
+section is told by the numbers of its theorems: propositional calculus is what comes
+before the term `wal` (theorems 0 to 1532), predicate calculus what comes before
+`ax_ext` (1533 to 2824).
+
+| | propositional | predicate |
+| - | - | - |
+| theorems | 1,520 | 1,262 |
+| proved | 805 (53.0%) | 374 (29.6%) |
+| stopped at the limit | 715 | 888 |
+| proofs rejected by the verifier | 0 | 0 |
+| steps of a proof found: median, largest | 2, 4 | 1, 3 |
+| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 501, 268, 8 | 3, 300, 57, 14, 0 |
+| shorter than in the file / the same / longer | 15 / 594 / 196 | 233 / 134 / 7 |
+| time of a successful search: median, 90% | 272 ms, 699 ms | 3 ms, 611 ms |
+
+The files with the proofs found in the place of the original ones are accepted by our
+verifier against `setmm.mm0` and by `mm0-rs`.
+
+What the numbers say:
+
+- In one second the tree reaches about 500,000 assertion nodes, which is depth 3 to 4.
+  A proof found has at most four steps; whatever needs five is out of reach of an
+  unguided search at this budget. This is the baseline that ranking has to beat.
+- A proof found can be longer than the one in the file (196 in propositional calculus):
+  within a round the first proof that reaches the root is taken, not the shortest.
+- In predicate calculus 300 theorems are proved in one step, 233 of them by a shorter
+  proof than the file has: they are instances of an assertion that precedes them.
+  set.mm proves many statements a second time, from other axioms or by another route
+  (`minimp_ax1` is `ax_1` derived from a single axiom, in 3 steps), and a search that may
+  use everything before a theorem finds the first one.
+- Outside the two sections, a sample of every 250th theorem (179 theorems) has 3 proved,
+  each in one step.
+
+More time helps, slowly. A sample of every tenth theorem of the two sections, with a
+limit of 10 s or 3,000,000 assertion nodes (the node limit was reached first in 80 of
+the 97 searches that were stopped):
+
+| | propositional | predicate |
+| - | - | - |
+| theorems in the sample | 154 | 127 |
+| proved at 1 s | 87 (56%) | 41 (32%) |
+| proved at 10 s or 3,000,000 nodes | 122 (79%) | 62 (49%) |
+| largest proof found | 4 steps | 3 steps |
+
+Six times the nodes buy one more round of the tree for some theorems, and no proof of
+more than four steps.
+
+Carrying the conditions on bound variables matters here. The first version, which only
+discarded what was violated for certain, proved 357 theorems of predicate calculus under
+the same limit and sent 361 proofs to the verifier to be rejected; with the conditions
+carried, 374 are proved and none is rejected.
+
+Speed: a search makes about 500,000 assertion nodes per second, with 300 to 2,800
+assertions in the index. A profile of a search (callgrind) has the lookup in the index
+at 30% and the making of the nodes at most of the rest; `addProof` is small as long as
+the tree is shallow.
 
 ### Questions
 
@@ -785,10 +845,13 @@ BASELINE
    in it is a choice of mine: a condition on a name of the tree that no node above can
    replace is taken as settled, because that name will become a dummy. This relies on
    change 5 for what "above can replace" means. Is that reading right?
-2. **Forward expansion.** The brief describes a tree that grows in both directions; the
-   paper and the core of the source grow it from the goal, and `forward.flow` (915 lines,
-   with its join to the backward tree) is a recent layer on top. Both acceptance tests
-   are met without it. Port it next, or after the ranking questions of phase 4?
+2. **Forward expansion.** The brief describes a tree that grows in both directions.
+   The paper and the core of the source grow it from the goal. `forward.flow` (915
+   lines) is a layer on top: a front of facts derived from the premises, by matching a
+   fact with a hypothesis of an assertion and emitting its conclusion, with the proofs
+   built by the same `ruAddProof`, and a join of a forward fact with a backward subgoal
+   that must not make a proof depend on itself. Both acceptance tests are met without
+   it. Port it next, or after the search baseline has been looked at?
 3. **Definitions.** Not needed for set.mm. For MM0 libraries that use `def` (peano,
    x86), unfolding is not an inference by an assertion, and unification modulo
    unfolding would give up the unique most general unifier that the paper relies on.

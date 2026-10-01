@@ -6,7 +6,8 @@ Last updated: 2026-10-01.
 
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
 **Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
-**Phase 3 — prover**: not started.
+**Phase 3 — prover**: the engine is ported; both acceptance tests are run (report
+below). Open: forward expansion, definitions, and the questions of `DESIGN.md`.
 
 ### Phase 1 acceptance
 
@@ -100,6 +101,55 @@ reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed fi
   matching 0.35 s). The first version took 3.1 s; what was changed, and why it was slow,
   is in `DESIGN.md`, "The loop, and what the Lean compiler does with it".
 
+### Phase 3 acceptance
+
+> **Replay test**: given an existing set.mm proof as the *sequence of statements used*,
+> the engine reconstructs the full proof by unification alone; the emitted `.mmb` passes
+> our verifier and `mm0-rs`.
+
+`mm0-whitehead prove replay .tools/corpus/setmm.mmb -o out.mmb`: each proof is reduced
+to the tree of the assertions it uses, every expression is forgotten, and the engine
+finds the substitutions again.
+
+| | |
+| - | - |
+| theorems with a proof | 47,611 |
+| reconstructed | 47,611 |
+| steps | 3,508,182, as in the file |
+| tuples of proofs that did not unify; proofs rejected by the verifier | 0; 0 |
+| proof bodies | 32.4 MB in the file, 32.7 MB reconstructed |
+| time | 80 to 90 s |
+
+`out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
+
+> **Search test**: a benchmark set of theorems from the set.mm translation (start with
+> propositional calculus and predicate calculus sections) proved from scratch under a
+> time budget; report the fraction proved and the proof lengths.
+
+`scripts/search-baseline.sh`: every theorem proved from the assertions before it and
+nothing else, breadth first, 1 s per theorem.
+
+| | propositional calculus | predicate calculus |
+| - | - | - |
+| theorems | 1,520 | 1,262 |
+| proved | 805 (53.0%) | 374 (29.6%) |
+| steps of a proof found: median, largest | 2, 4 | 1, 3 |
+| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 501, 268, 8 | 3, 300, 57, 14, 0 |
+| shorter than in the file / the same / longer | 15 / 594 / 196 | 233 / 134 / 7 |
+| proofs rejected by the verifier | 0 | 0 |
+
+The files with the proofs found are accepted by our verifier against `setmm.mm0` and by
+`mm0-rs`. In one second the tree reaches about 500,000 assertion nodes, depth 3 to 4, so
+a proof found has at most four steps. Of a sample of 179 theorems from the rest of
+set.mm, 3 are proved. With 10 s or 3,000,000 nodes, on a sample of every tenth theorem,
+79% of propositional and 49% of predicate calculus are proved (56% and 32% of the same
+sample at 1 s), still by proofs of at most four steps. More in `DESIGN.md`, "The search
+test".
+
+What is not done of the engine model of the brief: the tree grows from the goal only
+(forward expansion is a layer of its own in Russell, question 2 below), and definitions
+are not unfolded (set.mm has none, question 3).
+
 ## Decisions (2026-10-01)
 
 1. The formal semantics are the final judge: `mm0.md` plus the formal specification
@@ -119,7 +169,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-641 checks, 0 failures, in 8 seconds:
+792 checks, 0 failures, in 12 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -136,6 +186,12 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 - Verifier, hand-written: `small.mmb` and the 7 disputed files; 48 files with one rule
   each, with our verdict and those of `mm0-rs` and mm0-c; 18 specification cases.
 - Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.
+- Prover, hand-written and random: expressions and substitutions; unification and the
+  index, also compared with a reference unifier on 27,000 random inputs; the engine on
+  the logic fixture (database, replay of its 16 proofs, breadth-first search, conditions
+  on bound variables, answers for a goal with a variable).
+- Prover, corpus: the first 6,000 statements of set.mm replayed, the resulting file
+  verified.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
   repository, 10 of the built corpus). 21 agree on every statement, 55,165 in all; one is
   the expected mismatch.
@@ -196,18 +252,21 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
    corpus script removes it. Our reader reads the current layout only, so `setmm.mmb`
    dumps with generated names (`T5198`); the real names are in `setmm.mm0`.
-4. **Phase 3, four questions** (`DESIGN.md`, "The prover", "Questions"): where undecided
-   disjoint-variable conditions are kept; whether forward expansion comes after the
-   backward engine; what to do about definitions; whether answer substitutions for
-   metavariables in the goal need a test in this phase. Each has a proposed default, and
-   work proceeds on the parts that do not depend on the answers.
+4. **Phase 3, six questions** (`DESIGN.md`, "The prover", "Questions"):
+   1. whether a condition on a name that nothing above can replace may be taken as
+      settled (the conditions on bound variables are carried, as the brief says);
+   2. whether forward expansion (`forward.flow`) is ported next;
+   3. what to do about definitions and `Unfold`, which set.mm does not need;
+   4. whether answer substitutions need a command of their own;
+   5. whether keeping one proof per visible substitution, where Russell keeps one per
+      whole substitution, is acceptable;
+   6. three places in the Russell source that look unintended: `ruCheckDisjs` in
+      `ruAddProof`, the variable set in `ruMakeFresherSubst`, the argument order of
+      `ruSuperRule` in `unify_var`.
 
 ## Next steps
 
-Phase 3. The plan of the port is in `DESIGN.md`, "The prover", written from the Flow9
-source and the paper.
-
-1. Expressions, substitutions, unification and the index (`Prove/Exp`, `Subst`, `Unify`,
-   `Index`), each with tests on hand-written cases and on the statements of set.mm.
-2. The tree, the two passes and proof extraction; emission of a proof body.
-3. The replay test, then the search baseline.
+1. The answers to the questions above; forward expansion if it is wanted in this phase.
+2. `ruUnifySubsProd` (`unify/prod.flow`), for assertion nodes whose premises have many
+   proofs each: the plain product is walked now.
+3. Phase 4 is designed only after the search baseline is accepted.
