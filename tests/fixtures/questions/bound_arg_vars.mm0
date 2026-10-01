@@ -1,0 +1,8 @@
+delimiter $ ( $ $ ) $;
+provable sort wff;
+sort set;
+term al {x: set} (ph: wff x): wff;
+term foo {x: set}: wff x;
+term imp (a b: wff): wff;
+axiom ax5 {x: set} (ph: wff): $ imp ph (al x ph) $;
+theorem bad {x: set}: $ imp (foo x) (al x (foo x)) $;
