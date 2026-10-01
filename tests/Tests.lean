@@ -6,3 +6,5 @@ import Tests.Mm0.Corpus
 import Tests.Mm0.Pairs
 import Tests.Mmb.Reader
 import Tests.Mmb.Corpus
+import Tests.Verify.Proofs
+import Tests.Verify.Spec

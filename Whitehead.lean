@@ -10,3 +10,6 @@ import Whitehead.Mmb.Types
 import Whitehead.Mmb.Reader
 import Whitehead.Mmb.Encode
 import Whitehead.Mmb.Dump
+import Whitehead.Verify.Machine
+import Whitehead.Verify.Check
+import Whitehead.Verify.Spec

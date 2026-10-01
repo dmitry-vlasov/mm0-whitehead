@@ -8,7 +8,8 @@ def usage : String :=
   dump <file.mm0>                print the parsed statements of a specification file
   join <file.mm0>                print a specification with its imports included
   dump <file.mmb>                print a decoded proof file: statements and proofs
-  verify <file.mm0> <file.mmb>   check a proof file against its specification  (phase 2)
+  verify <file.mmb>              check the proofs of a proof file, without a specification
+  verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove ...                      automated proof search                        (phase 3)
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
@@ -114,6 +115,63 @@ def benchMmb (path : String) : IO UInt32 := do
     open {ms (opened - start)}, decode all streams {ms (done - opened)}, {mbPerSec} MB/s"
   return 0
 
+/-- Checks the proofs of a `.mmb` file on their own. -/
+def verifyMmb (path : String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let start ← IO.monoNanosNow
+  match Mmb.MmbFile.parse bytes with
+  | .error e =>
+    IO.eprintln (e.format path)
+    return 1
+  | .ok file =>
+    match Verify.checkProofs file with
+    | .error e =>
+      IO.eprintln (e.format file path)
+      return 1
+    | .ok () =>
+      let micros := ((← IO.monoNanosNow) - start) / 1000
+      IO.println s!"{path}: {file.stmts.size} statements verified in {micros / 1000}.{(micros % 1000) / 100} ms \
+        (proofs only: no specification was given)"
+      return 0
+
+/-- The verifier: the proofs of `mmb` are valid, and they prove what `mm0` states. -/
+def verifyPair (mm0 mmb : String) : IO UInt32 := do
+  let start ← IO.monoNanosNow
+  let env ←
+    match ← Mm0.load mm0 with
+    | .error e =>
+      IO.eprintln e.format
+      return 1
+    | .ok spec =>
+      match Mm0.elaborate spec with
+      | .error e =>
+        IO.eprintln e.format
+        return 1
+      | .ok env => pure env
+  let elaborated ← IO.monoNanosNow
+  let bytes ← IO.FS.readBinFile mmb
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .error e =>
+      IO.eprintln (e.format mmb)
+      return 1
+    | .ok file => pure file
+  if let .error e := Verify.checkProofs file then
+    IO.eprintln (e.format file mmb)
+    return 1
+  let checked ← IO.monoNanosNow
+  match Verify.matchSpec env file with
+  | .error e =>
+    IO.eprintln (e.format file mmb)
+    return 1
+  | .ok n =>
+    let done ← IO.monoNanosNow
+    let ms (a b : Nat) : String := s!"{(b - a) / 1000000}.{((b - a) % 1000000) / 100000} ms"
+    IO.println s!"verified: {mmb} proves the {n} statements of {mm0}"
+    IO.println s!"  specification {ms start elaborated}, proofs {ms elaborated checked}, \
+      matching {ms checked done}, total {ms start done}"
+    return 0
+
 def bench (path : String) : IO UInt32 :=
   if (path : System.FilePath).extension == some "mmb" then benchMmb path else benchMm0 path
 
@@ -126,7 +184,8 @@ def main (args : List String) : IO UInt32 := do
     for p in path :: paths do
       code := max code (← bench p)
     return code
-  | "verify" :: _ => notImplemented "verify (phase 2)"
+  | ["verify", path] => verifyMmb path
+  | ["verify", mm0, mmb] => verifyPair mm0 mmb
   | "prove" :: _ => notImplemented "prove (phase 3)"
   | _ =>
     IO.eprintln usage

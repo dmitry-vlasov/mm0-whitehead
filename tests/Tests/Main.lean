@@ -5,6 +5,8 @@ import Tests.Mm0.Corpus
 import Tests.Mm0.Pairs
 import Tests.Mmb.Reader
 import Tests.Mmb.Corpus
+import Tests.Verify.Proofs
+import Tests.Verify.Spec
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -12,6 +14,8 @@ def main : IO UInt32 := do
     Tests.Mm0.loadTests
     Tests.Mm0.elabTests
     Tests.Mmb.readerTests
+    Tests.Verify.proofTests
+    Tests.Verify.specTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
     Tests.Mm0.pairTests : Tests.TestM Unit).run {}
