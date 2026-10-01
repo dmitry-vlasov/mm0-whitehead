@@ -184,6 +184,16 @@ inductive Target where
 
 namespace MathParser
 
+/-- The index of the variable named `name`, from `i` on. A plain loop: this is done for
+every identifier of every formula, and `Array.findIdx?` with a comparison of
+`Option String` calls a closure and compares boxed options for every variable. -/
+partial def findVar (vars : Array VarDecl) (name : String) (i : Nat) : Option Nat :=
+  if h : i < vars.size then
+    match vars[i].name with
+    | some n => if n == name then some i else findVar vars name (i + 1)
+    | none => findVar vars name (i + 1)
+  else none
+
 /-- The state is the index of the next token. -/
 abbrev MathM := EStateM ParseError Nat
 
@@ -285,7 +295,7 @@ partial def leading (c : MathCtx) (p : Prec) : MathM (Expr × Nat × Prec) := do
     if !isIdent tk.text then
       fail tk.pos s!"unknown token `{tk.text}`"
     -- a variable shadows a term of the same name
-    if let some v := c.vars.findIdx? (·.name == some tk.text) then
+    if let some v := findVar c.vars tk.text 0 then
       return (.var v, c.vars[v]!.sort, .max)
     let some t := c.termIds[tk.text]?
       | fail tk.pos s!"unknown variable or term `{tk.text}`"
