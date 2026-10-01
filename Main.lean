@@ -267,6 +267,42 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"  written to {out}"
   return if stats.failed == 0 then 0 else 1
 
+/-- `prove search`: proves the theorems of a file from scratch, breadth first. -/
+def proveSearch (path : String) (args : List String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok file => pure file
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let opts : Prove.SearchOptions :=
+    { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
+      limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000 },
+      verbose := args.contains "--verbose" }
+  let start ← IO.monoMsNow
+  let (rows, bodies) ← Prove.searchAll db opts IO.println
+  let ms := (← IO.monoMsNow) - start
+  let proved := rows.filter (·.ending == .proved)
+  let steps := proved.foldl (init := 0) (· + ·.steps)
+  let known := proved.foldl (init := 0) (· + ·.knownSteps)
+  IO.println s!"{path}: {rows.size} theorems, {proved.size} proved, \
+    {(rows.filter (·.ending == .limit)).size} stopped at the limit \
+    ({opts.limits.maxProps} assertion nodes, {opts.limits.maxMs} ms), \
+    {(rows.filter (·.ending == .exhausted)).size} with nothing left to expand, in {ms} ms"
+  IO.println s!"  steps of the proofs found {steps}, of the proofs in the file for the same theorems {known}; \
+    proofs rejected by the verifier {rows.foldl (init := 0) (· + ·.rejected)}"
+  if let some out := strOption args "-o" then
+    IO.FS.writeBinFile out (file.withBodies bodies)
+    IO.println s!"  written to {out}"
+  return 0
+
 def bench (path : String) : IO UInt32 :=
   if (path : System.FilePath).extension == some "mmb" then benchMmb path else benchMm0 path
 
@@ -283,6 +319,7 @@ def main (args : List String) : IO UInt32 := do
   | ["verify", mm0, mmb] => verifyPair mm0 mmb
   | ["prove", "db", path] => proveDb path
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
+  | "prove" :: "search" :: path :: rest => proveSearch path rest
   | "prove" :: _ => notImplemented "prove (phase 3)"
   | _ =>
     IO.eprintln usage

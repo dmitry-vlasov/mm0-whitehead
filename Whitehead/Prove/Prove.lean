@@ -99,12 +99,51 @@ def closers (env : Env) (ty : Nat) (freshId : Nat) : Array Exp := Id.run do
     out := out.push ⟨#[Node.const k env.task.consts[k]!.ty]⟩
   return out
 
+/-- The pairs of leftover names of a proof that must stay different: a step needs them
+so when one is given for a bound binder `x` of its assertion and the other occurs in
+what is given for a binder that `x` must be kept apart from. -/
+partial def nameConflicts (db : Db) (t : ProofTree) (acc : Array (Nat × Nat) := #[]) : Array (Nat × Nat) :=
+  match t with
+  | .hyp _ => acc
+  | .step a args children =>
+    let acc := db.asserts[a]!.disjs.foldl (init := acc) fun acc (x, v) =>
+      let ex := args[x]!
+      if ex.isVar then
+        args[v]!.nodes.foldl (init := acc) fun acc n =>
+          if Node.isVar n && n != ex.nodes[0]! then acc.push (ex.nodes[0]!, n) else acc
+      else acc
+    children.foldl (init := acc) fun acc c => nameConflicts db c acc
+
+/-- The proof with as few leftover names as its steps allow: every name is replaced by
+the first earlier one of its type that it need not differ from. MM0 allows 55 bound
+variables in a theorem, and the most general proof has a name of its own wherever the
+known proof could use one name again. -/
+def mergeNames (db : Db) (tree : ProofTree) : ProofTree := Id.run do
+  let names := tree.vars.filter fun v => Ty.isName (Node.ty v)
+  let conflicts := nameConflicts db tree
+  let mut differs : Std.HashSet (Nat × Nat) := {}
+  for (a, b) in conflicts do
+    differs := (differs.insert (a, b)).insert (b, a)
+  -- the names that are kept, and for each of them the names that became it
+  let mut kept : Array (Nat × Array Nat) := #[]
+  let mut map : Std.HashMap Nat SubExp := {}
+  for v in names do
+    let mut placed := false
+    for k in [0:kept.size] do
+      let (rep, members) := kept[k]!
+      if !placed && Node.ty rep == Node.ty v && members.all fun m => !differs.contains (m, v) then
+        kept := kept.set! k (rep, members.push v)
+        map := map.insert (Node.varId v) (SubExp.mk' v (Exp.ofVar rep))
+        placed := true
+    if !placed then kept := kept.push (v, #[v])
+  return if map.isEmpty then tree else tree.subst { map }
+
 /-- The proof with its leftover regular variables replaced, in up to `tries` ways: the
 `k`-th way takes the `k`-th choice for every variable (the last one, if there are
 fewer). Names that are left stay: they become dummies. -/
 def closings (env : Env) (tree : ProofTree) (tries : Nat := 4) : Array ProofTree := Id.run do
   let regular := tree.vars.filter fun v => !Ty.isName (Node.ty v)
-  if regular.isEmpty then return #[tree]
+  if regular.isEmpty then return #[fit tree]
   let choices := (Array.range regular.size).map fun i => closers env (Node.ty regular[i]!) (env.fresh + i)
   if choices.any (·.isEmpty) then return #[]
   let most := choices.foldl (init := 1) fun n c => max n c.size
@@ -113,8 +152,14 @@ def closings (env : Env) (tree : ProofTree) (tries : Nat := 4) : Array ProofTree
     let map : Std.HashMap Nat SubExp := (Array.range regular.size).foldl (init := {}) fun m i =>
       let c := choices[i]!
       m.insert (Node.varId regular[i]!) (SubExp.mk' regular[i]! c[min k (c.size - 1)]!)
-    out := out.push (tree.subst { map })
+    out := out.push (fit (tree.subst { map }))
   return out
+where
+  /-- Names are merged only when there would be too many bound variables otherwise. -/
+  fit (tree : ProofTree) : ProofTree :=
+    let names := (tree.vars.filter fun v => Ty.isName (Node.ty v)).size
+    let bound := (env.task.consts.filter fun c => Ty.isName c.ty).size
+    if names + bound > 55 then mergeNames env.db tree else tree
 
 /-- The proof body for a proof that reached the root, if the verifier accepts one of
 its closings; otherwise what the verifier said about the last one. -/

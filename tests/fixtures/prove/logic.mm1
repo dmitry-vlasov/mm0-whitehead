@@ -1,0 +1,46 @@
+-- A small deductive system for the tests of the prover: propositional calculus as in
+-- examples/set.mm1 of the MM0 repository, without definitions (the prover does not
+-- unfold), and enough of the quantifier to have bound variables, dependencies and a
+-- proof that needs a dummy.
+--
+-- logic.mmb is compiled from this file by gen.sh, with mm0-rs. The tests read logic.mmb.
+delimiter $ ( ~ $ $ ) $;
+provable sort wff;
+term wi (ph ps: wff): wff; infixr wi: $->$ prec 25;
+term wn (ph: wff): wff; prefix wn: $~$ prec 41;
+
+axiom ax_1 (ph ps: wff): $ ph -> ps -> ph $;
+axiom ax_2 (ph ps ch: wff): $ (ph -> ps -> ch) -> (ph -> ps) -> ph -> ch $;
+axiom ax_3 (ph ps: wff): $ (~ph -> ~ps) -> ps -> ph $;
+axiom ax_mp (ph ps: wff): $ ph $ > $ ph -> ps $ > $ ps $;
+
+pub theorem a1i (ph ps: wff) (h: $ ph $): $ ps -> ph $ = '(ax_mp h ax_1);
+pub theorem a2i (ph ps ch: wff) (h: $ ph -> ps -> ch $): $ (ph -> ps) -> ph -> ch $ = '(ax_mp h ax_2);
+pub theorem mpd (ph ps ch: wff) (h1: $ ph -> ps $) (h2: $ ph -> ps -> ch $): $ ph -> ch $ = '(ax_mp h1 (ax_mp h2 ax_2));
+pub theorem id (ph: wff): $ ph -> ph $ = '(mpd (! ax_1 _ ph) ax_1);
+pub theorem syl (ph ps ch: wff) (h1: $ ps -> ch $) (h2: $ ph -> ps $): $ ph -> ch $ = '(mpd h2 (a1i h1));
+pub theorem a2d (ph ps ch th: wff) (h: $ ph -> ps -> ch -> th $): $ ph -> (ps -> ch) -> ps -> th $ = '(syl ax_2 h);
+pub theorem com12 (ph ps ch: wff) (h: $ ph -> ps -> ch $): $ ps -> ph -> ch $ = '(syl (a2i h) ax_1);
+pub theorem mpcom (ph ps: wff): $ ph -> (ph -> ps) -> ps $ = '(com12 id);
+pub theorem imidm (ph ps: wff): $ (ph -> ph -> ps) -> ph -> ps $ = '(a2i mpcom);
+pub theorem imim2 (ph ps ch: wff): $ (ps -> ch) -> (ph -> ps) -> ph -> ch $ = '(a2d ax_1);
+pub theorem con1 (ph ps: wff): $ (~ph -> ps) -> (~ps -> ph) $ =
+'(syl ax_3 (ax_mp (ax_mp (syl (ax_mp (! imidm ph ph) (syl (a2i ax_3) (a1i (a1i (! id ph))))) (syl ax_3 ax_1)) ax_3) imim2));
+pub theorem con2 (ph ps: wff): $ (ph -> ~ps) -> (ps -> ~ph) $ = '(syl ax_3 (com12 (syl (com12 id) (ax_mp id con1))));
+
+sort set;
+term wal {x: set} (ph: wff x): wff; prefix wal: $A.$ prec 41;
+
+axiom ax_gen {x: set} (ph: wff x): $ ph $ > $ A. x ph $;
+axiom ax_4 {x: set} (ph ps: wff x): $ A. x (ph -> ps) -> A. x ph -> A. x ps $;
+axiom ax_5 {x: set} (ph: wff): $ ph -> A. x ph $;
+axiom sp {x: set} (ph: wff x): $ A. x ph -> ph $;
+
+-- generalization under an implication
+pub theorem alimi {x: set} (ph ps: wff x) (h: $ ph -> ps $): $ A. x ph -> A. x ps $ = '(ax_mp (ax_gen h) ax_4);
+-- the antecedent does not depend on x
+pub theorem alrimi {x: set} (ph: wff) (ps: wff x) (h: $ ph -> ps $): $ ph -> A. x ps $ = '(syl (alimi h) ax_5);
+-- two bound variables; ph may contain both
+pub theorem alcomi {x y: set} (ph: wff x y) (h: $ ph $): $ A. x A. y ph $ = '(ax_gen (ax_gen h));
+-- a proof with a variable that the statement does not have
+pub theorem dummy (ph: wff) {.x: set}: $ ph -> ph $ = '(syl (! sp x) (! ax_5 x));

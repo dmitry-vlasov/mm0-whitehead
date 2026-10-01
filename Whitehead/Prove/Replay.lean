@@ -96,4 +96,61 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
               log s!"  {repr cmds}"
   return (stats, bodies)
 
+/-! ### The search test -/
+
+structure SearchOptions where
+  first : Nat := 0
+  last : Nat := 1000000000
+  limits : Limits := {}
+  /-- Report every theorem. -/
+  verbose : Bool := false
+
+/-- What the search test reports for one theorem. -/
+structure SearchRow where
+  thm : Nat
+  name : String
+  ending : Ending
+  /-- The steps of the proof found, and of the proof in the file. -/
+  steps : Nat
+  knownSteps : Nat
+  ms : Nat
+  props : Nat
+  rejected : Nat
+
+/-- Searches for a proof of every theorem of `db.file` in the range, breadth first, each
+from the assertions before it. Returns a row per theorem and the new proof bodies. -/
+def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
+    IO (Array SearchRow × Array (Option ByteArray)) := do
+  let f := db.file
+  let vc := Verify.Ctx.ofFile f
+  let index := db.index
+  let mut rows : Array SearchRow := #[]
+  let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
+  for i in [0:f.stmts.size] do
+    let s := f.stmts[i]!
+    let isThm := match s.kind with
+      | .thm _ => true
+      | _ => false
+    if !isThm || s.index < opts.first || s.index ≥ opts.last then continue
+    let known := match db.skeleton s with
+      | .ok (some skel) => skel.size
+      | _ => 0
+    let start ← IO.monoMsNow
+    let result ← search vc (Env.init db index (db.task s.index)) breadthFirst opts.limits
+    let ms := (← IO.monoMsNow) - start
+    let steps := (result.proof.map (·.size)).getD 0
+    if let some body := result.body then bodies := bodies.set! i (some body)
+    let row : SearchRow :=
+      { thm := s.index, name := f.thmName s.index, ending := result.ending, steps, knownSteps := known, ms,
+        props := result.env.props.size, rejected := result.rejected }
+    rows := rows.push row
+    if opts.verbose then
+      let what := match result.ending with
+        | .proved => s!"proved in {steps} steps (the file has {known})"
+        | .exhausted => "nothing left to expand"
+        | .limit => "limit reached"
+      log s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
+        {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}"
+  return (rows, bodies)
+
 end Whitehead.Prove
