@@ -587,6 +587,7 @@ repository.
 | 18 | equality of expressions | identity of nodes (`mm0b.lean`) | identity | identity | identity |
 | 19 | fixed capacity limits | none | none | stack, heap, store, 256 hypotheses | none |
 | 20 | fewer statements than table entries | — | **accepts** | rejects | reject |
+| 21 | an `END` whose first byte has data-width bits (`0x40`, `0x80`, `0xC0`) | — (mmb.md: `END` is `0x00`) | accepts | rejects | accept |
 
 What the implementations did with the fixtures (exit codes):
 
@@ -660,6 +661,18 @@ We use the model of the format: a node is its allocation index in a per-statemen
 That needs no hashing and is also the fastest. Hash-consing remains the right tool for
 the prover. (The brief first listed hash-consing among the verifier's techniques; that
 was changed on 2026-10-01.)
+
+**20. Statements and table entries.** `mm0-rs` looks at a table entry only when a
+statement declares it, and does not compare the number of statements with the header.
+So it accepts a proof stream that stops early, and a header whose counts are too large
+even if the extra table entries are garbage. Our reader reads every entry of the tables
+and rejects an unreadable one; our verifier requires the counts to agree.
+
+**21. `END` with a data width.** A byte `0x40` has opcode 0 and announces one byte of
+data. As the last byte of a statement it is an `END` whose data byte would be the first
+byte of the next statement. `mm0-rs` takes it as the `END` (it looks at the opcode and at
+where the command starts), mm0-c computes a wrong statement length from it and rejects.
+Nothing depends on the choice; the reference implementation is followed.
 
 Noticed in passing, in the formal specification: in `VerifyProofThm` (`mm0.mm0`) and
 `safe_subst` (`mm0.lean`) the test "`u` is a bound variable" looks `u` up in the *proof

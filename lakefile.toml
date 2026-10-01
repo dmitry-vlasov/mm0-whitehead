@@ -21,3 +21,8 @@ root = "Main"
 name = "test"
 srcDir = "tests"
 root = "Tests.Main"
+
+[[lean_exe]]
+name = "mutate"
+srcDir = "tests"
+root = "Tests.Mutate.Main"
