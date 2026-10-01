@@ -862,16 +862,16 @@ small as long as the tree is shallow, which is why `ruUnifySubsProd` could wait.
    their bound variables). I propose to leave this until it is needed.
 4. **Which variables of a task are replaceable.** The brief wants metavariables in the
    goal and the premises, with answer substitutions. The engine has them (a variable in
-   the goal is bound like any other), but the acceptance of a proof is tied to a theorem
-   of the file, whose statement has none. Is a command or a test for answer
-   substitutions wanted in this phase?
+   the goal is bound like any other; `searchWith` returns the goal as it was proved, and
+   two tests ask for `?q -> ps`). But such a goal is not a theorem of the file, so its
+   proof is not emitted and not verified. Is a command for it wanted in this phase, and
+   in what form should the proof of an answer be checked?
 5. **One proof per visible substitution.** With change 5, two proofs of an assertion
    node that agree on the variables visible above, and on their open conditions, have
    the same key although they may differ below, and one is kept; Russell, with the whole
    substitution in the key, keeps both. Either can stand for the other in every proof
-   above, so nothing provable is lost, and the tree is pruned a great deal. But it is a
-   departure from the source, and it decides which of several proofs is found. Is it
-   acceptable?
+   above, so nothing provable is lost, and fewer proofs are kept. But it is a departure
+   from the source, and it decides which of several proofs is found. Is it acceptable?
 6. **Three things in the source that look unintended**, for you to judge: `ruCheckDisjs`
    in `ruAddProof` (change 3), the variable set of `ruMakeFresherSubst` (change 4), and
    the order of the arguments of `ruSuperRule` in `unify_var` (change 2).
