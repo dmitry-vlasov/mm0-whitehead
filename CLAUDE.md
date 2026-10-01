@@ -1,0 +1,199 @@
+# mm0-whitehead — project brief for Claude Code
+
+## What this project is
+
+`mm0-whitehead` is a Lean 4 implementation of tooling for **Metamath Zero (MM0)**:
+
+1. a reader for the `.mm0` specification format and the `.mmb` binary proof format;
+2. an **independent verifier** for MM0, written in Lean, cross-checked against the
+   reference C verifier `mm0-c`;
+3. an **automated prover** for MM0, based on the proof-search engine of the author's
+   earlier system *Russell* (a Metamath-based prover), emitting `.mmb` proofs that
+   `mm0-c` accepts;
+4. later: proof-pattern mining ("linear subproofs") and a learned ranking layer on top of
+   the prover.
+
+The phases are strictly ordered. **Do not start phase N+1 before phase N has passed its
+acceptance tests** (defined below). The name: Whitehead was Russell's co-author on
+*Principia Mathematica*; this is the MM0 companion of the Russell prover.
+
+Reference material (read before writing code):
+- MM0 repository: https://github.com/digama0/mm0 — the format specifications
+  (`mm0.md` for `.mm0`, the `.mmb` binary format description, and `mm0-c/` for the
+  reference verifier), plus the `examples/` directory.
+- The paper: M. Carneiro, *Metamath Zero: The Cartesian Theorem Prover* (CADE 2020).
+- The formalization of MM0's semantics used for the verified verifier (search the mm0
+  repository and its sister repos for the Lean formalization); treat its definitions as
+  the specification of what "verify" means.
+
+Local checkouts:
+- MM0: `/home/dmitry/tools/mm0/` (`mm0.md`, `mm0-c/mmb.md`, `mm0-c/*.c`, `examples/`,
+  `tests/`).
+- Russell: `/home/dmitry/dev/russell-flow/` (see the next section).
+
+When the spec and `mm0-c` disagree, or when something is unclear, **stop and ask**
+rather than guessing.
+
+## Russell — the reference implementation of the prover
+
+Phase 3 ports an existing, working engine; it does not design a new one.
+
+- **Russell is written in Flow9**, a simple yet powerful functional language of the ML
+  family: immutable records, algebraic types dispatched with `switch`, first-class
+  functions, explicit state threading, path-based imports (`import ru/src;` →
+  `src/ru/src.flow`). Translating Flow9 to Lean is therefore mostly direct: structs
+  become `structure`s, unions become `inductive`s, `switch` becomes `match`. Read
+  `/home/dmitry/dev/russell-flow/CLAUDE.md` for the Flow9 notes and the layout of that
+  repository.
+- **The Russell source code is the final judge.** For anything in the prover — the
+  proof variant tree, expansion, unification, substitution composition, indexing, proof
+  extraction — first look at how Russell implements it, then translate that to the Lean
+  MM0 environment. Do not re-derive an algorithm from its description when the source
+  is there to read; a discrepancy between this brief (or a doc) and the Russell source
+  is resolved in favour of the source, and is worth raising. Cite the Flow9 file and
+  function being translated in the commit message or in `DESIGN.md`.
+- Where to look:
+  - engine: `src/ru/prover/core/` (`tree.flow`, `expand.flow`, `prove.flow`,
+    `env.flow`, `proofs.flow`, …);
+  - unification and indexing: `src/ru/unify/`, `src/ru/subst.flow`, `src/ru/index.flow`;
+  - strategies: `src/ru/prover/tactics/` (the layer above the engine);
+  - linear chains and learning (phase 4): `src/ru/prover/commands/find_linear_chains.flow`,
+    `src/ru/prover/ml/`;
+  - docs: `docs/proof-search-algorithm.md`, `docs/unification-algorithms.md`.
+- **Completeness has a proof**: `docs/proof_search_algo.pdf` (D. Vlasov, *Proof Search
+  Algorithm in Pure Logical Framework*) proves correctness, generality and completeness
+  of Russell's algorithm. The Lean port must stay within the algorithm that proof covers;
+  where MM0 forces a change (bound variables and dependency constraints, definitions and
+  `unfold`), write down how the change relates to the proof and ask.
+
+## Technology and constraints
+
+- Lean 4, application code. **No Mathlib dependency.** Core `Std` (`HashMap`, `HashSet`,
+  `ByteArray`, `Array`) is the standard library; add `Batteries` only if a concrete need
+  arises, and say why.
+- `lakefile.toml` has `autoImplicit = false`. Keep it. Every variable is declared.
+- `lean-toolchain` is pinned; do not bump it without asking.
+- Performance matters from phase 2 on: the reference verifier checks the set.mm
+  translation in well under a second; our target is within an order of magnitude.
+  Lean performance idioms to respect:
+  - keep `Array`/`ByteArray` updates in place by never holding a second reference to
+    the array being mutated (uniqueness); prefer `modify`/`set!` in loops over
+    functional rebuilds;
+  - avoid `List` in hot paths; use `Array` and indices;
+  - `partial def` and `unsafe` are acceptable in the engine and I/O code — this is a
+    program, not a proof library; do not spend effort on termination proofs for
+    interpreters and search loops;
+  - measure before optimizing: add a `bench` executable target early and report timings
+    in PR descriptions.
+- Code organization: one concept per module under `Whitehead/` (e.g. `Whitehead/Mm0/Syntax.lean`,
+  `Whitehead/Mmb/Reader.lean`, `Whitehead/Verify/*.lean`, `Whitehead/Prove/*.lean`),
+  a thin `Main.lean` CLI with subcommands (`verify`, `prove`, `bench`, `dump`).
+- Tests live under `tests/`, run by `lake test` (or a `test` exe target). Every phase
+  adds tests before features.
+- Keep `docs/DESIGN.md` up to date: data structures, the proof-tree model, decisions
+  taken and why. Keep `docs/MMB-NOTES.md` as our own description of the `.mmb` format as
+  understood from the spec and from reading `mm0-c` — it must be enough for someone to
+  re-implement the reader from it.
+
+## Phase 1 — readers
+
+Deliverables:
+- `.mm0` parser (parser combinators from core `Std.Internal.Parsec` are fine; no need for
+  a parser generator): sorts, term declarations with binder/dependency information,
+  axioms, theorems (statements only), `def`s, notation declarations needed to parse the
+  example files. Produce an AST with source positions and good error messages.
+- `.mmb` reader: full decoding of the binary format into in-memory structures — the
+  statement table, the term/theorem/def tables, and the **proof instruction streams**
+  (the `.mmb` proof format is a stack machine; decode instructions faithfully, including
+  save/reuse of subproofs and `unfold`).
+- `dump` subcommand that pretty-prints a decoded `.mmb` (statements and proofs) in a
+  readable text form, for debugging and for diffing against `mm0-rs`/`mm0-c` output
+  where available.
+
+Acceptance:
+- All example `.mm0`/`.mmb` pairs in the MM0 repository, and the set.mm translation,
+  parse/decode without error and round-trip through `dump` consistently.
+- Unit tests for the parser on hand-written snippets, including malformed input.
+
+## Phase 2 — independent verifier
+
+Deliverables:
+- `verify <file.mm0> <file.mmb>` that checks a `.mmb` proof file against its `.mm0`
+  specification, implementing MM0's checks: sort/term/binder well-formedness, bound
+  variable and dependency conditions, definition well-formedness and conservativity
+  conditions, `unfold` side conditions, and the proof stack machine.
+- A verifier that is **structurally close to the MM0 semantics formalization**, so that
+  it can be verified against it later. Prefer clarity over cleverness in the checking
+  logic; put performance work in the data representation (hash-consing of expressions,
+  arrays, in-place stacks), not in the logic.
+
+Acceptance (differential testing against `mm0-c`, which is the oracle):
+- Every `.mmb` accepted by `mm0-c` is accepted by us, including the set.mm translation.
+- A corpus of **mutated** `.mmb` files (bit flips, swapped instructions, altered
+  statements, broken dependency declarations) is rejected by both; add a `tests/mutate`
+  tool that generates them. Any case where we accept and `mm0-c` rejects (or vice
+  versa) is a bug to be fixed before moving on.
+- Benchmark: set.mm translation verified within 10x of `mm0-c`'s time.
+
+## Phase 3 — prover (the Russell engine, ported)
+
+The engine model, to be implemented as specified here and **as implemented in Russell**
+(see "Russell — the reference implementation of the prover" above: the Flow9 source is
+the final judge; see `docs/DESIGN.md` for the evolving details):
+
+- **Proof variant tree**: a set of rule-labelled DAGs connecting premises (hypotheses,
+  already-proved statements) to a goal. Nodes are statements possibly containing
+  **metavariables**; edges are labelled by the MM0 theorem/axiom/definition used.
+  The tree can be expanded in both directions: *backward* (which rules could conclude
+  this goal) and *forward* (what follows from this premise).
+- **Expansion is unification-driven**: to expand a node against the database, compute
+  for every applicable statement the **most general unifier** (first-order syntactic
+  unification over MM0 expressions, with MM0's bound-variable/dependency constraints
+  carried as constraints on the substitution and discharged consistently). Never guess
+  instantiations: metavariables are instantiated only by unification. Metavariables are
+  allowed in the initial goal and premises; the prover must then *find* substitutions
+  that make the goal provable (Prolog-style answer substitutions).
+- **Soundness by construction**: every closed path in the tree corresponds to a valid
+  MM0 proof; emit it as `.mmb` and check it with our verifier and with `mm0-c`.
+- **Completeness**: with a fair expansion strategy (iterative deepening or equivalent),
+  any existing proof is found. The engine must not lose this property; ranking and
+  heuristics live in a separate layer that only chooses *which* existing variants to
+  expand next.
+- **Indexing**: "all statements unifying with this expression" must be fast at set.mm
+  scale — implement a discrimination tree (or substitution tree) over MM0 expressions.
+- **Layering**: (1) engine = tree + unifier + index + `.mmb` emission; (2) oracles for
+  theory reasoning (to be designed later; they must produce `.mmb` certificates, never
+  tree expansions); (3) strategies/policies choosing expansions. Keep the layers in
+  separate modules with explicit interfaces.
+
+Acceptance:
+- **Replay test**: given an existing set.mm proof as the *sequence of statements used*,
+  the engine reconstructs the full proof by unification alone; the emitted `.mmb` passes
+  `mm0-c`. This tests the unifier and emission on real data.
+- **Search test**: a benchmark set of theorems from the set.mm translation (start with
+  propositional calculus and predicate calculus sections) proved from scratch under a
+  time budget; report the fraction proved and the proof lengths. This is the baseline
+  for all later ranking work.
+
+## Phase 4 — pattern mining and ranking (research layer)
+
+- Mine **linear subproofs** (chains of single-rule steps from a premise to a goal)
+  across the set.mm translation; anti-unify occurrences into generalized schemas with
+  frequencies; expose them to the prover as macro-actions (derived rules with one
+  unifier each). Measure coverage and out-of-sample replay success.
+- A clean environment API (state = tree frontier, action = (node, variant)) for learned
+  policies; dataset export for training premise-ranking models.
+Design only after phase 3's search baseline exists.
+
+## How to work
+
+- Start by reading the MM0 spec and `mm0-c`, then write `docs/MMB-NOTES.md`; show it
+  to me before writing the reader.
+- Work in small, reviewable steps: one module or one feature per PR-sized change, with
+  tests. Explain Lean-specific choices (uniqueness/in-place updates, `partial`, data
+  representation) in commit messages or `DESIGN.md`.
+- Do not introduce abstractions speculatively; three concrete uses before a
+  generalization.
+- When unsure about MM0 semantics, write the question down and ask; do not pick an
+  interpretation silently.
+- Keep a `docs/STATUS.md` with the current phase, what passes, what's open.
