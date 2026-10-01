@@ -40,7 +40,9 @@ structure Env where
   hyps : Array HypNode
   props : Array PropNode := #[]
   /-- The assertion nodes not expanded yet, in the order they were made
-  (`RuProverTree.leafs`). -/
+  (`RuProverTree.leafs`). A node that is expanded stays in the list until the end of the
+  round (`Env.dropExpanded`): taking each one out when it is expanded would be a pass
+  over the whole list for every node. -/
   leafs : Array Nat := #[]
   /-- The number of the next fresh variable. -/
   fresh : Nat := freshBase
@@ -48,6 +50,11 @@ structure Env where
   rootProofs : Array Proof := #[]
   counters : Counters := {}
   deriving Inhabited
+
+/-- The leaves without those that have been expanded. -/
+def Env.dropExpanded (env : Env) : Env :=
+  let props := env.props
+  { env with leafs := env.leafs.filter fun p => !props[p]!.expanded }
 
 abbrev ProverM := StateM Env
 

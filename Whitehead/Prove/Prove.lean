@@ -37,7 +37,8 @@ def breadthFirst : Strategy Unit where
   root := none
   init := ()
   step env _ :=
-    if env.leafs.isEmpty then (.done, ()) else (.expand (env.leafs.map fun p => (p, none)), ())
+    let leafs := env.leafs.filter fun p => !env.props[p]!.expanded
+    if leafs.isEmpty then (.done, ()) else (.expand (leafs.map fun p => (p, none)), ())
 
 /-- The state of `oracle`: the assertion nodes expanded in the last round, each with the
 step of the known proof that it stands for. -/
@@ -258,6 +259,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     match decision with
     | .done => return { ending := .exhausted, rejected, rejection, rejectedProof, env }
     | .expand items =>
+      env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
         if env.props.size > limits.maxProps || (← IO.monoMsNow) - start > limits.maxMs then

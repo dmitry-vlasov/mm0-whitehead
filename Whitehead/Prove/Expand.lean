@@ -56,7 +56,6 @@ expression node may use. -/
 def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := do
   modify fun env =>
     { env with props := env.props.modify p fun prop => { prop with expanded := true },
-               leafs := env.leafs.filter (· != p),
                counters := { env.counters with expanded := env.counters.expanded + 1 } }
   let env ← get
   let prop := env.props[p]!

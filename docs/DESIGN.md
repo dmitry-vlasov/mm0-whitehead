@@ -619,10 +619,28 @@ substitution applied. Write `C(T)` for them.
   could still go either way (because `θ(v)` contains a variable, or `θ(x)` is one) must
   not be decided.
 
-What is built (`checkDisjs` in `Proofs.lean`): `addProof` checks the pairs of its own
-assertion and discards a proof that violates one for certain. A condition that is still
-open is not remembered; if it turns out false higher up, the proof goes on to the root
-and is rejected there by the verifier. Question 1 is whether that is enough.
+What is built (`judge`, `openConds` in `Proofs.lean`) is this rule with the conditions
+carried, as the brief asks ("carried as constraints on the substitution and discharged
+consistently"). A condition is judged as one of three things:
+
+- *violated*: the proof is discarded;
+- *settled*: nothing can change it any more, and it is forgotten. A bound variable of the
+  theorem against an expression without variables; or a name of the tree that no node
+  above can replace, which will become a dummy of its own;
+- *open*: it stays with the proof (`Proof.prop ... conds`), goes up with it, and is
+  judged again under every substitution that the proof is joined with.
+
+So a proof that is doomed stops where it becomes doomed, and a proof at the root
+satisfies every condition up to the choice of what is put for the variables that are
+left; that choice leaves out what would make an open condition false. "No node above
+can replace it" is decided by change 5 below: the variables visible above a node are
+those of its expression under the substitution of the proof.
+
+The first version did less, which is what Russell does in effect (change 3 below): it
+discarded what was violated for certain and remembered nothing. On the logic fixture
+the search for `alrimi` then sent one proof to the verifier to be rejected; now that
+proof stops in the tree. In the search test on set.mm the two versions do not differ in
+what they prove: there the verifier rejected nothing in either.
 
 ### Where the code does something else than the source
 
@@ -637,13 +655,15 @@ Each of these is also noted in the file it concerns.
    case may never arise there. Here a variable is bound to what fits it, and of two
    variables the more general is bound to the more special (a regular variable to a
    name), as `ruUnifyStepVar` does in `exps.flow`.
-3. **The disjointness check looks through `outer`** (`Proofs.lean`). `ruAddProof` calls
-   `ruCheckDisjs(theta, prop.assertion.infer.vars.disjs)`. `theta` binds variables of the
-   tree; the pairs are over variables of the assertion, which only `outer` binds. So
-   every lookup returns the variable itself, the two sides never share a variable, and
-   the check lets everything pass: Russell finds a violated restriction only when the
-   finished proof is verified. Here the two binders of a pair are looked up through
-   `outer` and then `theta`.
+3. **The disjointness check looks through `outer`, and remembers** (`Proofs.lean`).
+   `ruAddProof` calls `ruCheckDisjs(theta, prop.assertion.infer.vars.disjs)`. `theta`
+   binds variables of the tree; the pairs are over variables of the assertion, which
+   only `outer` binds. So every lookup returns the variable itself, the two sides never
+   share a variable, and the check lets everything pass: Russell finds a violated
+   restriction only when the finished proof is verified. Here the two binders of a pair
+   are looked up through `outer` and then `theta`, and what is still open is carried
+   (above). An assertion without premises is checked too when its node is expanded;
+   `ruExpandProp` records its proof without looking at the pairs.
 4. **`ruMakeFresherSubst`** records, as the variables of the image `v'` of `v`, the set
    `{v}`; here `{v'}`, as for every other entry (`Subst.lean`). In Russell the entry is
    then not updated when `v'` is bound later, and the statement of a step keeps `v'`
@@ -659,10 +679,9 @@ Each of these is also noted in the file it concerns.
    0.38 s. One consequence beyond speed: `ruProofSubKey` keeps one proof per
    substitution of an assertion node, and two proofs that agree on what is visible above
    now have the same key although they differ below. Keeping one of them is right when
-   either can stand for the other in every proof above; that fails if a condition on
-   bound variables is still open in the one that is kept. So only proofs that apply no
-   assertion with such conditions are kept once per key (all of propositional calculus
-   is in that class); the others are all kept (question 5).
+   either can stand for the other in every proof above: when they also have the same
+   open conditions on bound variables. So the open conditions are part of the key
+   (question 5).
 6. **Proof extraction in one pass** (`makeProofTree`). Russell instantiates a step by
    its own substitution and then applies the substitution of every step above it to the
    whole subtree. After change 5 the substitution of a step no longer contains those
@@ -741,12 +760,10 @@ BASELINE
 
 ### Questions
 
-1. **Where do undecided disjointness conditions live?** What is built is (a): a proof
-   is discarded when a condition is violated for certain, an open condition is not
-   remembered, and the verifier has the last word at the root. The brief asks for (b):
-   the conditions "carried as constraints on the substitution and discharged
-   consistently", so that each proof on a node carries its open conditions and a doomed
-   proof stops where it becomes doomed. BASELINE_Q1
+1. **Conditions on bound variables are carried** (above), as the brief says. One thing
+   in it is a choice of mine: a condition on a name of the tree that no node above can
+   replace is taken as settled, because that name will become a dummy. This relies on
+   change 5 for what "above can replace" means. Is that reading right?
 2. **Forward expansion.** The brief describes a tree that grows in both directions; the
    paper and the core of the source grow it from the goal, and `forward.flow` (915 lines,
    with its join to the backward tree) is a recent layer on top. Both acceptance tests
@@ -763,14 +780,13 @@ BASELINE
    the goal is bound like any other), but the acceptance of a proof is tied to a theorem
    of the file, whose statement has none. Is a command or a test for answer
    substitutions wanted in this phase?
-5. **One proof per visible substitution.** With change 5 above, two proofs of an
-   assertion node that agree on the variables visible above have the same key, although
-   they may differ below; Russell, with the whole substitution in the key, keeps both.
-   For proofs without conditions on bound variables one is kept, which prunes the tree
-   a great deal and loses nothing: either proof can stand for the other. For proofs
-   with such conditions all are kept, as long as open conditions are not carried
-   (question 1); once they are, they belong to the key and the same pruning applies
-   everywhere. Is this pruning acceptable, as a departure from the source?
+5. **One proof per visible substitution.** With change 5, two proofs of an assertion
+   node that agree on the variables visible above, and on their open conditions, have
+   the same key although they may differ below, and one is kept; Russell, with the whole
+   substitution in the key, keeps both. Either can stand for the other in every proof
+   above, so nothing provable is lost, and the tree is pruned a great deal. But it is a
+   departure from the source, and it decides which of several proofs is found. Is it
+   acceptable?
 6. **Three things in the source that look unintended**, for you to judge: `ruCheckDisjs`
    in `ruAddProof` (change 3), the variable set of `ruMakeFresherSubst` (change 4), and
    the order of the arguments of `ruSuperRule` in `unify_var` (change 2).
