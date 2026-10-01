@@ -14,8 +14,10 @@ is an instance of proves the goal.
 
 Ported: `ruSeedForwardFront` (the premises and the assertions without hypotheses as
 facts), `ruApplyForward`, `ruApplyForwardOn` for an assertion without hypotheses,
-`ruExpandForwardProved`, `ruReverseJoin`, `ruFwdRegister`; `ruRunForwardWave` is in
-`Prove.lean`, where the clock is. Not ported: the seed hooks of the tactic layer, the
+`ruExpandForwardProved`, `ruReverseJoin`, `ruFwdRegister`. The loops over the facts of a
+wave, over the applications of a fact and over the subgoals that a new fact is joined
+with are in `Prove.lean` (`forwardWave`), where the clock is: these functions are what
+the loops do at each turn. Not ported: the seed hooks of the tactic layer, the
 ordered wave, the positional join of the completeness test (`pathIndex`), and
 `forward_closure.flow`.
 
@@ -37,6 +39,8 @@ What differs from Russell:
   Russell calls `ruMakeProofTree` at every use.
 - Seeding stops at the limit of facts; Russell seeds every assertion without hypotheses
   in scope and then finds the front over its limit, so that no wave runs.
+- One application is held to the room that the front has left (`applyForward`). In
+  Russell the limit is looked at between applications only.
 -/
 import Whitehead.Prove.Proofs
 
@@ -109,11 +113,13 @@ def addFact (expr : Exp) (proof : Nat → Proof) (children : Array Nat) : Prover
     counters := { env.counters with facts := env.counters.facts + 1 } }
   return some f
 
-/-- `ruReverseJoin`: what the new fact `f` proves of the backward tree. The goal, if the
-goal is an instance of the fact: only the variables of the fact are bound, so that what
-is proved is the goal itself. And every subgoal that the fact unifies with: the proof is
-put on the subgoal and carried down the tree. -/
-def reverseJoin (f : Nat) : ProverM Unit := do
+/-- `ruReverseJoin`, the first part: the new fact `f` proves the goal if the goal is an
+instance of it. Only the variables of the fact are bound, so that what is proved is the
+goal itself. Returns the subgoals of the backward tree that the fact unifies with and
+that the strategy admits: the second part, `joinSubgoal`, is done for each. (Russell has
+both in one function; here the search loop looks at the clock in between, because a
+fact can unify with thousands of subgoals.) -/
+def joinRoot (f : Nat) : ProverM (Array Nat) := do
   let (e, tree, conds) ← freshCopy f
   let env ← get
   if let some s := matchExp env.task.goal e then
@@ -131,18 +137,22 @@ def reverseJoin (f : Nat) : ProverM Unit := do
         { env with rootProofs := env.rootProofs.push proof,
                    counters := { env.counters with joins := env.counters.joins + 1 } }
   let env ← get
-  let found := (env.backwardFront.unify env.hyps[f]!.expr).map (·.data)
-  for h in found do
-    let env ← get
-    let some p := env.hyps[h]!.parent | continue
-    if let some (proof, _) ← graft f h env.hyps[h]!.expr then
-      let before := (← get).props[p]!.proofs.size
-      modify fun env =>
-        { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof },
-                   counters := { env.counters with joins := env.counters.joins + 1 } }
-      addProof p proof
-      let all := (← get).props[p]!.proofs
-      buildPropProofs p (all.extract before all.size)
+  return ((env.backwardFront.unify env.hyps[f]!.expr).map (·.data)).filter fun h =>
+    env.admitJoin env.hyps[f]!.expr env.hyps[h]!.expr
+
+/-- `ruReverseJoin`, the second part: the fact `f` as a proof of the subgoal `h`, put on
+the subgoal and carried down the tree. -/
+def joinSubgoal (f h : Nat) : ProverM Unit := do
+  let env ← get
+  let some p := env.hyps[h]!.parent | return
+  if let some (proof, _) ← graft f h env.hyps[h]!.expr then
+    let before := (← get).props[p]!.proofs.size
+    modify fun env =>
+      { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof },
+                 counters := { env.counters with joins := env.counters.joins + 1 } }
+    addProof p proof
+    let all := (← get).props[p]!.proofs
+    buildPropProofs p (all.extract before all.size)
 
 /-- The variables of an assertion replaced by fresh ones. -/
 def freshVars (a : Assertion) : ProverM Subst := do
@@ -173,8 +183,17 @@ def applyNoHyps (a : Assertion) : ProverM (Option Nat) := do
 /-- `ruApplyForward`: one application of assertion `a`, in which the fact `fact` is its
 hypothesis number `trig`. The other hypotheses are filled from the front, each with
 every fact that unifies with it under what the trigger has fixed. `addProof` joins them
-as it does in the backward tree, and every proof it makes is a new fact. -/
-def applyForward (fact : Nat) (a : Assertion) (trig : Nat) : ProverM Unit := do
+as it does in the backward tree, and every proof it makes is a new fact. Returns the
+new facts; they are joined with the backward tree by the caller.
+
+The front has room for `maxFacts` facts. An application cannot make more facts than
+there is room for, so it takes no more candidates for a hypothesis, and no more of the
+tuples that unify. This is a limit on work, like the limit on the front itself: without
+it one assertion with two hypotheses that the trigger leaves open is the square of the
+front. -/
+def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : ProverM (Array Nat) := do
+  let room := maxFacts - (((← get).forward.map (·.count)).getD 0)
+  if room == 0 then return #[]
   let fresh ← freshVars a
   let hyps := a.hyps.map fresh.apply
   let concTmpl := fresh.apply a.concl
@@ -189,43 +208,42 @@ def applyForward (fact : Nat) (a : Assertion) (trig : Nat) : ProverM Unit := do
     props := env.props.push { assertion := a.id, sub := {}, outer := fresh, parent := cnode,
                               children := (Array.range hyps.size).map (first + ·), expanded := true },
     counters := { env.counters with props := env.counters.props + 1 } }
-  let some (trigProof, sigma) ← graft fact (first + trig) hyps[trig]! | return
+  let some (trigProof, sigma) ← graft fact (first + trig) hyps[trig]! | return #[]
   for j in [0:hyps.size] do
     if j != trig then
-      let some fwd := (← get).forward | return
-      let found := (fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)
+      let some fwd := (← get).forward | return #[]
+      let found := ((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).extract 0 room
       for g in found do
         if let some (proof, _) ← graft g (first + j) hyps[j]! sigma then
           modify fun env =>
             { env with hyps := env.hyps.modify (first + j) fun hyp => { hyp with proofs := hyp.proofs.push proof } }
   modify fun env =>
     { env with hyps := env.hyps.modify (first + trig) fun hyp => { hyp with proofs := hyp.proofs.push trigProof } }
-  addProof p trigProof
+  addProof p trigProof room
+  let mut made := #[]
   for pp in (← get).props[p]!.proofs do
+    if (((← get).forward.map (·.count)).getD 0) ≥ maxFacts then break
     let conc := pp.sub.apply concTmpl
     if let some f ← addFact conc (fun f => .stmt f conc (restrict pp.sub concTmpl) pp) #[p] then
-      reverseJoin f
+      made := made.push f
+  return made
 
-/-- `ruExpandForwardProved`: every application of an assertion in which the fact is one
-of the hypotheses, as long as the front has fewer than `maxFacts` facts. -/
-def expandForward (fact maxFacts : Nat) : ProverM Unit := do
-  let env ← get
+/-- `ruExpandForwardProved`, the choice: the applications of an assertion in which the
+fact can be one of the hypotheses, as the assertion and the position of the hypothesis.
+`applyForward` does each. -/
+def forwardTriggers (env : Env) (fact : Nat) : Array (Nat × Nat) :=
   let expr := env.hyps[fact]!.expr
   let single := (env.hypIndexes.single.unify expr {} env.task.limit).map fun u => (u.data, 0)
   let multi := (env.hypIndexes.multi.unify expr {} env.task.limit).map (·.data)
-  for (id, pos) in single ++ multi do
-    let env ← get
-    let some fwd := env.forward | return
-    if fwd.count ≥ maxFacts then return
-    applyForward fact env.db.asserts[id]! pos
+  single ++ multi
 
 /-- `ruSeedForwardFront`: the front at the start. The premises of the task are facts,
 and so are the assertions without hypotheses that precede the theorem, which no wave
 would reach (a wave applies an assertion when a fact fits one of its hypotheses). The
 seeds are then joined with the goal. It must run before the root is expanded, so that
-the subgoals are recorded for the joins. -/
-def seedForward (maxFacts : Nat) : ProverM Unit := do
-  if (← get).forward.isSome then return
+the subgoals are recorded for the joins. Returns the seeds. -/
+def seedForward (maxFacts : Nat) : ProverM (Array Nat) := do
+  if (← get).forward.isSome then return #[]
   modify fun env => { env with forward := some {} }
   let env ← get
   let mut seeds : Array Nat := #[]
@@ -237,7 +255,6 @@ def seedForward (maxFacts : Nat) : ProverM Unit := do
     if a.hyps.isEmpty then
       if ((← get).forward.map (·.count)).getD 0 ≥ maxFacts then break
       if let some f ← applyNoHyps a then seeds := seeds.push f
-  for f in seeds do
-    reverseJoin f
+  return seeds
 
 end Whitehead.Prove

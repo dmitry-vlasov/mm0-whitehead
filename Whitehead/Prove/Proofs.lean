@@ -20,9 +20,6 @@ What differs from Russell:
   them is right when either can stand for the other in every proof above: when they
   also have the same open conditions on bound variables. So the open conditions are
   part of the key.
-- The product of the proofs is always walked tuple by tuple. Russell switches to
-  `ruUnifySubsProd` (`unify/prod.flow`) for products of 64 tuples and more; it gives the
-  same proofs faster and is not ported yet.
 - Conditions on bound variables. `ruCheckDisjs` is given the substitution `theta` of
   the new proof, which binds variables of the tree, and looks up in it the variables of
   the assertion's disjoint pairs, which `theta` does not bind (they are in `outer`); so
@@ -37,6 +34,7 @@ What differs from Russell:
   (`docs/DESIGN.md`, "Where MM0 differs").
 -/
 import Whitehead.Prove.Env
+import Whitehead.Prove.Prod
 
 namespace Whitehead.Prove
 
@@ -114,6 +112,9 @@ def condsKey (conds : Array Cond) : Array Nat :=
       return a.size < b.size
     (rows.qsort less).foldl (init := #[conds.size]) (· ++ ·)
 
+/-- No limit on the number of tuples. -/
+def noLimit : Nat := 0xFFFFFFFF
+
 /-- `check_consistent` of `ruAddProof`: each child's expression under `theta` must be an
 instance of the premise of the assertion it stands for, by one substitution for all
 premises. It guards against a `theta` that is not applied through. -/
@@ -126,8 +127,10 @@ def consistent (env : Env) (prop : PropNode) (theta : Subst) (children : Array P
         (matchExp (theta.apply children[i]!.expr) a.hyps[i]!).bind fun sigma => s.merge sigma).isSome
 
 /-- `ruAddProof`: the proofs of assertion node `p` that use the new proof `hypProof` of
-one of its children. They are added to the node. -/
-def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
+one of its children. They are added to the node. At most `maxTuples` of the tuples
+that unify are taken; the backward tree gives no limit, the forward front one that keeps
+it within its number of facts. -/
+def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM Unit := do
   let env ← get
   let prop := env.props[p]!
   let arity := env.db.asserts[prop.assertion]!.hyps.size
@@ -137,44 +140,41 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
     if c == hypProof.node then #[hypProof] else env.hyps[c]!.proofs
   if sets.any (·.isEmpty) then return
   let hypExpr := env.hyps[prop.parent]!.expr
-  let mut counters := env.counters
+  let size := sets.foldl (init := 1) (· * ·.size)
+  let mut counters := { env.counters with tuples := env.counters.tuples + size }
+  -- the tuples whose substitutions unify, each with the unifier: tuple by tuple for a
+  -- small product, by `unifySubsProd` from 64 tuples on, as in Russell. A product with
+  -- one large set only is also walked: there the other way has nothing to save.
+  let mut unified : Array (Subst × Array Proof) := #[]
+  if size < 64 || (sets.filter (·.size > 1)).size ≤ 1 then
+    for picks in tuples (sets.map fun set => Array.range set.size) do
+      let row := (Array.range sets.size).map fun i => sets[i]![picks[i]!]!
+      match unifySubs (row.map (·.sub)) with
+      | some s => unified := unified.push (s, row)
+      | none => pure ()
+  else
+    unified := (unifySubsProd (sets.map (·.map (·.sub)))).map fun (s, picks) =>
+      (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
+  counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   let mut proofs := prop.proofs
   let mut keys := prop.keys
-  -- all tuples, the last position changing fastest
-  let mut pick : Array Nat := Array.replicate sets.size 0
-  let mut more := true
-  while more do
-    let row := (Array.range sets.size).map fun i => sets[i]![pick[i]!]!
-    counters := { counters with tuples := counters.tuples + 1 }
-    match unifySubs (row.map (·.sub)) with
+  for (s, row) in unified.extract 0 maxTuples do
+    match prop.sub.compose s with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
-    | some s =>
-      match prop.sub.compose s with
-      | none => counters := { counters with notUnified := counters.notUnified + 1 }
-      | some theta =>
-        match openConds env prop theta (theta.apply hypExpr).varIds row with
-        | none => counters := { counters with disjoint := counters.disjoint + 1 }
-        | some conds =>
-          if !consistent env prop theta row then
-            counters := { counters with inconsistent := counters.inconsistent + 1 }
+    | some theta =>
+      match openConds env prop theta (theta.apply hypExpr).varIds row with
+      | none => counters := { counters with disjoint := counters.disjoint + 1 }
+      | some conds =>
+        if !consistent env prop theta row then
+          counters := { counters with inconsistent := counters.inconsistent + 1 }
+        else
+          -- one proof for each substitution with its open conditions
+          let key := theta.key ++ condsKey conds
+          if keys.contains key then
+            counters := { counters with duplicate := counters.duplicate + 1 }
           else
-            -- one proof for each substitution with its open conditions
-            let key := theta.key ++ condsKey conds
-            if keys.contains key then
-              counters := { counters with duplicate := counters.duplicate + 1 }
-            else
-              keys := keys.insert key
-              proofs := proofs.push (.prop p theta row conds)
-    -- the next tuple
-    let mut i := sets.size
-    more := false
-    while i > 0 && !more do
-      i := i - 1
-      if pick[i]! + 1 < sets[i]!.size then
-        pick := pick.set! i (pick[i]! + 1)
-        more := true
-      else
-        pick := pick.set! i 0
+            keys := keys.insert key
+            proofs := proofs.push (.prop p theta row conds)
   modify fun env =>
     { env with counters, props := env.props.modify p fun prop => { prop with proofs, keys } }
 

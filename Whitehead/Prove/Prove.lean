@@ -34,6 +34,8 @@ structure Strategy (σ : Type) where
   step : Env → σ → Decision × σ
   /-- The strategy uses the forward front: it is seeded before the root is expanded. -/
   forward : Bool := false
+  /-- Which joins of a new fact with a subgoal are made (`RuProverEnv.admitJoin`). -/
+  admitJoin : Exp → Exp → Bool := fun _ _ => true
 
 /-- `ruBreadthFirstTactic` (`tactics/breadth_first.flow`): all leaves, round by round.
 This is the fair strategy of the completeness theorem. -/
@@ -54,7 +56,14 @@ def forwardOnly : Strategy Unit where
 
 /-- Both directions in turn: a round of the backward tree, then a wave of the forward
 front. The two meet in the joins of `Forward.lean`. (In Russell such a strategy is put
-together in the tactic language, from `bfs` and `forward`.) -/
+together in the tactic language, from `bfs` and `forward`.)
+
+A new fact is not joined with a subgoal that is a bare variable, such as the minor
+premise of modus ponens: it unifies with every fact, and with a backward tree of any
+size each fact would be put on thousands of them. This is the policy that Russell's
+`ordered` tactic installs (`tactics/dsl.flow`). Such a subgoal is still proved by the
+backward search, by the facts that are there when it is made, and through the joins of
+its siblings. -/
 def bidirectional : Strategy Bool where
   root := none
   init := false
@@ -63,6 +72,7 @@ def bidirectional : Strategy Bool where
     if forwardTurn || leafs.isEmpty then (.forward, false)
     else (.expand (leafs.map fun p => (p, none)), true)
   forward := true
+  admitJoin _ subgoal := !subgoal.isVar
 
 /-- The state of `oracle`: the assertion nodes expanded in the last round, each with the
 step of the known proof that it stands for. -/
@@ -258,6 +268,22 @@ def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String 
     | .error msg => rejections := rejections.push (msg, tree)
   return (none, rejections, { env with rootProofs := #[] })
 
+/-- Is a limit of the search reached? -/
+def over (env : Env) (limits : Limits) (now start : Nat) : Bool :=
+  env.props.size > limits.maxProps || now - start > limits.maxMs
+
+/-- `ruReverseJoin` for each of the new facts: the goal, then every subgoal it unifies
+with, as long as the limits allow. -/
+def joinFacts (env : Env) (facts : Array Nat) (limits : Limits) (start : Nat) : IO Env := do
+  let mut env := env
+  for f in facts do
+    let (targets, env') := (joinRoot f).run env
+    env := env'
+    for h in targets do
+      if over env limits (← IO.monoMsNow) start then return env
+      env := ((joinSubgoal f h).run env).2
+  return env
+
 /-- `ruRunForwardWave`: every fact of the front is expanded, and the facts that this
 makes are the new front. Nothing is done if the front is empty or has reached its limit.
 Returns whether there is a front to go on with. -/
@@ -267,8 +293,11 @@ def forwardWave (env : Env) (limits : Limits) (start : Nat) : IO (Env × Bool) :
   let front := fwd.front
   let mut env := { env with forward := some { fwd with front := #[] } }
   for f in front do
-    if env.props.size > limits.maxProps || (← IO.monoMsNow) - start > limits.maxMs then break
-    env := ((expandForward f limits.maxFacts).run env).2
+    for (id, pos) in forwardTriggers env f do
+      if over env limits (← IO.monoMsNow) start then return (env, false)
+      if ((env.forward.map (·.count)).getD 0) ≥ limits.maxFacts then break
+      let (made, env') := (applyForward f env.db.asserts[id]! pos limits.maxFacts).run env
+      env ← joinFacts env' made limits start
   return (env, !((env.forward.map (·.front.isEmpty)).getD true))
 
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
@@ -286,14 +315,15 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     if allowed then
       if let .ok body := accept env (.hyp k) #[] then
         return { ending := .proved, proof := some (.hyp k), body := some body, answer := some env.task.goal, env }
-  let mut env := env
+  let mut env := { env with admitJoin := strategy.admitJoin }
   let mut rejected := 0
   let mut rejection := ""
   let mut rejectedProof : Option ProofTree := none
   -- the forward front is seeded before the root is expanded (`ruSeedForwardFront`), and
   -- a seed may be the goal
   if strategy.forward then
-    env := ((seedForward limits.maxFacts).run env).2
+    let (seeds, env') := (seedForward limits.maxFacts).run env
+    env ← joinFacts env' seeds limits start
     let (found, r, env') := takeRootProofs accept env
     env := env'
     rejected := rejected + r.size

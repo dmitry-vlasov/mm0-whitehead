@@ -37,9 +37,11 @@ import Whitehead.Prove.Unify
 
 namespace Whitehead.Prove
 
-/-- The rank of a node under which nothing is stored yet: more than any real rank.
-(Written as a machine integer: see the note on `Nat` literals in `Verify/Machine.lean`.) -/
-def noRank : Nat := (0x3FFFFFFFFFFFFFFF : UInt64).toNat
+/-- The rank of a node under which nothing is stored yet: more than any real rank. It is
+below 2^32 on purpose: a `Nat` literal from 2^32 on is parsed from its digits each time
+it is used (see the note in `Verify/Machine.lean`), also when it is written as a
+`UInt64` and converted, and this one is used for every node of the index. -/
+def noRank : Nat := 0xFFFFFFFF
 
 /-- `RuIndexNode` -/
 structure IndexNode (α : Type) where

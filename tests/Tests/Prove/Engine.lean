@@ -147,9 +147,10 @@ def engineTests : TestM Unit := do
     ((a1iForward.proof.map (proofText db)).getD "none") "(ax_mp h0 ax_1)"
   check "forward: the proof came from a fact that is the goal"
     (a1iForward.env.counters.facts > 0 && a1iForward.env.counters.joins == 1)
-  let mpcomForward ← search vc (forwardEnv "mpcom") forwardOnly limits
+  let con1Forward ← search vc (forwardEnv "con1") forwardOnly limits
   check "forward: a front that reaches its limit of facts ends the search"
-    (mpcomForward.ending == .exhausted && mpcomForward.proof.isNone)
+    (con1Forward.ending == .exhausted && con1Forward.proof.isNone &&
+      (con1Forward.env.forward.map (·.count)) == some limits.maxFacts)
   let mpcomBoth ← search vc (forwardEnv "mpcom") bidirectional limits
   checkEq "both directions: mpcom" ((mpcomBoth.proof.map (proofText db)).getD "none") "(com12 id)"
   let (bothRows, bothBodies) ← searchAll db { strategy := "both", limits := { maxProps := 3000, maxMs := 20000 } }

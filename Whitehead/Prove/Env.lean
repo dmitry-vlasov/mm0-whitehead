@@ -68,6 +68,9 @@ structure Env where
   filled while there is a forward front, so that a new fact can find the subgoals it
   proves. -/
   backwardFront : Index Nat := {}
+  /-- `RuProverEnv.admitJoin`: whether a new fact (first) is joined with a subgoal
+  (second) that it unifies with. A strategy sets it; the engine only asks. -/
+  admitJoin : Exp → Exp → Bool := fun _ _ => true
   /-- The number of the next fresh variable. -/
   fresh : Nat := freshBase
   /-- The proofs that reached the root and have not been taken by the driver yet. -/

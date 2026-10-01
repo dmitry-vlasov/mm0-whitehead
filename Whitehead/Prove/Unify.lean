@@ -133,9 +133,18 @@ def unifySubsRaw (subs : Array Subst) : Option Subst := Id.run do
       sub := s
   return some sub
 
-/-- `ruUnifySubs` -/
+/-- `ruUnifySubs`. Russell first sets apart the bindings of the variables that only one
+of the substitutions mentions (`ruSplitSubs`), unifies the rest, and puts the two parts
+together again: with the substitution of a whole subtree in every proof, most bindings
+are of that kind. Here a proof carries only the bindings that are visible at its node
+(`Proofs.lean`), the substitutions are small, and the splitting cost more than it saved
+(half of the time of a join, in a profile). So it is done only for large ones. The
+result is the same up to the bindings of the part set apart being brought under the
+unifier, which `ruCompose` does next in `ruAddProof` anyway. -/
 def unifySubs (subs : Array Subst) : Option Subst :=
-  let split := splitSubs subs
-  (unifySubsRaw split.depend).map fun sub => split.indep.mergeUnsafe sub
+  if subs.foldl (init := 0) (· + ·.size) ≤ 256 then unifySubsRaw subs
+  else
+    let split := splitSubs subs
+    (unifySubsRaw split.depend).map fun sub => split.indep.mergeUnsafe sub
 
 end Whitehead.Prove

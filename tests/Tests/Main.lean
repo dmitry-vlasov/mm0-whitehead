@@ -12,6 +12,7 @@ import Tests.Verify.Corpus
 import Tests.Prove.Subst
 import Tests.Prove.Unify
 import Tests.Prove.Index
+import Tests.Prove.Prod
 import Tests.Prove.Engine
 
 def main : IO UInt32 := do
@@ -26,6 +27,7 @@ def main : IO UInt32 := do
     Tests.Prove.substTests
     Tests.Prove.unifyTests
     Tests.Prove.indexTests
+    Tests.Prove.prodTests
     Tests.Prove.engineTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
