@@ -1,0 +1,23 @@
+name = "mm0-whitehead"
+version = "0.1.0"
+defaultTargets = ["mm0-whitehead"]
+testDriver = "test"
+
+[leanOptions]
+autoImplicit = false
+
+[[lean_lib]]
+name = "Whitehead"
+
+[[lean_lib]]
+name = "Tests"
+srcDir = "tests"
+
+[[lean_exe]]
+name = "mm0-whitehead"
+root = "Main"
+
+[[lean_exe]]
+name = "test"
+srcDir = "tests"
+root = "Tests.Main"
