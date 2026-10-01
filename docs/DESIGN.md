@@ -22,7 +22,9 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Verify/Machine.lean` | the proof stack machine: store, stack, heap, unification, one rule per command |
 | `Whitehead/Verify/Check.lean` | the statements of a proof file: binders, proof body, what must hold at its end; `checkProofs` |
 | `Whitehead/Verify/Spec.lean` | a proof file against a specification: `matchSpec` |
-| `Main.lean` | the command line: `dump`, `join`, `verify`, `bench`; `prove` is a stub |
+| `Whitehead/Mmb/Write.lean` | a proof file with other proof bodies |
+| `Whitehead/Prove/*.lean` | the prover: see "The prover", "Modules" |
+| `Main.lean` | the command line: `dump`, `join`, `verify`, `bench`, `prove replay`, `prove search`, `prove db` |
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
 | `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
@@ -35,6 +37,9 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `tests/Tests/Verify/Cases.lean` | one proof file per rule, with the verdicts of `mm0-rs` and mm0-c |
 | `tests/Tests/Verify/Spec.lean` | `matchSpec` on `small.mmb` against altered specifications |
 | `tests/Tests/Verify/Corpus.lean` | the proof checker over real `.mmb` files |
+| `tests/Tests/Prove/Util.lean` | a small language for the prover's tests, random expressions, a reference unifier on trees |
+| `tests/Tests/Prove/Subst.lean`, `Unify.lean`, `Index.lean` | expressions and substitutions; unification and the index, also against the reference on random input |
+| `tests/Tests/Prove/Engine.lean` | the engine on the logic fixture: database, replay, search, conditions on bound variables, answers |
 | `tests/Tests/Mutate/Engine.lean` | mutations of a proof file, from a seed |
 | `tests/Tests/Mutate/Main.lean` | `lake exe mutate`: our verdict against that of `mm0-rs` on mutants |
 | `tests/fixtures/mmbasm.py` | a hand assembler for small `.mmb` files, used by the `gen.py` scripts |
@@ -43,7 +48,9 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `tests/fixtures/verify/` | hand-assembled `.mmb` files, one per rule of the verifier, and `cases.tsv` with the expected verdicts |
 | `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` and `mm0-hs` into `.tools/bin` |
 | `scripts/build-corpus.sh` | builds the `.mm0`/`.mmb` pairs for acceptance testing into `.tools/corpus` |
+| `tests/fixtures/prove/` | `logic.mm1`, a small deductive system with proofs, and `logic.mmb` compiled from it by `mm0-rs` (`gen.sh`) |
 | `scripts/mutation-campaign.sh` | runs the mutation campaigns of the phase 2 acceptance test |
+| `scripts/search-baseline.sh`, `scripts/search-summary.py` | run and summarize the search test of phase 3 |
 
 ## The `.mm0` front end
 
@@ -456,6 +463,20 @@ reads it. That tree is what the prover will work on, so the front end stays as i
   test. They run with `LEAN_ABORT_ON_PANIC=1`, so that an index out of bounds in the
   verifier would be a crash and not a message. With `--mm0-c PATH` the mutants that
   both accept are also shown to mm0-c.
+
+- The prover's parts are tested bottom up. Substitutions and unification have
+  hand-written cases, and are compared on random input with a second unifier that is
+  written on trees in the plainest way and shares no code with the port: 20,000 pairs of
+  expressions and 5,000 sets of substitutions must give the same outcome, and a unifier
+  that makes the expressions equal, is idempotent, and is as general as the reference
+  one. The index is compared with unifying the given expression with each stored one,
+  on 2,000 lookups among 400 expressions.
+- The engine is tested on `tests/fixtures/prove/logic.mmb`: every proof of the file
+  replays; breadth-first search finds 15 of its 16 theorems, none by a longer proof than
+  the file's, and the file with the proofs found is valid; a condition on a bound
+  variable is judged violated, settled or open in hand-made cases; a goal with a
+  variable gets its answer. When the corpus is built, the first 6,000 statements of
+  set.mm are replayed and the resulting file is verified.
 
 ### External tools and the acceptance corpus
 
