@@ -10,14 +10,14 @@ def usage : String :=
   dump <file.mmb>                print a decoded proof file: statements and proofs
   verify <file.mmb>              check the proofs of a proof file, without a specification
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
-  prove ...                      automated proof search                        (phase 3)
+  prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
+                                 reconstruct the proofs of a file from the assertions they use
+  prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--ms T] [--max-nodes N] [--verbose]
+                                 prove the theorems of a file from scratch, breadth first
+  prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
-/-- Exit codes: 0 success, 1 the input was rejected, 2 the command line is wrong or asks
-for something that does not exist yet. -/
-def notImplemented (what : String) : IO UInt32 := do
-  IO.eprintln s!"mm0-whitehead: not implemented yet: {what}"
-  return 2
+-- Exit codes: 0 success, 1 the input was rejected, 2 the command line is wrong.
 
 def dumpMm0 (path : String) : IO UInt32 := do
   let src ← IO.FS.readBinFile path
@@ -189,14 +189,17 @@ def proveDb (path : String) : IO UInt32 := do
       IO.eprintln s!"{path}: {msg}"
       return 1
   let t1 ← IO.monoNanosNow
-  let index := db.index
-  let t2 ← IO.monoNanosNow
   let ms (a b : Nat) : String := s!"{(b - a) / 1000000} ms"
   let nodes := db.asserts.foldl (init := 0) fun n a => a.hyps.foldl (init := n + a.concl.size) (· + ·.size)
   let pairs := db.asserts.foldl (init := 0) fun n a => n + a.disjs.size
   IO.println s!"{path}: {db.terms.size} terms, {db.asserts.size} assertions, {nodes} expression nodes, \
     {pairs} pairs of binders to keep apart ({ms t0 t1})"
-  IO.println s!"index of the conclusions: {index.nodes.size} nodes ({ms t1 t2})"
+  -- the index is built when its size is printed: a pure value is computed where it is used
+  let t1 ← IO.monoNanosNow
+  let index := db.index
+  IO.print s!"index of the conclusions: {index.nodes.size} nodes"
+  let t2 ← IO.monoNanosNow
+  IO.println s!" ({ms t1 t2})"
   -- the proofs as trees of assertions
   let mut steps := 0
   let mut proofs := 0
@@ -320,7 +323,6 @@ def main (args : List String) : IO UInt32 := do
   | ["prove", "db", path] => proveDb path
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: "search" :: path :: rest => proveSearch path rest
-  | "prove" :: _ => notImplemented "prove (phase 3)"
   | _ =>
     IO.eprintln usage
     return 2
