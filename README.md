@@ -16,11 +16,15 @@ Lean.
 
 ## Usage
 
-    mm0-whitehead dump file.mm0          # print the parsed statements, normalized
-    mm0-whitehead join file.mm0          # the same, with every import included
-    mm0-whitehead bench file.mm0 ...     # time the parser
+    mm0-whitehead verify file.mm0 file.mmb   # the proof file is valid and proves the specification
+    mm0-whitehead verify file.mmb            # the proofs alone, without a specification
+    mm0-whitehead dump file.mm0              # print the parsed statements, normalized
+    mm0-whitehead dump file.mmb              # print the statements and proofs of a proof file
+    mm0-whitehead join file.mm0              # a specification with every import included
+    mm0-whitehead bench file ...             # time the .mm0 front end or the .mmb reader
 
-`dump` for `.mmb` files, `verify` and `prove` are not implemented yet.
+`verify` exits with 0 if the file is accepted; otherwise it prints the first error with
+its file offset and statement. `prove` is not implemented yet.
 
 ## Reference tools and test corpus
 
@@ -32,6 +36,11 @@ tests run on proof files that have to be built first. Neither is kept in this re
 
 `mm0-rs` needs a recent stable Rust; `--with-hs` builds `mm0-hs`, which is needed only
 for the set.mm translation and takes about ten minutes.
+
+With both in place, the verifier can be compared with `mm0-rs` on mutated proof files:
+
+    lake exe mutate file.mmb --count 3000 --seed 1    # one campaign
+    scripts/mutation-campaign.sh                      # those of the acceptance test, about a minute
 
 ## Documents
 

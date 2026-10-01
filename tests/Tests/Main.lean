@@ -8,6 +8,7 @@ import Tests.Mmb.Corpus
 import Tests.Verify.Proofs
 import Tests.Verify.Spec
 import Tests.Verify.Cases
+import Tests.Verify.Corpus
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -20,6 +21,7 @@ def main : IO UInt32 := do
     Tests.Verify.caseTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
+    Tests.Verify.corpusTests
     Tests.Mm0.pairTests : Tests.TestM Unit).run {}
   IO.println s!"{stats.passed} passed, {stats.failed} failed, {stats.skipped} skipped"
   return if stats.failed == 0 then 0 else 1

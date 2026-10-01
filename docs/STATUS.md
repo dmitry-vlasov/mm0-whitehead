@@ -5,7 +5,8 @@ Last updated: 2026-10-01.
 ## Phase
 
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
-**Phase 2 — independent verifier**: in progress.
+**Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
+**Phase 3 — prover**: not started.
 
 ### Phase 1 acceptance
 
@@ -33,6 +34,72 @@ Last updated: 2026-10-01.
 - 303 checks on hand-written input, 165 of them malformed inputs that must be rejected
   at a given position with a given message (see "What passes").
 
+### Phase 2 acceptance
+
+> Every valid `.mmb` is accepted by us, including the set.mm translation and every file
+> the example sources compile to.
+
+- The proofs of all 15 valid proof files are accepted: the 9 built from the example
+  sources and from set.mm (`.tools/corpus`), and the 6 that the MM0 repository ships.
+  99,996 statements, 50,595 of them in the set.mm translation. This is a test
+  (`tests/Tests/Verify/Corpus.lean`).
+- With their specifications: `verify x.mm0 x.mmb` accepts all 9 corpus pairs.
+- `hello_assembler.mmb`, the tenth corpus file, is rejected, and should be: one theorem
+  is proved with `sorry`, and the file does not match its specification (phase 1).
+- The 7 mutants of the MM0 repository that the reader lets through are rejected, each
+  with the expected message; the other 14 are rejected by the reader.
+
+> A corpus of mutated `.mmb` files is run through both [...] Any case where we accept
+> and `mm0-rs` rejects (or vice versa) is examined before moving on.
+
+`scripts/mutation-campaign.sh`: 31,800 mutants of six valid files (`small`, `conv_all`,
+`dummy_thm`, `hol`, `set`, `peano`), each checked by us and by `mm0-rs compile`.
+
+| Verdicts | Mutants |
+| -------- | ------- |
+| rejected by both | 21,704 |
+| accepted by both | 3,049 |
+| rejected by us, accepted by `mm0-rs` | 7,047 |
+| accepted by us, rejected by `mm0-rs` | 0 |
+
+Every one of the 7,047 is a difference already decided in `MMB-NOTES.md` section 9, and
+is recognized as such from our error message:
+
+| Point of section 9 | Mutants |
+| ------------------ | ------- |
+| 8: `mm0-rs` does not read the proof body of an axiom or definition | 5,896 |
+| 11: it ignores the dependency bits of a bound binder | 413 |
+| 6: it accepts `Sorry` | 383 |
+| 9: it does not compare the sort in the term table with the return type | 276 |
+| 20: it does not count statements, nor read table entries that no statement declares | 79 |
+
+In each of these the formal semantics, or mmb.md where they are silent, side with us,
+and each has a fixture (`tests/fixtures/disputed`, `tests/fixtures/verify`). Of the 3,049
+mutants that both accept, mm0-c rejects 74: all are an `END` byte with data-width bits,
+point 21. No mutant made the verifier index out of bounds (`LEAN_ABORT_ON_PANIC=1`).
+
+The same comparison on hand-written files: 48 proof files, one per rule
+(`tests/fixtures/verify`). We agree with mm0-c on all 48; `mm0-rs` accepts 11 that we
+reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed files that
+`mm0-rs` and we reject (points 1 and 7): it is not the reference.
+
+> `mm0-rs` [...] has no command that checks a `.mmb` against a `.mm0`. That step follows
+> the formal specification, and is tested on hand-written cases.
+
+- 18 cases on `small.mmb`: the specification as it is, 3 changes that must not matter
+  (a def without its value, other names of variables and hypotheses, other names of
+  declarations) and 14 that must be caught (modifiers, binders, values, conclusions,
+  hypotheses and their order, axiom against theorem, missing and extra statements,
+  order).
+- 21 real pairs match on all 55,165 statements; the one pair that should not match does
+  not.
+
+> Benchmark: set.mm translation verified within 10x of `mm0-c`'s time.
+
+- mm0-c: 0.26 s. Ours: 1.80 s, 6.9 times that (specification 0.89 s, proofs 0.56 s,
+  matching 0.35 s). The first version took 3.1 s; what was changed, and why it was slow,
+  is in `DESIGN.md`, "The loop, and what the Lean compiler does with it".
+
 ## Decisions (2026-10-01)
 
 1. The formal semantics are the final judge: `mm0.md` plus the formal specification
@@ -52,7 +119,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-437 checks, 0 failures, in 8 seconds:
+641 checks, 0 failures, in 8 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -66,6 +133,9 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 - `.mmb` corpus: 16 proof files decode, round-trip and dump. Of the 21 mutated files of
   the MM0 repository, the reader rejects the 14 it should and decodes the 7 that are
   wrong only for a verifier.
+- Verifier, hand-written: `small.mmb` and the 7 disputed files; 48 files with one rule
+  each, with our verdict and those of `mm0-rs` and mm0-c; 18 specification cases.
+- Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
   repository, 10 of the built corpus). 21 agree on every statement, 55,165 in all; one is
   the expected mismatch.
@@ -83,13 +153,13 @@ Timings (`mm0-whitehead bench`, one run each):
 | Input | Size | Time |
 | ----- | ---- | ---- |
 | `setmm.mm0`, parse | 20 MB, 50,596 statements | 0.20 s |
-| `setmm.mm0`, load and elaborate | 49,156 axioms and theorems | 0.94 s |
+| `setmm.mm0`, load and elaborate | 49,156 axioms and theorems | 0.89 s |
 | `setmm.mmb`, open | 39 MB, 50,595 statements | 0.008 s |
 | `setmm.mmb`, decode every stream | 21.2 million commands | 0.35 s |
 | `setmm.mmb`, dump to a pipe | 15.6 million lines, 390 MB | 3.5 s |
 
-For scale, mm0-c verifies the set.mm translation in 0.26 s, so the phase 2 budget of ten
-times that is 2.6 s.
+`mm0-whitehead verify setmm.mm0 setmm.mmb` takes 1.80 s; mm0-c takes 0.26 s, so the
+phase 2 budget of ten times that is 2.6 s.
 
 ## Tools and corpus
 
@@ -129,10 +199,13 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 
 ## Next steps
 
-Phase 2, once phase 1 is confirmed and open points 1 and 2 are answered:
+Phase 3 starts with reading, not with code:
 
-1. The proof stack machine of `MMB-NOTES.md` section 6 on the bytes of the file, with the
-   fixtures of `tests/fixtures/disputed` as its first tests.
-2. The well-formedness conditions on the environment, and the match between the
-   specification and the proof file (the pair test, promoted to a check).
-3. `tests/mutate`, and the differential run against `mm0-rs`.
+1. Russell's engine in `russell-flow/src/ru/prover/core/` and its unifier and index
+   (`src/ru/unify/`, `src/ru/subst.flow`, `src/ru/index.flow`), together with
+   `docs/proof_search_algo.pdf`; the data structures and the algorithm written down in
+   `DESIGN.md`, with the Flow9 file and function for each part.
+2. Where MM0 forces a change — bound variables and their dependency constraints,
+   definitions and `Unfold` — how the change relates to the completeness proof, as a
+   question before any code.
+3. Then the replay test first: it needs the unifier and `.mmb` emission, not the search.

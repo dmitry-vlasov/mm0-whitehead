@@ -19,7 +19,10 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Mmb/Reader.lean` | opening a `.mmb` file; decoding binders, unify streams and proof bodies on demand |
 | `Whitehead/Mmb/Encode.lean` | command streams back to bytes |
 | `Whitehead/Mmb/Dump.lean` | a `.mmb` file as text |
-| `Main.lean` | the command line: `dump`, `join`, `bench`; `verify` and `prove` are stubs |
+| `Whitehead/Verify/Machine.lean` | the proof stack machine: store, stack, heap, unification, one rule per command |
+| `Whitehead/Verify/Check.lean` | the statements of a proof file: binders, proof body, what must hold at its end; `checkProofs` |
+| `Whitehead/Verify/Spec.lean` | a proof file against a specification: `matchSpec` |
+| `Main.lean` | the command line: `dump`, `join`, `verify`, `bench`; `prove` is a stub |
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
 | `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
@@ -28,11 +31,19 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `tests/Tests/Mm0/Pairs.lean` | every elaborated statement against its counterpart in a `.mmb` file |
 | `tests/Tests/Mmb/Reader.lean` | the reader on two small files, and on corruptions of one of them |
 | `tests/Tests/Mmb/Corpus.lean` | the reader over real `.mmb` files, with the round trip |
+| `tests/Tests/Verify/Proofs.lean` | the proof checker on `small.mmb` and on the disputed files |
+| `tests/Tests/Verify/Cases.lean` | one proof file per rule, with the verdicts of `mm0-rs` and mm0-c |
+| `tests/Tests/Verify/Spec.lean` | `matchSpec` on `small.mmb` against altered specifications |
+| `tests/Tests/Verify/Corpus.lean` | the proof checker over real `.mmb` files |
+| `tests/Tests/Mutate/Engine.lean` | mutations of a proof file, from a seed |
+| `tests/Tests/Mutate/Main.lean` | `lake exe mutate`: our verdict against that of `mm0-rs` on mutants |
 | `tests/fixtures/mmbasm.py` | a hand assembler for small `.mmb` files, used by the `gen.py` scripts |
 | `tests/fixtures/mmb/` | `small.mmb`: a valid file with one of everything, and its expected dump |
 | `tests/fixtures/disputed/` | hand-assembled `.mmb` files on which the sources disagree |
+| `tests/fixtures/verify/` | hand-assembled `.mmb` files, one per rule of the verifier, and `cases.tsv` with the expected verdicts |
 | `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` and `mm0-hs` into `.tools/bin` |
 | `scripts/build-corpus.sh` | builds the `.mm0`/`.mmb` pairs for acceptance testing into `.tools/corpus` |
+| `scripts/mutation-campaign.sh` | runs the mutation campaigns of the phase 2 acceptance test |
 
 ## The `.mm0` front end
 
@@ -246,16 +257,18 @@ What is specific to the Lean code:
 
 - **The file stays a `ByteArray`.** `MmbFile` holds the bytes and what is cheap and small:
   the header, one structure per table entry and per statement, and the names. Binders,
-  unify streams and proof bodies are decoded by accessor functions when asked for. A
-  verifier will not ask for them as arrays at all: it will step through the bytes with
-  `Reader.readCmd`.
+  unify streams and proof bodies are decoded by accessor functions when asked for. The
+  verifier does not ask for them as arrays at all: it steps through the bytes.
 - **`Arg` is a structure around one `UInt64`**, which Lean represents as the bare scalar,
   with `bound`, `sort` and `deps` as bit operations. 64-bit words are assembled with
   `UInt64` operations, not through `Nat`, so that a set top bit (every bound variable)
   does not create a big number.
 - **`readCmd` returns an `Except` of a triple** and is `@[inline]`. That is fine for the
-  reader, which builds arrays anyway. Whether the verifier's inner loop can use it
-  without allocating is a phase-2 measurement, not something assumed here.
+  reader, which builds arrays anyway. The verifier's loops do not use it: they check the
+  bounds once and read the opcode and the data with `cmdSize` and `cmdData`
+  (`Verify/Machine.lean`), which return plain numbers.
+- **Bytes are put together as machine integers** (`u16`, `u32`, `word64`). A left shift
+  of a `Nat` is a call into the big number library even when the result is small.
 - **Errors are an offset and a message**, as for `.mm0`; the reader stops at the first.
 - The stream decoders are `partial def` loops over the bytes; `readPattern` recurses on
   the term structure of a unify stream, which is as deep as the formula it describes.
@@ -266,6 +279,126 @@ What is specific to the Lean code:
 
 `dump` writes line by line through a callback rather than building a string: the dump of
 the set.mm translation is 15.6 million lines (390 MB), written in 3.5 s.
+
+## The verifier
+
+`verify spec.mm0 proof.mmb` does two things, in two modules that do not know each other:
+
+1. `checkProofs` (`Verify/Check.lean`, on top of `Verify/Machine.lean`): the proof file
+   is valid on its own. Every statement's binders are well-formed, its proof body runs
+   on the stack machine, and what the body leaves is the statement that the tables
+   declare. This is what `mm0-rs compile file.mmb` checks, and `verify proof.mmb` alone
+   stops here.
+2. `matchSpec` (`Verify/Spec.lean`): the public statements of the proof file are, in
+   order, the declarations of the specification.
+
+The rules are those of `MMB-NOTES.md` section 6, with the decisions of its section 9
+where the sources differ. The comments in the code name the rule each function
+implements and, where there is one, the definition of the formal semantics it follows.
+
+### Representation
+
+The checking logic is plain; the speed is in how the data are laid out.
+
+- **Commands are read from the bytes of the file**, never decoded into values.
+- **The store** is one `Array Nat` that holds every expression of the statement being
+  checked; it is emptied for the next statement and keeps its memory. A node is the
+  index of its first slot: `store[e]` is its type word, `store[e+1]` is `0` for a
+  variable and `t + 1` for an application of term `t`, and the argument nodes follow.
+- **Two expressions are equal when they are the same node.** That is the equality of
+  the format (`mm0b.lean`, `mm0-rs`): a proof that builds the same term twice has two
+  nodes, and must use `Ref` to mean the first one. There is no hash-consing and no
+  structural comparison, so `Refl`, `URef` and the comparison of a saved conversion are
+  one comparison of two numbers.
+- **The type word** of a node is one number: bits 0–54 the bound variables it depends
+  on, bits 55–61 its sort, bit 62 set for a bound variable. It is computed once, when
+  the node is made. In a theorem the dependencies are the variables of the expression
+  (the union over all arguments); in a definition they are its free variables.
+- **A stack or heap element** is one number: the kind (expression, proof, conversion,
+  obligation) in the low two bits, then one or two node indices of 30 bits.
+- All arrays therefore hold small numbers, which Lean stores unboxed, and a command
+  allocates nothing but array slots.
+
+### The loop, and what the Lean compiler does with it
+
+The first version kept the whole state in one record of 12 fields and wrote every
+command in the state monad. It verified the set.mm translation's proofs in 1.8 s; the
+budget for the whole verification is 2.6 s. A profile (`valgrind --tool=callgrind`; `perf`
+is not permitted on this machine) showed 2,400 instructions per proof command, and three
+causes that have nothing to do with the checking itself:
+
+| Change | Proofs of `setmm.mmb` | Instructions |
+| ------ | --------------------- | ------------ |
+| first version | 1.80 s | 38.2 G |
+| masks and shifts on `UInt64` instead of `Nat` literals | 1.36 s | 28.7 G |
+| the loop on separate arrays; byte reads on `UInt32` | 0.55 s | 12.1 G |
+
+- **A `Nat` literal of 2^32 or more inside a function is rebuilt each time it runs**,
+  by a call that parses its decimal digits. The masks of the type word were such
+  literals. The words are still stored as `Nat`, but they are taken apart with `UInt64`
+  operations (`Ty` and `El` in `Machine.lean`), whose literals are machine constants.
+- **`Nat` shifted left always goes through the big number library.** The 16- and
+  32-bit operands of commands were assembled that way.
+- **A record is updated in place only in a narrow case.** For `{ m with stack :=
+  m.stack.push x }` the compiler reuses the record if it is not shared, and avoids
+  touching the reference counts of the other fields only if the reads of the fields
+  directly precede the update, in the same basic block (the pass `ExpandResetReuse`
+  looks for exactly that pattern). With a test of `m` in between — and a command always
+  tests before it updates — every field is incremented and decremented again. In the
+  loop itself, where the record was also updated for the position of the command, the
+  compiled code freed the record and allocated a new one for every `Ref`.
+
+So the loop over the commands of a proof (`run`) carries the store, the stack, the heap
+and the two arrays of unification as separate variables, each with one owner: a push or
+a pop is then done in place, with no record around it. What the loop calls is written to
+fit: a function either reads arrays and returns a number (`argsFault`, `argsVars`,
+`argsFree`, `boundDeps`), or takes one array and returns it (`argsToStore`,
+`argsToUheap`, `pushArgs`). A failed check of arguments is reported as a number (which
+argument, which rule), and the message is made from it only when needed. `unify` works
+on its two arrays as loop variables too, and returns them in a small record once per
+unification. The record `Machine` remains for what happens between statements and for
+the rare commands (`stepOther`: everything but `Ref`, `Term` and `Thm`, which are 99% of
+the commands of set.mm); those are written in the state monad, where clarity costs
+nothing measurable.
+
+The rules did not change in this rewrite, and their order of checks did not either. The
+scratch array of "dependencies of the bound arguments so far" went away: `boundDeps`
+computes the same union from the binders and the arguments on the stack.
+
+`partial def` is used for all loops: they run over the bytes of a file, and nothing
+would be gained by proving that they end.
+
+### Errors
+
+A failed check is a message, the file offset of the command or statement, and the index
+of the statement (`VerifyError`); it is printed as `file:0x<offset>: error: in theorem
+foo: <message>`. The verifier stops at the first error.
+
+### Against the specification
+
+`matchSpec` walks the statements of the proof file and the declarations of the
+elaborated specification side by side. Local definitions and theorems of the proof file
+are skipped; everything else must be the same kind of declaration with the same
+content: the modifiers of a sort, the binders and return type of a term bit for bit,
+and each formula as a tree, the expression elaborated from the `.mm0` text against the
+unify stream of the proof file. A definition may have its value in the proof file only.
+Names are not compared — the index is not part of what is proved — and the term numbers
+of the two sides differ by the local definitions, so a map from one to the other is
+built on the way. This is `env.extend` of `mm0.lean`. `mm0-rs` has no counterpart; mm0-c
+has one, in `parser.c`.
+
+Time on the set.mm translation (49,156 axioms and theorems), one run:
+
+| Step | Time |
+| ---- | ---- |
+| load and elaborate `setmm.mm0` | 0.89 s |
+| check the proofs of `setmm.mmb` | 0.56 s |
+| match the two | 0.35 s |
+| total | 1.80 s |
+
+mm0-c does the same in 0.26 s. Half of our time is the `.mm0` front end, which builds a
+syntax tree and an environment where mm0-c compares the text with the proof file as it
+reads it. That tree is what the prover will work on, so the front end stays as it is.
 
 ## Testing
 
@@ -303,6 +436,26 @@ the set.mm translation is 15.6 million lines (390 MB), written in 3.5 s.
   point on which the sources disagree about proof checking (`MMB-NOTES.md`, section 9).
   They are the regression tests for the verifier's deliberate differences from
   `mm0-rs` and mm0-c.
+- `tests/fixtures/verify/gen.py` assembles one proof file per rule of the verifier: 48
+  files, each valid or invalid in one known way. `cases.tsv` records for each our
+  verdict (a fragment of the error message), the verdicts of `mm0-rs` and of mm0-c, and,
+  where `mm0-rs` differs from us, the point of section 9 that explains it. The test
+  checks our verdict always and the other two when the tools are built. This is the
+  differential test on hand-written cases.
+- The verifier corpus test runs `checkProofs` over the same proof files as the reader
+  corpus test. Every valid one must be accepted; the mutants of the MM0 repository that
+  the reader lets through must be rejected, each with its own message.
+- `matchSpec` is tested on `small.mmb` against its specification with one thing changed
+  at a time (18 cases: what may differ, and what may not), and by the pair test above.
+- `lake exe mutate FILE.mmb --count N --seed S` makes N mutants of a valid proof file
+  (a flipped bit in a chosen part of the file, two proof commands swapped, an opcode or
+  an operand altered, a broken binder, a truncation), checks each with our verifier and
+  with `mm0-rs compile`, and compares. A difference must be one of the known ones of
+  section 9, recognized from our error message; anything else is reported and the
+  mutant kept. `scripts/mutation-campaign.sh` runs the campaigns of the acceptance
+  test. They run with `LEAN_ABORT_ON_PANIC=1`, so that an index out of bounds in the
+  verifier would be a crash and not a message. With `--mm0-c PATH` the mutants that
+  both accept are also shown to mm0-c.
 
 ### External tools and the acceptance corpus
 
