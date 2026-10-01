@@ -92,8 +92,6 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
             {if result.rejection.isEmpty then "" else ": " ++ result.rejection}"
           if let some tree := result.rejectedProof then
             log s!"  goal: {db.showExp env.task.goal}\n  premises: {env.task.premises.map (db.showExp ·)}\n{tree.render db "  "}"
-            if let some cmds := emitBody db env.task tree then
-              log s!"  {repr cmds}"
   return (stats, bodies)
 
 /-! ### The search test -/

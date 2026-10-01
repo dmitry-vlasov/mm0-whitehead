@@ -149,4 +149,33 @@ def engineTests : TestM Unit := do
   checkEq "names: merged where the steps allow it"
     ((mergeNames db tree).vars.map fun v => Node.varId v - freshBase) #[0, 1]
 
+/-- The replay test on the first theorems of the set.mm translation, if the corpus is
+built: every proof is reconstructed, and the file with the new bodies is valid. The
+whole file is `mm0-whitehead prove replay .tools/corpus/setmm.mmb`. -/
+def replayCorpusTests : TestM Unit := do
+  let path : System.FilePath := ".tools/corpus/setmm.mmb"
+  if !(← path.pathExists) then
+    skip "replay of the set.mm translation" "run scripts/build-corpus.sh"
+    return
+  let file ←
+    match MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e => check "replay corpus: the file is read" false e.msg; return
+  let db ←
+    match Db.ofFile file with
+    | .ok db => pure db
+    | .error msg => check "replay corpus: the file becomes a database" false msg; return
+  let (stats, bodies) ← replay db { last := 6000 } fun _ => pure ()
+  check s!"replay corpus: the first {stats.theorems} theorems of set.mm are reconstructed"
+    (stats.failed == 0 && stats.replayed == stats.theorems && stats.theorems > 5000)
+    s!"{stats.replayed} of {stats.theorems}"
+  checkEq "replay corpus: step for step" stats.stepsOut stats.stepsIn
+  match MmbFile.parse (file.withBodies bodies) with
+  | .error e => check "replay corpus: the file with the new bodies is read" false e.msg
+  | .ok f2 =>
+    match Whitehead.Verify.checkProofs f2 with
+    | .ok () => check "replay corpus: the file with the new bodies is valid" true
+    | .error e => check "replay corpus: the file with the new bodies is valid" false (e.format f2 "replayed")
+  IO.println s!"replay corpus: {stats.replayed} proofs of set.mm reconstructed, {stats.stepsOut} steps"
+
 end Tests.Prove

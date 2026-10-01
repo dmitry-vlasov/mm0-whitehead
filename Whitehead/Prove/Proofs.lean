@@ -8,6 +8,15 @@ of the substitutions of the tuple, composed with the unifier of the assertion no
 
 What differs from Russell:
 
+- A proof of an expression node goes up with its substitution restricted to the
+  variables of the node's expression (`restrict`). Russell carries the whole
+  substitution of the subtree to the root; it grows with the subtree, and a proof of
+  thousands of steps is then composed again at every level. The restricted one has the
+  same bindings for everything that the nodes above can see, so the same tuples unify,
+  with the same result on those variables. Two things follow: `ruMakeProofTree` cannot
+  rely on the substitution of a node to contain those of its subtree (see
+  `makeProofTree`), and proofs of one assertion node are the same for `ruProofSubKey`
+  when they agree on what is visible above, also if they differ below.
 - The product of the proofs is always walked tuple by tuple. Russell switches to
   `ruUnifySubsProd` (`unify/prod.flow`) for products of 64 tuples and more; it gives the
   same proofs faster and is not ported yet.
@@ -104,6 +113,18 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
   modify fun env =>
     { env with counters, props := env.props.modify p fun prop => { prop with proofs, keys } }
 
+/-- The bindings of `theta` for the variables of `e`. A proof of an expression node goes
+up the tree with these only: the other variables that its substitution binds were made
+below the node and occur nowhere else, so the proofs of the siblings cannot depend on
+them. -/
+def restrict (theta : Subst) (e : Exp) : Subst :=
+  { map := e.nodes.foldl (init := {}) fun m n =>
+      if Node.isVar n then
+        match theta.map[Node.varId n]? with
+        | some x => m.insert (Node.varId n) x
+        | none => m
+      else m }
+
 mutual
 
 /-- `ruBuildPropProofs`: the new proofs `proofs` of assertion node `p` become proofs of
@@ -113,7 +134,8 @@ partial def buildPropProofs (p : Nat) (proofs : Array Proof) : ProverM Unit := d
   let env ← get
   let h := env.props[p]!.parent
   let hyp := env.hyps[h]!
-  let added := proofs.map fun proof => Proof.stmt h (proof.sub.apply hyp.expr) proof.sub proof
+  let added := proofs.map fun proof =>
+    Proof.stmt h (proof.sub.apply hyp.expr) (restrict proof.sub hyp.expr) proof
   modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs ++ added } }
   match hyp.parent with
   | some _ => buildExpProofs h added
@@ -135,17 +157,47 @@ partial def buildExpProofs (h : Nat) (proofs : Array Proof) : ProverM Unit := do
 
 end
 
-/-- `ruMakeProofTree`: the proof that a substitution proof tree stands for. The
-expressions of a step are instantiated by the substitution of that step; the
-substitutions of the steps above are applied on the way back up. -/
-partial def makeProofTree (env : Env) : Proof → ProofTree
-  | .top _ _ premise _ => .hyp premise
-  | .stmt _ _ _ child => makeProofTree env child
-  | .prop p sub children =>
-    let prop := env.props[p]!
-    let a := env.db.asserts[prop.assertion]!
-    let composed := prop.outer.unsafeCompose sub
-    .step a.id (a.vars.map composed.lookupD)
-      (children.map fun ch => (makeProofTree env ch).subst sub)
+/-- The bindings of all substitutions in a proof, as one substitution. The proof is
+walked from the root down, and a binding of a node is taken if no node above it binds
+the variable; its image is brought under the bindings from above first.
+
+A variable can be bound below and free above: when two variables are identified, a node
+below may bind the first to the second and a node above the second to the first. The
+binding from below then says nothing new — under the bindings from above its image is
+the variable itself — and is left out. -/
+partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
+  let add (acc : Subst) (s : Subst) : Subst :=
+    s.map.fold (init := acc) fun acc v x =>
+      if acc.map.contains v then acc
+      else
+        let image := acc.apply x.exp
+        if image.isTheVar x.var then acc
+        else { map := acc.map.insert v (SubExp.mk' x.var image) }
+  match proof with
+  | .top _ _ _ sub => add acc sub
+  | .stmt _ _ _ child => allBindings child acc
+  | .prop _ sub children => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
+
+/-- `ruMakeProofTree`: the proof that a substitution proof tree stands for.
+
+Russell instantiates the expressions of a step by the substitution of that step, and
+then applies the substitution of every step above it to the whole subtree. Here the
+bindings of all steps are collected first (`allBindings`) and applied to each expression
+once: the result is the same, and a step is visited once instead of once for every step
+above it. -/
+partial def makeProofTree (env : Env) (proof : Proof) : ProofTree :=
+  go (allBindings proof) proof
+where
+  /-- One application is enough if no image has a bound variable; a few more are allowed
+  for, and what is still not through is caught by the verifier. -/
+  resolve (all : Subst) (e : Exp) (fuel : Nat := 8) : Exp :=
+    if fuel != 0 && all.affects e then resolve all (all.applyRaw e) (fuel - 1) else e
+  go (all : Subst) : Proof → ProofTree
+    | .top _ _ premise _ => .hyp premise
+    | .stmt _ _ _ child => go all child
+    | .prop p _ children =>
+      let prop := env.props[p]!
+      let a := env.db.asserts[prop.assertion]!
+      .step a.id (a.vars.map fun v => resolve all (prop.outer.lookupD v)) (children.map (go all))
 
 end Whitehead.Prove
