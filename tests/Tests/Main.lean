@@ -9,6 +9,8 @@ import Tests.Verify.Proofs
 import Tests.Verify.Spec
 import Tests.Verify.Cases
 import Tests.Verify.Corpus
+import Tests.Prove.Subst
+import Tests.Prove.Unify
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -19,6 +21,8 @@ def main : IO UInt32 := do
     Tests.Verify.proofTests
     Tests.Verify.specTests
     Tests.Verify.caseTests
+    Tests.Prove.substTests
+    Tests.Prove.unifyTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
     Tests.Verify.corpusTests

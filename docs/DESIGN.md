@@ -643,7 +643,7 @@ Expressions and subproofs that occur twice are saved once (`TermSave`, `ThmSave`
 referred to, as `ruMakeLinearProof` shares steps with the same statement. The emitted
 body is checked by our verifier before it is reported, which is the port of the
 verification in `ruMakeProofFromSteps`, and the files of the acceptance tests are
-checked with mm0-c as well.
+checked with `mm0-rs` as well.
 
 ### The two acceptance tests
 
@@ -652,7 +652,8 @@ checked with mm0-c as well.
   is forgotten. The oracle strategy (after `tactics/oracle.flow`) expands, at each
   expression node, only the assertion that the known proof uses there. The engine
   must find all substitutions by unification. The output is a `.mmb` file with the same
-  tables and the reconstructed bodies, checked by mm0-c against `setmm.mm0`.
+  tables and the reconstructed bodies, checked by our verifier against `setmm.mm0` and
+  by `mm0-rs`.
 - **Search.** Breadth-first search with a time budget on the first sections of set.mm,
   each theorem proved from the assertions before it.
 
