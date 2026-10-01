@@ -19,8 +19,10 @@ inductive Proof where
   /-- `RuProverProofStmt`: the expression node `node` is proved by the proof `child` of
   one of its assertion nodes. -/
   | stmt (node : Nat) (expr : Exp) (sub : Subst) (child : Proof)
-  /-- `RuProverProofProp`: the assertion node `node` with a proof for each premise. -/
-  | prop (node : Nat) (sub : Subst) (children : Array Proof)
+  /-- `RuProverProofProp`: the assertion node `node` with a proof for each premise.
+  `conds` says that this step or one below it applies an assertion that has conditions
+  on bound variables. -/
+  | prop (node : Nat) (sub : Subst) (children : Array Proof) (conds : Bool)
   deriving Inhabited
 
 namespace Proof
@@ -28,18 +30,24 @@ namespace Proof
 def sub : Proof → Subst
   | .top _ _ _ s => s
   | .stmt _ _ s _ => s
-  | .prop _ s _ => s
+  | .prop _ s _ _ => s
 
 def node : Proof → Nat
   | .top n _ _ _ => n
   | .stmt n _ _ _ => n
-  | .prop n _ _ => n
+  | .prop n _ _ _ => n
 
 /-- The expression that a proof on an expression node proves. -/
 def expr : Proof → Exp
   | .top _ e _ _ => e
   | .stmt _ e _ _ => e
-  | .prop _ _ _ => default
+  | .prop _ _ _ _ => default
+
+/-- Does the proof apply an assertion with conditions on bound variables? -/
+def conds : Proof → Bool
+  | .top _ _ _ _ => false
+  | .stmt _ _ _ child => child.conds
+  | .prop _ _ _ c => c
 
 end Proof
 

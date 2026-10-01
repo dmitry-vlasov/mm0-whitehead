@@ -63,7 +63,8 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
   let a := env.db.asserts[prop.assertion]!
   if a.hyps.isEmpty then
     modify fun env => { env with props := env.props.modify p fun prop =>
-      { prop with proofs := prop.proofs.push (.prop p prop.sub #[]), keys := prop.keys.insert prop.sub.key } }
+      { prop with proofs := prop.proofs.push (.prop p prop.sub #[] !a.disjs.isEmpty),
+                  keys := prop.keys.insert prop.sub.key } }
   else
     for i in [0:a.hyps.size] do
       let ex := prop.outer.apply (prop.sub.apply a.hyps[i]!)

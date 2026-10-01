@@ -13,10 +13,14 @@ What differs from Russell:
   substitution of the subtree to the root; it grows with the subtree, and a proof of
   thousands of steps is then composed again at every level. The restricted one has the
   same bindings for everything that the nodes above can see, so the same tuples unify,
-  with the same result on those variables. Two things follow: `ruMakeProofTree` cannot
+  with the same result on those variables. Two things follow. `ruMakeProofTree` cannot
   rely on the substitution of a node to contain those of its subtree (see
-  `makeProofTree`), and proofs of one assertion node are the same for `ruProofSubKey`
-  when they agree on what is visible above, also if they differ below.
+  `makeProofTree`). And proofs of one assertion node have the same key (`ruProofSubKey`)
+  when they agree on what is visible above, also if they differ below. Keeping one of
+  them is right when either can stand for the other in every proof above, which is so
+  unless a condition on bound variables is still open in one of them: that one may be
+  rejected at the root where the other would not. So only proofs that apply no
+  assertion with such conditions are kept once per key; the others are all kept.
 - The product of the proofs is always walked tuple by tuple. Russell switches to
   `ruUnifySubsProd` (`unify/prod.flow`) for products of 64 tuples and more; it gives the
   same proofs faster and is not ported yet.
@@ -74,6 +78,7 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
   let sets : Array (Array Proof) := prop.children.map fun c =>
     if c == hypProof.node then #[hypProof] else env.hyps[c]!.proofs
   if sets.any (·.isEmpty) then return
+  let hasPairs := !env.db.asserts[prop.assertion]!.disjs.isEmpty
   let mut counters := env.counters
   let mut proofs := prop.proofs
   let mut keys := prop.keys
@@ -94,12 +99,15 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
         else if !consistent env prop theta row then
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
+          -- one proof for each substitution, but only among proofs that no condition on
+          -- bound variables can still spoil: see the note at the head of this file
+          let conds := hasPairs || row.any (·.conds)
           let key := theta.key
-          if keys.contains key then
+          if !conds && keys.contains key then
             counters := { counters with duplicate := counters.duplicate + 1 }
           else
             keys := keys.insert key
-            proofs := proofs.push (.prop p theta row)
+            proofs := proofs.push (.prop p theta row conds)
     -- the next tuple
     let mut i := sets.size
     more := false
@@ -176,7 +184,7 @@ partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
   match proof with
   | .top _ _ _ sub => add acc sub
   | .stmt _ _ _ child => allBindings child acc
-  | .prop _ sub children => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
+  | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
 
 /-- `ruMakeProofTree`: the proof that a substitution proof tree stands for.
 
@@ -195,7 +203,7 @@ where
   go (all : Subst) : Proof → ProofTree
     | .top _ _ premise _ => .hyp premise
     | .stmt _ _ _ child => go all child
-    | .prop p _ children =>
+    | .prop p _ children _ =>
       let prop := env.props[p]!
       let a := env.db.asserts[prop.assertion]!
       .step a.id (a.vars.map fun v => resolve all (prop.outer.lookupD v)) (children.map (go all))
