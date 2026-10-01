@@ -23,11 +23,15 @@ def fail {α : Type} (pos : Nat) (msg : String) : Except MmbError α :=
 @[inline] def u8 (b : ByteArray) (p : Nat) : Nat :=
   (b.get! p).toNat
 
+/-! The bytes are put together as machine integers: a left shift of a `Nat` goes through
+the big number library even when the result is small. -/
+
 @[inline] def u16 (b : ByteArray) (p : Nat) : Nat :=
-  u8 b p ||| (u8 b (p + 1) <<< 8)
+  ((b.get! p).toUInt32 ||| ((b.get! (p + 1)).toUInt32 <<< 8)).toNat
 
 @[inline] def u32 (b : ByteArray) (p : Nat) : Nat :=
-  u16 b p ||| (u16 b (p + 2) <<< 16)
+  ((b.get! p).toUInt32 ||| ((b.get! (p + 1)).toUInt32 <<< 8) |||
+    ((b.get! (p + 2)).toUInt32 <<< 16) ||| ((b.get! (p + 3)).toUInt32 <<< 24)).toNat
 
 /-- A 64-bit word, kept as `UInt64` so that a set top bit does not make a big number. -/
 def word64 (b : ByteArray) (p : Nat) : UInt64 :=

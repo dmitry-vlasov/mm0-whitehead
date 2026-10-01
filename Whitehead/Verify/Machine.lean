@@ -12,7 +12,12 @@ The checking logic is kept plain. Speed comes from the representation:
   are the same only if they are the same node. That is the equality of the format; there
   is no hashing and no structural comparison;
 - stack and heap elements are single numbers, so all arrays hold unboxed values and a
-  command allocates nothing but array slots.
+  command allocates nothing but array slots;
+- the loop over the commands of a proof (`run`) carries the store, the stack and the heap
+  as separate variables, each with a single owner, so that a push or a pop is done in
+  place. The functions it calls read these arrays and return a number, or take one array
+  and return it. The rest of the state is the record `Machine`, which the loop touches
+  only for the rare commands (`stepOther`).
 
 Layout of a node at index `e`: `store[e]` is its type word, `store[e+1]` is `0` for a
 variable and `t + 1` for an application of term `t`, followed by the argument nodes.
@@ -24,21 +29,46 @@ namespace Whitehead.Verify
 open Whitehead.Mmb
 
 /-! The type word of a node: bits 0–54 the set of bound variables it depends on, bits
-55–61 its sort, bit 62 set for a bound variable. It always fits an unboxed `Nat`. -/
+55–61 its sort, bit 62 set for a bound variable. It always fits an unboxed `Nat`.
+
+The words are stored as `Nat` (an `Array Nat` of small numbers holds them unboxed) and
+taken apart as `UInt64`. A `Nat` literal of 2^32 or more inside a function is compiled
+to a call that parses its decimal digits each time it runs, which took a quarter of the
+run time when the masks below were written as `Nat` literals; `UInt64` literals are
+machine constants. -/
 namespace Ty
 
-def depsMask : Nat := 0x7FFFFFFFFFFFFF
+/-- The dependency bits. -/
+@[inline] def deps (ty : Nat) : Nat := (ty.toUInt64 &&& 0x7FFFFFFFFFFFFF).toNat
+@[inline] def sort (ty : Nat) : Nat := ((ty.toUInt64 >>> 55) &&& 0x7F).toNat
+@[inline] def bound (ty : Nat) : Bool := (ty.toUInt64 >>> 62) != 0
 
-@[inline] def deps (ty : Nat) : Nat := ty &&& depsMask
-@[inline] def sort (ty : Nat) : Nat := (ty >>> 55) &&& 0x7F
-@[inline] def bound (ty : Nat) : Bool := (ty >>> 62) != 0
+/-- The dependency sets `a` and `b` have a common element. -/
+@[inline] def meets (a b : Nat) : Bool := (a.toUInt64 &&& b.toUInt64) != 0
+
+/-- The dependency set `a` without the elements of `b`. -/
+@[inline] def minus (a b : Nat) : Nat := (a.toUInt64 &&& ~~~b.toUInt64).toNat
+
+@[inline] def union (a b : Nat) : Nat := (a.toUInt64 ||| b.toUInt64).toNat
+
+/-- Is bit `j` set in the dependency set `a`? -/
+@[inline] def hasBit (a j : Nat) : Bool := ((a.toUInt64 >>> j.toUInt64) &&& 1) != 0
 
 def mk (sort : Nat) (bound : Bool) (deps : Nat) : Nat :=
-  deps + sort * 0x80000000000000 + (if bound then 0x4000000000000000 else 0)
+  (deps.toUInt64 ||| (sort.toUInt64 <<< 55) ||| (if bound then (1 : UInt64) <<< 62 else 0)).toNat
 
 /-- The type word of a binder of the file. -/
 def ofArg (a : Arg) : Nat :=
   mk a.sort a.bound a.deps.toNat
+
+/-- Do the two type words have the same sort? -/
+@[inline] def sameSort (a b : Nat) : Bool := ((a.toUInt64 ^^^ b.toUInt64) >>> 55) &&& 0x7F == 0
+
+/-- The dependency set of the bound variable number `k`. -/
+@[inline] def bit (k : Nat) : Nat := ((1 : UInt64) <<< k.toUInt64).toNat
+
+/-- The type word of a term node: the result word of the term, with these dependencies. -/
+@[inline] def withDeps (ret deps : Nat) : Nat := (ret.toUInt64 ||| deps.toUInt64).toNat
 
 end Ty
 
@@ -46,17 +76,18 @@ end Ty
 node indices of 30 bits each. -/
 namespace El
 
-@[inline] def expr (e : Nat) : Nat := e * 4
+@[inline] def expr (e : Nat) : Nat := (e.toUInt64 <<< 2).toNat
 /-- `⊢ e` -/
-@[inline] def proof (e : Nat) : Nat := e * 4 + 1
+@[inline] def proof (e : Nat) : Nat := ((e.toUInt64 <<< 2) ||| 1).toNat
 /-- A conversion `e1 = e2`. -/
-@[inline] def conv (e1 e2 : Nat) : Nat := e1 * 4 + 2 + e2 * 0x100000000
+@[inline] def conv (e1 e2 : Nat) : Nat := ((e1.toUInt64 <<< (2 : UInt64)) ||| (2 : UInt64) ||| (e2.toUInt64 <<< (32 : UInt64))).toNat
 /-- An obligation `e1 =?= e2`. -/
-@[inline] def coconv (e1 e2 : Nat) : Nat := e1 * 4 + 3 + e2 * 0x100000000
+@[inline] def coconv (e1 e2 : Nat) : Nat := ((e1.toUInt64 <<< (2 : UInt64)) ||| (3 : UInt64) ||| (e2.toUInt64 <<< (32 : UInt64))).toNat
 
-@[inline] def tag (el : Nat) : Nat := el &&& 3
-@[inline] def fst (el : Nat) : Nat := (el >>> 2) &&& 0x3FFFFFFF
-@[inline] def snd (el : Nat) : Nat := el >>> 32
+/-- The kind of an element: 0 an expression, 1 a proof, 2 a conversion, 3 an obligation. -/
+@[inline] def tag (el : Nat) : UInt64 := el.toUInt64 &&& 3
+@[inline] def fst (el : Nat) : Nat := ((el.toUInt64 >>> 2) &&& 0x3FFFFFFF).toNat
+@[inline] def snd (el : Nat) : Nat := (el.toUInt64 >>> 32).toNat
 
 end El
 
@@ -117,15 +148,12 @@ structure Machine where
   store : Array Nat := #[]
   stack : Array Nat := #[]
   heap : Array Nat := #[]
-  /-- The hypotheses declared by `Hyp`, as nodes. -/
+  /-- The hypotheses declared by `Hyp`, each as the element `⊢ h`. -/
   hyps : Array Nat := #[]
   /-- The unify stack. -/
   ustack : Array Nat := #[]
   /-- The unify heap: `2 * node`, plus `1` for an entry made by `UTermSave`. -/
   uheap : Array Nat := #[]
-  /-- Scratch: the dependency sets of the bound arguments of the term or theorem being
-  applied. -/
-  bdeps : Array Nat := #[]
   /-- The number of bound variables so far; the next dummy gets this bit. -/
   nextBv : Nat := 0
   /-- How many sorts, terms and theorems have been declared: only those may be used. -/
@@ -196,192 +224,206 @@ inductive UMode where
   | thmEnd
   deriving BEq
 
+/-- What a unification leaves: the two arrays it worked on, to be used again, and how it
+went. -/
+structure UResult where
+  ustack : Array Nat
+  uheap : Array Nat
+  /-- How many hypotheses are still to be matched. -/
+  hyps : Nat
+  /-- Empty if the unification succeeded. -/
+  error : String
+  deriving Inhabited
+
 /-- Is `d` disjoint from the dependencies of every entry of the unify heap that was not
 made by `UTermSave`: the arguments and the earlier dummies? -/
-partial def dummyIsFresh (m : Machine) (d : Nat) (i : Nat) : Bool :=
-  if i ≥ m.uheap.size then true
+partial def dummyIsFresh (store uheap : Array Nat) (d : Nat) (i : Nat) : Bool :=
+  if i ≥ uheap.size then true
   else
-    let h := m.uheap[i]!
-    if h &&& 1 == 0 && Ty.deps m.store[h >>> 1]! &&& d != 0 then false
-    else dummyIsFresh m d (i + 1)
+    let h := uheap[i]!
+    if h &&& 1 == 0 && Ty.meets store[h >>> 1]! d then false
+    else dummyIsFresh store uheap d (i + 1)
 
 /-- Pushes the arguments of the application node `p` on the unify stack, the first one
 on top. -/
-partial def pushArgs (p n : Nat) (m : Machine) : Machine :=
-  if n == 0 then m
-  else pushArgs p (n - 1) { m with ustack := m.ustack.push m.store[p + 1 + n]! }
+partial def pushArgs (store : Array Nat) (p n : Nat) (ustack : Array Nat) : Array Nat :=
+  if n == 0 then ustack
+  else pushArgs store p (n - 1) (ustack.push store[p + 1 + n]!)
 
 /-- Runs the unify stream at `pos`. The unify stack holds the target and the unify heap
-the substitution. -/
-partial def unify (c : Ctx) (mode : UMode) (pos : Nat) : M Unit := fun m =>
+the substitution. The hypotheses that `UHyp` takes are the first `k` elements of `hs`,
+the last one first: the main stack when a theorem is applied, the declared hypotheses
+when a statement is checked against its own stream. -/
+partial def unify (c : Ctx) (mode : UMode) (store hs : Array Nat) (pos k : Nat)
+    (ustack uheap : Array Nat) : UResult :=
   let b := c.bytes
-  if pos ≥ b.size then .error "unify: the stream runs past the end of the file" m
+  if pos ≥ b.size then ⟨ustack, uheap, k, "unify: the stream runs past the end of the file"⟩
   else
     let first := b.get! pos
     let next := pos + cmdSize first
-    if next > b.size then .error "unify: the stream runs past the end of the file" m
+    if next > b.size then ⟨ustack, uheap, k, "unify: the stream runs past the end of the file"⟩
     else
       let data := cmdData b pos first
       let op := first &&& 0x3F
       if op == 0x32 then
         -- URef i: the top of the unify stack is heap entry i, the same node
-        if data ≥ m.uheap.size then .error s!"unify: reference to heap entry {data}, which does not exist" m
-        else if m.ustack.size == 0 then .error "unify: stack underflow" m
-        else if m.ustack.back! != m.uheap[data]! >>> 1 then
-          .error s!"unify failure at 0x{hex pos}: the expression is not the one substituted for heap entry {data}" m
-        else unify c mode next { m with ustack := m.ustack.pop }
+        if data ≥ uheap.size then
+          ⟨ustack, uheap, k, s!"unify: reference to heap entry {data}, which does not exist"⟩
+        else if ustack.size == 0 then ⟨ustack, uheap, k, "unify: stack underflow"⟩
+        else if ustack.back! != uheap[data]! >>> 1 then
+          ⟨ustack, uheap, k, s!"unify failure at 0x{hex pos}: the expression is not the one substituted for heap entry {data}"⟩
+        else unify c mode store hs next k ustack.pop uheap
       else if op == 0x30 || op == 0x31 then
         -- UTerm t: the top is an application of t; replace it by its arguments
-        if m.ustack.size == 0 then .error "unify: stack underflow" m
+        if ustack.size == 0 then ⟨ustack, uheap, k, "unify: stack underflow"⟩
         else
-          let p := m.ustack.back!
-          if m.store[p + 1]! != data + 1 then
-            .error s!"unify failure at 0x{hex pos}: the expression is not an application of term {data}" m
+          let p := ustack.back!
+          if store[p + 1]! != data + 1 then
+            ⟨ustack, uheap, k, s!"unify failure at 0x{hex pos}: the expression is not an application of term {data}"⟩
           else
-            let m := { m with ustack := m.ustack.pop }
-            let m := pushArgs p c.termNargs[data]! m
-            let m := if op == 0x31 then { m with uheap := m.uheap.push (2 * p + 1) } else m
-            unify c mode next m
+            let ustack := pushArgs store p c.termNargs[data]! ustack.pop
+            unify c mode store hs next k ustack (if op == 0x31 then uheap.push (2 * p + 1) else uheap)
       else if op == 0x33 then
         -- UDummy s: the top is a bound variable of sort s, new with respect to the
         -- arguments and the earlier dummies
-        if mode != .defn then .error "unify: UDummy outside a definition" m
-        else if m.ustack.size == 0 then .error "unify: stack underflow" m
+        if mode != .defn then ⟨ustack, uheap, k, "unify: UDummy outside a definition"⟩
+        else if ustack.size == 0 then ⟨ustack, uheap, k, "unify: stack underflow"⟩
         else
-          let p := m.ustack.back!
-          let ty := m.store[p]!
-          if m.store[p + 1]! != 0 || !Ty.bound ty || Ty.sort ty != data then
-            .error s!"unify failure at 0x{hex pos}: a bound variable of sort {data} is expected for a dummy" m
-          else if !dummyIsFresh m (Ty.deps ty) 0 then
-            .error s!"unify failure at 0x{hex pos}: the variable taken for a dummy also occurs in the arguments or is another dummy" m
-          else unify c mode next { m with ustack := m.ustack.pop, uheap := m.uheap.push (2 * p) }
+          let p := ustack.back!
+          let ty := store[p]!
+          if store[p + 1]! != 0 || !Ty.bound ty || Ty.sort ty != data then
+            ⟨ustack, uheap, k, s!"unify failure at 0x{hex pos}: a bound variable of sort {data} is expected for a dummy"⟩
+          else if !dummyIsFresh store uheap (Ty.deps ty) 0 then
+            ⟨ustack, uheap, k, s!"unify failure at 0x{hex pos}: the variable taken for a dummy also occurs in the arguments or is another dummy"⟩
+          else unify c mode store hs next k ustack.pop (uheap.push (2 * p))
       else if op == 0x36 then
         -- UHyp: the next hypothesis becomes the target
         match mode with
+        | .defn => ⟨ustack, uheap, k, "unify: UHyp in a definition"⟩
         | .thm =>
-          if m.stack.size == 0 then .error "unify: a subproof is missing on the stack" m
+          if k == 0 then ⟨ustack, uheap, k, "unify: a subproof is missing on the stack"⟩
           else
-            let el := m.stack.back!
-            if El.tag el != 1 then .error "unify: expected the proof of a hypothesis on the stack" m
-            else unify c mode next { m with stack := m.stack.pop, ustack := m.ustack.push (el >>> 2) }
+            let el := hs[k - 1]!
+            if El.tag el != 1 then ⟨ustack, uheap, k, "unify: expected the proof of a hypothesis on the stack"⟩
+            else unify c mode store hs next (k - 1) (ustack.push (el >>> 2)) uheap
         | .thmEnd =>
-          if m.ustack.size != 0 then .error "unify: the statement is not matched completely before the next hypothesis" m
-          else if m.hyps.size == 0 then .error "unify failure: the statement has more hypotheses than the proof declares" m
-          else unify c mode next { m with hyps := m.hyps.pop, ustack := m.ustack.push m.hyps.back! }
-        | .defn => .error "unify: UHyp in a definition" m
+          if ustack.size != 0 then
+            ⟨ustack, uheap, k, "unify: the statement is not matched completely before the next hypothesis"⟩
+          else if k == 0 then
+            ⟨ustack, uheap, k, "unify failure: the statement has more hypotheses than the proof declares"⟩
+          else unify c mode store hs next (k - 1) (ustack.push (hs[k - 1]! >>> 2)) uheap
       else if op == 0 then
-        if m.ustack.size != 0 then .error "unify: the stream ends before the expression is matched completely" m
-        else if mode == .thmEnd && m.hyps.size != 0 then
-          .error "unify failure: the proof declares more hypotheses than the statement has" m
-        else .ok () m
-      else .error s!"unify: unknown command 0x{hex op.toNat}" m
+        if ustack.size != 0 then
+          ⟨ustack, uheap, k, "unify: the stream ends before the expression is matched completely"⟩
+        else if mode == .thmEnd && k != 0 then
+          ⟨ustack, uheap, k, "unify failure: the proof declares more hypotheses than the statement has"⟩
+        else ⟨ustack, uheap, k, ""⟩
+      else ⟨ustack, uheap, k, s!"unify: unknown command 0x{hex op.toNat}"⟩
 
-/-- Starts a unification with `target` on the unify stack. -/
-@[inline] def unifyWith (c : Ctx) (mode : UMode) (pos target : Nat) : M Unit := do
-  modify fun m => { m with ustack := (m.ustack.shrink 0).push target }
-  unify c mode pos
+/-- Unifies `target` with the stream at `pos`, the unify heap of the machine being the
+substitution. Hypotheses are the declared ones. -/
+def unifyWith (c : Ctx) (mode : UMode) (pos target : Nat) : M Unit := fun m =>
+  let ustack := m.ustack
+  let uheap := m.uheap
+  let m := { m with ustack := #[], uheap := #[] }
+  match unify c mode m.store m.hyps pos m.hyps.size ((ustack.shrink 0).push target) uheap with
+  | ⟨ustack, uheap, _, error⟩ =>
+    let m := { m with ustack, uheap }
+    if error.isEmpty then .ok () m else .error error m
 
-/-! ### Proof commands (section 6, "Proof commands") -/
+/-! ### The arguments of `Term` and `Thm`
 
-/-- The union of the sets in `bdeps` selected by the bits of `mask`. -/
-partial def selectDeps (bdeps : Array Nat) (mask : Nat) (j acc : Nat) : Nat :=
-  if j ≥ bdeps.size then acc
-  else selectDeps bdeps mask (j + 1) (if (mask >>> j) &&& 1 != 0 then acc ||| bdeps[j]! else acc)
+The `n` arguments are the stack elements from `base` on; their binders are the type
+words of `Ctx.argTys` from `off` on. Bit `k` of the dependencies of a binder stands for
+the `k`-th bound binder of the same term or theorem. -/
 
-/-- The arguments of `Term t`, taken from the stack at `base`: checks each against its
-binder, appends it to the node being built, and returns the dependencies of the term.
+/-- The union of the variables of the arguments given for the bound binders before
+binder `i`: those that `mask` selects if `sel`, those that it does not select otherwise.
+`j` runs over the binders and `k` counts the bound ones. -/
+partial def boundDeps (c : Ctx) (store stack : Array Nat) (off base i mask : Nat) (sel : Bool)
+    (j k acc : Nat) : Nat :=
+  if j == i then acc
+  else if Ty.bound c.argTys[off + j]! then
+    let acc :=
+      if Ty.hasBit mask k == sel then Ty.union acc (Ty.deps store[stack[base + j]! >>> 2]!) else acc
+    boundDeps c store stack off base i mask sel (j + 1) (k + 1) acc
+  else boundDeps c store stack off base i mask sel (j + 1) k acc
 
-In a theorem these are the variables of the term: the union over all arguments
-(`HasVar` in `mm0.mm0`). In a definition they are its free variables (`Free`): a bound
-argument contributes nothing here, and a regular argument contributes its own minus the
-bound arguments its binder is declared to depend on. -/
-partial def termArgs (c : Ctx) (isDef : Bool) (off base n i acc : Nat) : M Nat := fun m =>
-  if i == n then .ok acc m
+/-- Checks the arguments against their binders. The result is `0` if they all fit, and
+`kind + 8 * i` for the first argument `i` that does not:
+
+1. it is not an expression;
+2. its sort is not the sort of the binder;
+3. the binder is a bound variable and the argument is not one;
+
+and, for the substitution of a theorem (`dv`), the disjoint variable conditions
+(`safe_subst` in `mm0.lean`):
+
+4. the variable given for a bound binder occurs in an earlier argument;
+5. the expression given for a regular binder contains a variable given for a bound
+   binder that it is not declared to depend on.
+
+`seen` is the union of the dependencies of the arguments before `i`. -/
+partial def argsFault (c : Ctx) (dv : Bool) (store stack : Array Nat) (off base n i seen : Nat) : Nat :=
+  if i == n then 0
   else
-    let el := m.stack[base + i]!
-    if El.tag el != 0 then .error s!"Term: argument {i} is not an expression" m
+    let el := stack[base + i]!
+    if El.tag el != 0 then 1 + 8 * i
     else
-      let e := el >>> 2
-      let ety := m.store[e]!
+      let ety := store[el >>> 2]!
       let target := c.argTys[off + i]!
-      if Ty.sort ety != Ty.sort target then .error s!"Term: argument {i} has sort {Ty.sort ety}, the binder has sort {Ty.sort target}" m
-      else if Ty.bound target && !Ty.bound ety then .error s!"Term: argument {i} must be a bound variable" m
-      else
-        let d := Ty.deps ety
-        let m := { m with store := m.store.push e }
-        if !isDef then termArgs c isDef off base n (i + 1) (acc ||| d) m
-        else if Ty.bound target then
-          termArgs c isDef off base n (i + 1) acc { m with bdeps := m.bdeps.push d }
-        else
-          let bound := selectDeps m.bdeps (Ty.deps target) 0 0
-          termArgs c isDef off base n (i + 1) (acc ||| (d &&& (Ty.depsMask ^^^ bound))) m
-
-/-- `Term t`: `S, e1, ..., en --> S, (t e1 ... en)`; with `save`, also onto the heap. -/
-def stepTerm (c : Ctx) (isDef : Bool) (t : Nat) (save : Bool) : M Unit := do
-  let m ← get
-  if t ≥ m.numTerms then fail s!"Term: term {t} is not declared before this statement"
-  let n := c.termNargs[t]!
-  if m.stack.size < n then fail "stack underflow"
-  let base := m.stack.size - n
-  let node := m.store.size
-  if node ≥ maxStore then fail "this proof needs more than 2^30 store slots"
-  modify fun m => { m with store := (m.store.push 0).push (t + 1), bdeps := m.bdeps.shrink 0 }
-  let acc ← termArgs c isDef c.termArgs[t]! base n 0 0
-  -- in a definition, the bound arguments that the return type depends on are free
-  let m ← get
-  let acc := if isDef then selectDeps m.bdeps c.termRetDeps[t]! 0 acc else acc
-  modify fun m =>
-    { m with store := m.store.set! node (c.termRet[t]! ||| acc),
-             stack := (m.stack.shrink base).push (El.expr node) }
-  if save then pushHeap (El.expr node)
-
-/-- The substitution of `Thm T`, taken from the stack at `base`: checks each expression
-against its binder and the disjoint variable conditions (`safe_subst` in `mm0.lean`), and
-loads the unify heap. `seen` is the union of the dependencies of the arguments so far. -/
-partial def thmArgs (c : Ctx) (off base n i seen : Nat) : M Unit := fun m =>
-  if i == n then .ok () m
-  else
-    let el := m.stack[base + i]!
-    if El.tag el != 0 then .error s!"Thm: argument {i} is not an expression" m
-    else
-      let e := el >>> 2
-      let ety := m.store[e]!
-      let target := c.argTys[off + i]!
-      if Ty.sort ety != Ty.sort target then .error s!"Thm: argument {i} has sort {Ty.sort ety}, the binder has sort {Ty.sort target}" m
-      else if Ty.bound target && !Ty.bound ety then .error s!"Thm: argument {i} must be a bound variable" m
+      if !Ty.sameSort ety target then 2 + 8 * i
+      else if Ty.bound target && !Ty.bound ety then 3 + 8 * i
+      else if !dv then argsFault c dv store stack off base n (i + 1) seen
       else
         let d := Ty.deps ety
         if Ty.bound target then
-          -- a bound variable must be new with respect to every earlier argument
-          if d &&& seen != 0 then
-            .error s!"disjoint variable violation: the variable given for the bound argument {i} occurs in an earlier argument" m
-          else
-            thmArgs c off base n (i + 1) (seen ||| d)
-              { m with uheap := m.uheap.push (2 * e), bdeps := m.bdeps.push d }
-        else
-          -- a regular argument must avoid the bound variables it is not declared to
-          -- depend on
-          let allowed := selectDeps m.bdeps (Ty.deps target) 0 0
-          let all := selectDeps m.bdeps Ty.depsMask 0 0
-          if d &&& (all &&& (Ty.depsMask ^^^ allowed)) != 0 then
-            .error s!"disjoint variable violation: argument {i} contains a bound variable it is not declared to depend on" m
-          else thmArgs c off base n (i + 1) (seen ||| d) { m with uheap := m.uheap.push (2 * e) }
+          if Ty.meets d seen then 4 + 8 * i
+          else argsFault c dv store stack off base n (i + 1) (Ty.union seen d)
+        else if Ty.meets d (boundDeps c store stack off base i (Ty.deps target) false 0 0 0) then 5 + 8 * i
+        else argsFault c dv store stack off base n (i + 1) (Ty.union seen d)
 
-/-- `Thm T`: `S, ⊢ h1, ..., ⊢ hm, e1, ..., en, e --> S, ⊢ e`. -/
-def stepThm (c : Ctx) (isDef : Bool) (t : Nat) (save : Bool) : M Unit := do
-  if isDef then fail "Thm in a definition"
-  if t ≥ (← get).numThms then fail s!"Thm: theorem {t} is not declared before this statement"
-  let e ← popExpr
-  let n := c.thmNargs[t]!
-  let m ← get
-  if m.stack.size < n then fail "stack underflow"
-  let base := m.stack.size - n
-  modify fun m => { m with uheap := m.uheap.shrink 0, bdeps := m.bdeps.shrink 0 }
-  thmArgs c c.thmArgs[t]! base n 0 0
-  modify fun m => { m with stack := m.stack.shrink base }
-  unifyWith c .thm c.thmUnify[t]! e
-  push (El.proof e)
-  if save then pushHeap (El.proof e)
+/-- The message for a result of `argsFault` that is not `0`. -/
+def faultMessage (c : Ctx) (cmd : String) (store stack : Array Nat) (off base fault : Nat) : String :=
+  let i := fault / 8
+  match fault % 8 with
+  | 1 => s!"{cmd}: argument {i} is not an expression"
+  | 2 => s!"{cmd}: argument {i} has sort {Ty.sort store[stack[base + i]! >>> 2]!}, the binder has sort {Ty.sort c.argTys[off + i]!}"
+  | 3 => s!"{cmd}: argument {i} must be a bound variable"
+  | 4 => s!"disjoint variable violation: the variable given for the bound argument {i} occurs in an earlier argument"
+  | _ => s!"disjoint variable violation: argument {i} contains a bound variable it is not declared to depend on"
+
+/-- The variables of the arguments: the dependencies of a term in a theorem (`HasVar` in
+`mm0.mm0`). -/
+partial def argsVars (store stack : Array Nat) (base n i acc : Nat) : Nat :=
+  if i == n then acc
+  else argsVars store stack base n (i + 1) (Ty.union acc (Ty.deps store[stack[base + i]! >>> 2]!))
+
+/-- The free variables of the arguments: the dependencies of a term in a definition
+(`Free` in `mm0.mm0`), but for the bound arguments that its return type depends on. A
+bound argument contributes nothing here, and a regular argument contributes its own
+variables minus the bound arguments its binder is declared to depend on. -/
+partial def argsFree (c : Ctx) (store stack : Array Nat) (off base n i acc : Nat) : Nat :=
+  if i == n then acc
+  else
+    let target := c.argTys[off + i]!
+    if Ty.bound target then argsFree c store stack off base n (i + 1) acc
+    else
+      let d := Ty.deps store[stack[base + i]! >>> 2]!
+      let bound := boundDeps c store stack off base i (Ty.deps target) true 0 0 0
+      argsFree c store stack off base n (i + 1) (Ty.union acc (Ty.minus d bound))
+
+/-- Appends the argument nodes to the store: the arguments of a new application node. -/
+partial def argsToStore (stack : Array Nat) (base n i : Nat) (store : Array Nat) : Array Nat :=
+  if i == n then store
+  else argsToStore stack base n (i + 1) (store.push (stack[base + i]! >>> 2))
+
+/-- Appends the argument nodes to the unify heap: the substitution of a theorem. -/
+partial def argsToUheap (stack : Array Nat) (base n i : Nat) (uheap : Array Nat) : Array Nat :=
+  if i == n then uheap
+  else argsToUheap stack base n (i + 1) (uheap.push (2 * (stack[base + i]! >>> 2)))
+
+/-! ### Proof commands (section 6, "Proof commands") -/
 
 /-- Pushes `a_n =?= b_n, ..., a_1 =?= b_1` for the arguments of two applications. -/
 partial def pushCong (e1 e2 n : Nat) : M Unit := fun m =>
@@ -395,7 +437,8 @@ partial def loadUheap (p n i : Nat) (m : Machine) : Machine :=
   if i == n then m
   else loadUheap p n (i + 1) { m with uheap := m.uheap.push (2 * m.store[p + 2 + i]!) }
 
-/-- The commands other than `Term`, `Thm` and `Ref`. -/
+/-- The commands other than `Term`, `Thm` and `Ref`. They are rare, and written on the
+whole machine. -/
 def stepOther (c : Ctx) (isDef : Bool) (op : UInt8) (data : Nat) : M Unit := do
   if op == 0x13 then
     -- Dummy s: a new bound variable, on the stack and on the heap
@@ -403,7 +446,7 @@ def stepOther (c : Ctx) (isDef : Bool) (op : UInt8) (data : Nat) : M Unit := do
     if data ≥ m.numSorts then fail s!"Dummy: sort {data} is not declared before this statement"
     if c.sortMods[data]! &&& 10 != 0 then fail s!"Dummy: sort {data} is strict or free"
     if m.nextBv ≥ 55 then fail "more than 55 bound variables"
-    let e ← allocVar (Ty.mk data true (1 <<< m.nextBv))
+    let e ← allocVar (Ty.mk data true (Ty.bit m.nextBv))
     modify fun m => { m with nextBv := m.nextBv + 1 }
     push (El.expr e)
     pushHeap (El.expr e)
@@ -413,7 +456,7 @@ def stepOther (c : Ctx) (isDef : Bool) (op : UInt8) (data : Nat) : M Unit := do
     let e ← popExpr
     let m ← get
     if c.sortMods[Ty.sort m.store[e]!]! &&& 4 == 0 then fail "Hyp: the hypothesis does not have a provable sort"
-    modify fun m => { m with hyps := m.hyps.push e }
+    modify fun m => { m with hyps := m.hyps.push (El.proof e) }
     pushHeap (El.proof e)
   else if op == 0x17 then
     -- Conv: `S, e1, ⊢ e2 --> S, ⊢ e1, e1 =?= e2`
@@ -473,41 +516,119 @@ def stepOther (c : Ctx) (isDef : Bool) (op : UInt8) (data : Nat) : M Unit := do
   else
     fail s!"unknown proof command 0x{hex op.toNat}"
 
-/-- `Ref i`: push heap entry `i`; a saved conversion `e1 = e2` instead discharges the
-obligation `e1 =?= e2` on top of the stack. -/
-@[inline] def stepRef (i : Nat) : M Unit := fun m =>
-  if i ≥ m.heap.size then .error s!"Ref: heap entry {i} does not exist" m
-  else
-    let el := m.heap[i]!
-    if El.tag el != 2 then .ok () { m with stack := m.stack.push el }
-    else if m.stack.size == 0 then .error "stack underflow" m
-    else if m.stack.back! != el + 1 then
-      .error "Ref: the saved conversion is not the obligation on the stack" m
-    else .ok () { m with stack := m.stack.pop }
+/-- The machine with the arrays of the loop put back into it, at the command at `pos`. -/
+@[inline] def Machine.put (m : Machine) (pos : Nat) (store stack heap ustack uheap : Array Nat) : Machine :=
+  { m with store, stack, heap, ustack, uheap, pos }
+
+/-- Leaves the loop with an error at the command at `pos`. -/
+@[noinline] def halt (msg : String) (m : Machine) (pos : Nat) (store stack heap ustack uheap : Array Nat) :
+    EStateM.Result String Machine Unit :=
+  .error msg (m.put pos store stack heap ustack uheap)
+
+mutual
 
 /-- Runs the proof commands in `[pos, stop)`; the last byte of the range is the `END`. -/
 partial def runProof (c : Ctx) (isDef : Bool) (pos stop : Nat) : M Unit := fun m =>
-  let m := { m with pos := pos }
-  if pos ≥ stop then .error "the proof does not end with END" m
+  -- the arrays are taken out of the machine, which must not keep a second reference
+  let store := m.store
+  let stack := m.stack
+  let heap := m.heap
+  let ustack := m.ustack
+  let uheap := m.uheap
+  run c isDef stop pos store stack heap ustack uheap
+    { m with store := #[], stack := #[], heap := #[], ustack := #[], uheap := #[] }
+
+/-- The loop of `runProof`: the command at `pos`, then the rest. `m` is the machine
+without the five arrays. -/
+partial def run (c : Ctx) (isDef : Bool) (stop pos : Nat) (store stack heap ustack uheap : Array Nat)
+    (m : Machine) : EStateM.Result String Machine Unit :=
+  if pos ≥ stop then halt "the proof does not end with END" m pos store stack heap ustack uheap
   else
     let b := c.bytes
     let first := b.get! pos
     let next := pos + cmdSize first
     let op := first &&& 0x3F
     if op == 0 then
-      if pos + 1 == stop then .ok () m else .error "END before the end of the statement's proof" m
-    else if next > stop then .error "the proof does not end with END: this command crosses its end" m
+      if pos + 1 == stop then .ok () (m.put pos store stack heap ustack uheap)
+      else halt "END before the end of the statement's proof" m pos store stack heap ustack uheap
+    else if next > stop then
+      halt "the proof does not end with END: this command crosses its end" m pos store stack heap ustack uheap
     else
       let data := cmdData b pos first
-      let result :=
-        if op == 0x12 then stepRef data m
-        else if op == 0x10 then stepTerm c isDef data false m
-        else if op == 0x11 then stepTerm c isDef data true m
-        else if op == 0x14 then stepThm c isDef data false m
-        else if op == 0x15 then stepThm c isDef data true m
-        else stepOther c isDef op data m
-      match result with
-      | .ok () m => runProof c isDef next stop m
-      | .error e m => .error e m
+      if op == 0x12 then
+        -- Ref i: push heap entry `i`; a saved conversion `e1 = e2` instead discharges the
+        -- obligation `e1 =?= e2` on top of the stack
+        if data ≥ heap.size then
+          halt s!"Ref: heap entry {data} does not exist" m pos store stack heap ustack uheap
+        else
+          let el := heap[data]!
+          if El.tag el != 2 then run c isDef stop next store (stack.push el) heap ustack uheap m
+          else if stack.size == 0 then halt "stack underflow" m pos store stack heap ustack uheap
+          else if stack.back! != el + 1 then
+            halt "Ref: the saved conversion is not the obligation on the stack" m pos store stack heap ustack uheap
+          else run c isDef stop next store stack.pop heap ustack uheap m
+      else if op == 0x10 || op == 0x11 then
+        -- Term t: `S, e1, ..., en --> S, (t e1 ... en)`; with save, also onto the heap
+        if data ≥ m.numTerms then
+          halt s!"Term: term {data} is not declared before this statement" m pos store stack heap ustack uheap
+        else
+          let n := c.termNargs[data]!
+          if stack.size < n then halt "stack underflow" m pos store stack heap ustack uheap
+          else
+            let base := stack.size - n
+            let off := c.termArgs[data]!
+            let fault := argsFault c false store stack off base n 0 0
+            let node := store.size
+            if fault != 0 then
+              halt (faultMessage c "Term" store stack off base fault) m pos store stack heap ustack uheap
+            else if node ≥ maxStore then
+              halt "this proof needs more than 2^30 store slots" m pos store stack heap ustack uheap
+            else
+              -- in a definition, the bound arguments that the return type depends on are free
+              let deps :=
+                if isDef then
+                  boundDeps c store stack off base n c.termRetDeps[data]! true 0 0
+                    (argsFree c store stack off base n 0 0)
+                else argsVars store stack base n 0 0
+              let store := (store.push (Ty.withDeps c.termRet[data]! deps)).push (data + 1)
+              let store := argsToStore stack base n 0 store
+              let el := El.expr node
+              let stack := (stack.shrink base).push el
+              run c isDef stop next store stack (if op == 0x11 then heap.push el else heap) ustack uheap m
+      else if op == 0x14 || op == 0x15 then
+        -- Thm T: `S, ⊢ h1, ..., ⊢ hm, e1, ..., en, e --> S, ⊢ e`; with save, also onto the heap
+        if isDef then halt "Thm in a definition" m pos store stack heap ustack uheap
+        else if data ≥ m.numThms then
+          halt s!"Thm: theorem {data} is not declared before this statement" m pos store stack heap ustack uheap
+        else if stack.size == 0 then halt "stack underflow" m pos store stack heap ustack uheap
+        else
+          let top := stack.back!
+          let n := c.thmNargs[data]!
+          if El.tag top != 0 then halt "expected an expression on the stack" m pos store stack heap ustack uheap
+          else if stack.size - 1 < n then halt "stack underflow" m pos store stack heap ustack uheap
+          else
+            let base := stack.size - 1 - n
+            let off := c.thmArgs[data]!
+            let fault := argsFault c true store stack off base n 0 0
+            if fault != 0 then
+              halt (faultMessage c "Thm" store stack off base fault) m pos store stack heap ustack uheap
+            else
+              -- the substitution, then the conclusion and the hypotheses against the
+              -- statement of the theorem; the subproofs are below the arguments
+              let e := top >>> 2
+              let uheap := argsToUheap stack base n 0 (uheap.shrink 0)
+              match unify c .thm store stack c.thmUnify[data]! base ((ustack.shrink 0).push e) uheap with
+              | ⟨ustack, uheap, rest, error⟩ =>
+                if !error.isEmpty then halt error m pos store stack heap ustack uheap
+                else
+                  let el := El.proof e
+                  let stack := (stack.shrink rest).push el
+                  run c isDef stop next store stack (if op == 0x15 then heap.push el else heap) ustack uheap m
+      else
+        match stepOther c isDef op data (m.put pos store stack heap ustack uheap) with
+        | .ok () m => runProof c isDef next stop m
+        | .error e m => .error e m
+
+end
 
 end Whitehead.Verify

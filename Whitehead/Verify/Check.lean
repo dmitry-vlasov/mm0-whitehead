@@ -100,7 +100,7 @@ def checkTerm (c : Ctx) (f : MmbFile) (s : Stmt) (isLocal : Bool) : M Unit := do
     let ty := m.store[e]!
     if Ty.sort ty != ret.sort then
       fail s!"the value has sort {Ty.sort ty}, the definition has result sort {ret.sort}"
-    if Ty.deps ty &&& (Ty.depsMask ^^^ ret.deps.toNat) != 0 then
+    if Ty.minus (Ty.deps ty) ret.deps.toNat != 0 then
       fail "the value has free variables that the return type does not declare"
     modify (argsAsUheap entry.numArgs)
     unifyWith c .defn (f.termUnifyPos t) e
