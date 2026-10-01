@@ -205,8 +205,9 @@ partial def buildPropProofs (p : Nat) (proofs : Array Proof) : ProverM Unit := d
   match hyp.parent with
   | some _ => buildExpProofs h added
   | none =>
-    -- `ruBuildRootProofs`: the driver takes them from here
-    modify fun env => { env with rootProofs := env.rootProofs ++ added }
+    -- `ruBuildRootProofs`: the driver takes them from here. (A node of the forward
+    -- front has no parent either; its proofs go nowhere.)
+    if h == 0 then modify fun env => { env with rootProofs := env.rootProofs ++ added }
 
 /-- `ruBuildExpProofs`: the new proofs `proofs` of expression node `h` are joined with
 those of its siblings. -/
@@ -242,6 +243,7 @@ partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
   | .top _ _ _ sub => add acc sub
   | .stmt _ _ _ child => allBindings child acc
   | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
+  | .forward _ _ sub _ _ => add acc sub
 
 /-- `ruMakeProofTree`: the proof that a substitution proof tree stands for.
 
@@ -260,6 +262,7 @@ where
   go (all : Subst) : Proof → ProofTree
     | .top _ _ premise _ => .hyp premise
     | .stmt _ _ _ child => go all child
+    | .forward _ _ _ tree _ => tree.subst all
     | .prop p _ children _ =>
       let prop := env.props[p]!
       let a := env.db.asserts[prop.assertion]!

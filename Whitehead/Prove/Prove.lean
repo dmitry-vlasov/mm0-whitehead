@@ -21,6 +21,8 @@ open Whitehead.Mmb
 inductive Decision where
   /-- Expand these assertion nodes, each with the restriction of its premises, if any. -/
   | expand (items : Array (Nat × Option (Array Only)))
+  /-- `RuTacticExpandForward`: advance the forward front by one wave. -/
+  | forward
   | done
 
 /-- `RuProverTactic`. A strategy has a state of its own and reads the tree; it does not
@@ -30,6 +32,8 @@ structure Strategy (σ : Type) where
   root : Option Only
   init : σ
   step : Env → σ → Decision × σ
+  /-- The strategy uses the forward front: it is seeded before the root is expanded. -/
+  forward : Bool := false
 
 /-- `ruBreadthFirstTactic` (`tactics/breadth_first.flow`): all leaves, round by round.
 This is the fair strategy of the completeness theorem. -/
@@ -39,6 +43,26 @@ def breadthFirst : Strategy Unit where
   step env _ :=
     let leafs := env.leafs.filter fun p => !env.props[p]!.expanded
     if leafs.isEmpty then (.done, ()) else (.expand (leafs.map fun p => (p, none)), ())
+
+/-- `ruForwardTactic`: one wave of the forward front after another. A proof is found
+when a fact proves the goal. -/
+def forwardOnly : Strategy Unit where
+  root := none
+  init := ()
+  step _ _ := (.forward, ())
+  forward := true
+
+/-- Both directions in turn: a round of the backward tree, then a wave of the forward
+front. The two meet in the joins of `Forward.lean`. (In Russell such a strategy is put
+together in the tactic language, from `bfs` and `forward`.) -/
+def bidirectional : Strategy Bool where
+  root := none
+  init := false
+  step env forwardTurn :=
+    let leafs := env.leafs.filter fun p => !env.props[p]!.expanded
+    if forwardTurn || leafs.isEmpty then (.forward, false)
+    else (.expand (leafs.map fun p => (p, none)), true)
+  forward := true
 
 /-- The state of `oracle`: the assertion nodes expanded in the last round, each with the
 step of the known proof that it stands for. -/
@@ -204,6 +228,8 @@ structure Limits where
   maxProps : Nat := 1000000
   /-- The time allowed, in milliseconds. -/
   maxMs : Nat := 1000000000
+  /-- The largest number of facts in the forward front (`forward-search-size`). -/
+  maxFacts : Nat := 512
 
 structure Result where
   ending : Ending
@@ -232,6 +258,19 @@ def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String 
     | .error msg => rejections := rejections.push (msg, tree)
   return (none, rejections, { env with rootProofs := #[] })
 
+/-- `ruRunForwardWave`: every fact of the front is expanded, and the facts that this
+makes are the new front. Nothing is done if the front is empty or has reached its limit.
+Returns whether there is a front to go on with. -/
+def forwardWave (env : Env) (limits : Limits) (start : Nat) : IO (Env × Bool) := do
+  let some fwd := env.forward | return (env, false)
+  if fwd.front.isEmpty || fwd.count ≥ limits.maxFacts then return (env, false)
+  let front := fwd.front
+  let mut env := { env with forward := some { fwd with front := #[] } }
+  for f in front do
+    if env.props.size > limits.maxProps || (← IO.monoMsNow) - start > limits.maxMs then break
+    env := ((expandForward f limits.maxFacts).run env).2
+  return (env, !((env.forward.map (·.front.isEmpty)).getD true))
+
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
 reaches the root is given to `accept`, which says whether it counts. -/
 partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
@@ -247,18 +286,48 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     if allowed then
       if let .ok body := accept env (.hyp k) #[] then
         return { ending := .proved, proof := some (.hyp k), body := some body, answer := some env.task.goal, env }
-  let (_, env) := (expandHyp 0 strategy.root).run env
   let mut env := env
-  let mut st := strategy.init
   let mut rejected := 0
   let mut rejection := ""
   let mut rejectedProof : Option ProofTree := none
+  -- the forward front is seeded before the root is expanded (`ruSeedForwardFront`), and
+  -- a seed may be the goal
+  if strategy.forward then
+    env := ((seedForward limits.maxFacts).run env).2
+    let (found, r, env') := takeRootProofs accept env
+    env := env'
+    rejected := rejected + r.size
+    if let some (tree, body, answer) := found then
+      return { ending := .proved, proof := some tree, body := some body, answer := some answer, rejected, env }
+  env := ((expandHyp 0 strategy.root).run env).2
+  let mut st := strategy.init
+  -- a wave that leaves no front lets the strategy decide once more; two in a row end
+  -- the search (`ruProveRec`)
+  let mut dry := false
   while true do
     let (decision, st') := strategy.step env st
     st := st'
     match decision with
     | .done => return { ending := .exhausted, rejected, rejection, rejectedProof, env }
+    | .forward =>
+      let (env', more) ← forwardWave env limits start
+      env := env'
+      let (found, r, env') := takeRootProofs accept env
+      env := env'
+      rejected := rejected + r.size
+      if let some (msg, tree) := r.back? then
+        rejection := msg
+        rejectedProof := some tree
+      if let some (tree, body, answer) := found then
+        return { ending := .proved, proof := some tree, body := some body, answer := some answer,
+                 rejected, rejection, rejectedProof, env }
+      if env.props.size > limits.maxProps || (← IO.monoMsNow) - start > limits.maxMs then
+        return { ending := .limit, rejected, rejection, rejectedProof, env }
+      if more then dry := false
+      else if !dry then dry := true
+      else return { ending := .exhausted, rejected, rejection, rejectedProof, env }
     | .expand items =>
+      dry := false
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue

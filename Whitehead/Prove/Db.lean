@@ -161,6 +161,24 @@ def index (db : Db) : Index Nat :=
 
 end Db
 
+/-- The hypotheses of all assertions, for the forward direction: those of the
+assertions with one hypothesis (`RuProverForward.hypIndex`), and of the others every
+hypothesis that is not a bare variable, with its position (`multiHyp`). A bare variable
+unifies with every fact, so it is not a trigger; it is filled from the front. Each is
+ranked by the number of its assertion. -/
+structure HypIndexes where
+  single : Index Nat := {}
+  multi : Index (Nat × Nat) := {}
+  deriving Inhabited
+
+/-- `ruInitProverForwardProved`, the part that does not depend on the task. -/
+def Db.hypIndexes (db : Db) : HypIndexes :=
+  db.asserts.foldl (init := {}) fun ix a =>
+    if a.hyps.size == 1 then { ix with single := ix.single.insert a.hyps[0]! a.id a.id }
+    else
+      (Array.range a.hyps.size).foldl (init := ix) fun ix i =>
+        if a.hyps[i]!.isVar then ix else { ix with multi := ix.multi.insert a.hyps[i]! (a.id, i) a.id }
+
 /-! ### The statement to be proved -/
 
 /-- A variable of the statement to be proved, as the constant that stands for it. -/

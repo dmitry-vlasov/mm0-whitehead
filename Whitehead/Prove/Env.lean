@@ -27,6 +27,22 @@ structure Counters where
   disjoint : Nat := 0
   inconsistent : Nat := 0
   duplicate : Nat := 0
+  /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
+  root. -/
+  facts : Nat := 0
+  joins : Nat := 0
+  deriving Inhabited
+
+/-- `RuProverForward`: the forward front. Its facts are expression nodes of the tree. -/
+structure Forward where
+  /-- The facts by their expression. -/
+  index : Index Nat := {}
+  /-- The facts that have not been expanded forward yet. -/
+  front : Array Nat := #[]
+  /-- The expressions of the facts, up to the names of their variables. -/
+  seen : Std.HashSet Exp := {}
+  /-- The number of facts. -/
+  count : Nat := 0
   deriving Inhabited
 
 structure Env where
@@ -44,6 +60,14 @@ structure Env where
   round (`Env.dropExpanded`): taking each one out when it is expanded would be a pass
   over the whole list for every node. -/
   leafs : Array Nat := #[]
+  /-- The hypotheses of the assertions, for the forward direction. -/
+  hypIndexes : HypIndexes := {}
+  /-- The forward front, once a strategy has asked for it. -/
+  forward : Option Forward := none
+  /-- `RuProverEnv.backwardFront`: the subgoals of the backward tree by their expression,
+  filled while there is a forward front, so that a new fact can find the subgoals it
+  proves. -/
+  backwardFront : Index Nat := {}
   /-- The number of the next fresh variable. -/
   fresh : Nat := freshBase
   /-- The proofs that reached the root and have not been taken by the driver yet. -/
@@ -59,8 +83,8 @@ def Env.dropExpanded (env : Env) : Env :=
 abbrev ProverM := StateM Env
 
 /-- `ruInitProverEnv`, up to the first expansion of the root. -/
-def Env.init (db : Db) (assertions : Index Nat) (task : Task) : Env :=
-  { db, task, assertions,
+def Env.init (db : Db) (assertions : Index Nat) (task : Task) (hypIndexes : HypIndexes := {}) : Env :=
+  { db, task, assertions, hypIndexes,
     premises := (Array.range task.premises.size).foldl (init := {}) fun ix k => ix.insert task.premises[k]! k,
     hyps := #[{ ind := 0, expr := task.goal, parent := none }] }
 

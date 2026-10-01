@@ -5,10 +5,12 @@ The upward pass: a port of `russell-flow/src/ru/prover/core/expand.flow`, and of
 `expandHyp` gives an expression node one assertion node for every assertion whose
 conclusion unifies with it. `expandProp` gives an assertion node its expression nodes,
 the premises of the assertion under the unifier; each is matched with the premises of
-the task and expanded at once. Not ported: the forward closure and the forward front
-that `ruExpandProp` also consults.
+the task and expanded at once. If there is a forward front, each new subgoal is also
+recorded for the facts to come, and joined with the facts that are there
+(`Forward.lean`). Not ported: the forward closure (`forward_closure.flow`) and the
+positional join of the completeness test, which `ruExpandProp` also has.
 -/
-import Whitehead.Prove.Proofs
+import Whitehead.Prove.Forward
 
 namespace Whitehead.Prove
 
@@ -51,6 +53,10 @@ def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
                  hyps := env.hyps.modify h fun hyp => { hyp with children := hyp.children.push p },
                  counters := { env.counters with props := env.counters.props + 1 } }
 
+/-- How many facts of the forward front a new subgoal is joined with (`fwd_cap` in
+`ruExpandProp`). The facts that come later find the subgoal themselves. -/
+def joinCap : Nat := 4
+
 /-- `ruExpandProp`. `only` restricts, for each premise of the assertion, what its
 expression node may use. -/
 def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := do
@@ -89,6 +95,21 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
         let proof := Proof.top h unif.expr unif.data unif.sub
         modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof } }
         addProof p proof
+      -- the join with the forward front: the subgoal is recorded for the facts to come
+      -- (`backwardFront`), and the facts that unify with it prove it. As in Russell, the
+      -- four facts with the smallest proofs are taken.
+      if (← get).forward.isSome && restriction.isNone then
+        modify fun env => { env with backwardFront := env.backwardFront.insert ex h }
+        let env ← get
+        let found := ((env.forward.map (·.index.unify ex)).getD #[]).map (·.data)
+        let size (f : Nat) : Nat := (env.hyps[f]!.factProof.map (·.size)).getD 0
+        let nearest := (found.qsort fun a b => size a < size b || size a == size b && a < b).extract 0 joinCap
+        for f in nearest do
+          if let some (proof, _) ← graft f h ex then
+            modify fun env =>
+              { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof },
+                         counters := { env.counters with joins := env.counters.joins + 1 } }
+            addProof p proof
       expandHyp h restriction
 
 /-- `ruProveProp`: expands an assertion node, and carries the proofs that this gives it

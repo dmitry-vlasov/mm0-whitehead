@@ -101,6 +101,9 @@ structure SearchOptions where
   last : Nat := 1000000000
   /-- Only every `every`-th theorem of the range: a sample. -/
   every : Nat := 1
+  /-- `"bfs"`: the backward tree, breadth first; `"forward"`: the forward front alone;
+  `"both"`: a round of the one and a wave of the other in turn. -/
+  strategy : String := "bfs"
   limits : Limits := {}
   /-- Report every theorem. -/
   verbose : Bool := false
@@ -116,14 +119,19 @@ structure SearchRow where
   ms : Nat
   props : Nat
   rejected : Nat
+  /-- Facts of the forward front, and joins of a fact with a subgoal or the goal. -/
+  facts : Nat := 0
+  joins : Nat := 0
 
-/-- Searches for a proof of every theorem of `db.file` in the range, breadth first, each
-from the assertions before it. Returns a row per theorem and the new proof bodies. -/
+/-- Searches for a proof of every theorem of `db.file` in the range, each from the
+assertions before it, with the strategy of `opts`. Returns a row per theorem and the new
+proof bodies. -/
 def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
     IO (Array SearchRow × Array (Option ByteArray)) := do
   let f := db.file
   let vc := Verify.Ctx.ofFile f
   let index := db.index
+  let hypIndexes := if opts.strategy == "bfs" then {} else db.hypIndexes
   let mut rows : Array SearchRow := #[]
   let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
   for i in [0:f.stmts.size] do
@@ -136,13 +144,18 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
       | .ok (some skel) => skel.size
       | _ => 0
     let start ← IO.monoMsNow
-    let result ← search vc (Env.init db index (db.task s.index)) breadthFirst opts.limits
+    let env := Env.init db index (db.task s.index) hypIndexes
+    let result ←
+      if opts.strategy == "forward" then search vc env forwardOnly opts.limits
+      else if opts.strategy == "both" then search vc env bidirectional opts.limits
+      else search vc env breadthFirst opts.limits
     let ms := (← IO.monoMsNow) - start
     let steps := (result.proof.map (·.size)).getD 0
     if let some body := result.body then bodies := bodies.set! i (some body)
     let row : SearchRow :=
       { thm := s.index, name := f.thmName s.index, ending := result.ending, steps, knownSteps := known, ms,
-        props := result.env.props.size, rejected := result.rejected }
+        props := result.env.props.size, rejected := result.rejected,
+        facts := result.env.counters.facts, joins := result.env.counters.joins }
     rows := rows.push row
     if opts.verbose then
       let what := match result.ending with
@@ -150,7 +163,8 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
         | .exhausted => "nothing left to expand"
         | .limit => "limit reached"
       log s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
-        {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}"
+        {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}\
+        {if opts.strategy == "bfs" then "" else s!", {row.facts} facts, {row.joins} joins"}"
   return (rows, bodies)
 
 end Whitehead.Prove

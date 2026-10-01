@@ -139,6 +139,45 @@ def engineTests : TestM Unit := do
   checkEq "answer: another answer when less may be used"
     ((earlier.answer.map (db.showExp · #["ph", "ps"])).getD "none", (earlier.proof.map (proofText db)).getD "none")
     ("(wi (wi (wn ps) (wn ph)) ps)", "(mpd (a1i h0) ax_3)")
+  -- the forward direction: from the premises and the assertions without hypotheses
+  let hypIndexes := db.hypIndexes
+  let forwardEnv (name : String) : Env := Env.init db index (db.task (id name)) hypIndexes
+  let a1iForward ← search vc (forwardEnv "a1i") forwardOnly limits
+  checkEq "forward: a1i from its premise and ax_1, by ax_mp"
+    ((a1iForward.proof.map (proofText db)).getD "none") "(ax_mp h0 ax_1)"
+  check "forward: the proof came from a fact that is the goal"
+    (a1iForward.env.counters.facts > 0 && a1iForward.env.counters.joins == 1)
+  let mpcomForward ← search vc (forwardEnv "mpcom") forwardOnly limits
+  check "forward: a front that reaches its limit of facts ends the search"
+    (mpcomForward.ending == .exhausted && mpcomForward.proof.isNone)
+  let mpcomBoth ← search vc (forwardEnv "mpcom") bidirectional limits
+  checkEq "both directions: mpcom" ((mpcomBoth.proof.map (proofText db)).getD "none") "(com12 id)"
+  let (bothRows, bothBodies) ← searchAll db { strategy := "both", limits := { maxProps := 3000, maxMs := 20000 } }
+    fun _ => pure ()
+  let bothProved := (bothRows.filter (·.ending == .proved)).size
+  check "both directions: most of the fixture is proved" (bothProved ≥ 13) s!"{bothProved} of {bothRows.size}"
+  check "both directions: no proof is rejected by the verifier" (bothRows.all (·.rejected == 0))
+  match MmbFile.parse (file.withBodies bothBodies) with
+  | .error e => check "both directions: the file with the proofs found is read" false e.msg
+  | .ok f2 =>
+    match Whitehead.Verify.checkProofs f2 with
+    | .ok () => check "both directions: the file with the proofs found is valid" true
+    | .error e => check "both directions: the file with the proofs found is valid" false (e.format f2 "both")
+  -- a fact is known up to the names of its variables, and each use has its own
+  let v (k : Nat) : Exp := Exp.ofVar (Node.var (freshBase + k) (Ty.mk 0 false))
+  let imp (a b : Exp) : Exp := Exp.mkApp 0 (Ty.mk 0 false) #[a, b]
+  check "forward: two facts that differ in the names of variables are one"
+    (factKey (imp (v 3) (imp (v 9) (v 3))) == factKey (imp (v 5) (imp (v 2) (v 5))))
+  check "forward: but not if the variables are placed differently"
+    (factKey (imp (v 3) (imp (v 9) (v 3))) != factKey (imp (v 3) (imp (v 9) (v 9))))
+  let seeded := ((seedForward 100).run (forwardEnv "id")).2
+  let schematic := (seeded.forward.map (·.front)).getD #[] |>.filter fun f => seeded.hyps[f]!.expr.hasVars
+  check "forward: the axioms without hypotheses are seeded as facts with variables" (schematic.size ≥ 3)
+  let ((copy1, _, _), afterOne) := (freshCopy schematic[0]!).run seeded
+  let ((copy2, _, _), _) := (freshCopy schematic[0]!).run afterOne
+  check "forward: two uses of a fact share no variable"
+    (copy1.vars.all fun x => !copy2.vars.contains x)
+  check "forward: and are the same fact" (factKey copy1 == factKey copy2)
   -- the condition on bound variables, on an application of ax_5 in the task of alimi,
   -- whose constants are x, ph and ps, the last two depending on x
   let env := Env.init db index task

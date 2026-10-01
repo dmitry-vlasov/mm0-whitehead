@@ -12,8 +12,10 @@ def usage : String :=
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
                                  reconstruct the proofs of a file from the assertions they use
-  prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--verbose]
-                                 prove the theorems of a file from scratch, breadth first
+  prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
+               [--strategy bfs|forward|both] [--max-facts N] [--verbose]
+                                 prove the theorems of a file from scratch: backward breadth first,
+                                 forward from the premises, or both in turn
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
@@ -294,7 +296,9 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       every := max 1 (numOption args "--every" 1),
-      limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000 },
+      strategy := (strOption args "--strategy").getD "bfs",
+      limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
+                  maxFacts := numOption args "--max-facts" 512 },
       verbose := args.contains "--verbose" }
   let start ← IO.monoMsNow
   let (rows, bodies) ← Prove.searchAll db opts logLine
