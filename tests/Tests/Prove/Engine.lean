@@ -99,8 +99,9 @@ def engineTests : TestM Unit := do
   checkEq "search: what is provable without the variable needs no dummy" (← found "dummy") "id"
   let alrimi ← prove "alrimi"
   checkEq "search: alrimi" ((alrimi.proof.map (proofText db)).getD "none") "(syl (alimi h0) ax_5)"
-  check "search: a proof whose condition on a bound variable fails late is dropped by the verifier"
-    (alrimi.rejected == 1) s!"{alrimi.rejected} rejected"
+  check "search: a proof whose condition on a bound variable fails late stops there, not at the verifier"
+    (alrimi.rejected == 0 && alrimi.env.counters.disjoint > 0)
+    s!"{alrimi.rejected} rejected, {alrimi.env.counters.disjoint} stopped"
   let con1 ← search vc (Env.init db index (db.task (id "con1"))) breadthFirst { maxProps := 2000 }
   check "search: the limit ends a search" (con1.ending == .limit && con1.proof.isNone)
   -- every proof found is a proof: the bodies make a valid file
@@ -150,16 +151,29 @@ def engineTests : TestM Unit := do
     { assertion := ax5.id, parent := 0, sub := {},
       outer := { map := (({} : Std.HashMap Nat SubExp).insert 0 (SubExp.mk' ax5.vars[0]! x)).insert 1
                   (SubExp.mk' ax5.vars[1]! ph) } }
-  check "disjoint: x given for x, and ph, which depends on x: violated"
-    (!checkDisjs env (applied cx cph) {})
-  check "disjoint: x, and a variable that may still become anything: open"
-    (checkDisjs env (applied cx mvar) {})
-  check "disjoint: the same, once the variable is ph: violated"
-    (!checkDisjs env (applied cx mvar) (Subst.single mvar.nodes[0]! cph))
-  check "disjoint: a new name, and ph: open, the name can be a dummy"
-    (checkDisjs env (applied name' cph) {})
-  check "disjoint: a new name, and an expression with that name: violated"
-    (!checkDisjs env (applied name' (Exp.mkApp 2 (Ty.mk 0 false) #[name', cph])) {})
+  -- the outcome as text: violated, or the number of conditions left open
+  let conds (prop : PropNode) (theta : Subst) (visible : List Nat := []) : String :=
+    match openConds env prop theta (Std.HashSet.ofList visible) #[] with
+    | none => "violated"
+    | some cs => s!"{cs.size} open"
+  checkEq "disjoint: x given for x, and ph, which depends on x" (conds (applied cx cph) {}) "violated"
+  checkEq "disjoint: x, and a variable that may still become anything"
+    (conds (applied cx mvar) {}) "1 open"
+  checkEq "disjoint: the same, once the variable is ph"
+    (conds (applied cx mvar) (Subst.single mvar.nodes[0]! cph)) "violated"
+  -- in the task of alrimi the constant 1 is ph, which does not depend on x
+  let envR := Env.init db index (db.task (id "alrimi"))
+  let closedPh : Exp := ⟨#[Node.const 1 (Ty.mk 0 false)]⟩
+  checkEq "disjoint: x, and a variable that has become an expression without x: settled"
+    (match openConds envR (applied cx mvar) (Subst.single mvar.nodes[0]! closedPh) {} #[] with
+      | none => "violated"
+      | some cs => s!"{cs.size} open") "0 open"
+  checkEq "disjoint: a new name that nothing above can replace, and ph: settled, it becomes a dummy"
+    (conds (applied name' cph) {}) "0 open"
+  checkEq "disjoint: a new name that a node above can still replace, and ph"
+    (conds (applied name' cph) {} [freshBase + 1]) "1 open"
+  checkEq "disjoint: a new name, and an expression with that name"
+    (conds (applied name' (Exp.mkApp 2 (Ty.mk 0 false) #[name', cph])) {}) "violated"
   -- leftover names
   let n (k : Nat) : Exp := Exp.ofVar (Node.var (freshBase + k) (Ty.mk 1 true))
   let wal (x p : Exp) : Exp := Exp.mkApp 2 (Ty.mk 0 false) #[x, p]

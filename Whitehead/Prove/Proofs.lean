@@ -17,19 +17,23 @@ What differs from Russell:
   rely on the substitution of a node to contain those of its subtree (see
   `makeProofTree`). And proofs of one assertion node have the same key (`ruProofSubKey`)
   when they agree on what is visible above, also if they differ below. Keeping one of
-  them is right when either can stand for the other in every proof above, which is so
-  unless a condition on bound variables is still open in one of them: that one may be
-  rejected at the root where the other would not. So only proofs that apply no
-  assertion with such conditions are kept once per key; the others are all kept.
+  them is right when either can stand for the other in every proof above: when they
+  also have the same open conditions on bound variables. So the open conditions are
+  part of the key.
 - The product of the proofs is always walked tuple by tuple. Russell switches to
   `ruUnifySubsProd` (`unify/prod.flow`) for products of 64 tuples and more; it gives the
   same proofs faster and is not ported yet.
-- `ruCheckDisjs` is given the substitution `theta` of the new proof, which binds
-  variables of the tree, and looks up in it the variables of the assertion's disjoint
-  pairs, which `theta` does not bind (they are in `outer`); so it lets everything pass,
-  and Russell finds a violated restriction only when the finished proof is verified.
-  Here the two binders of a pair are looked up through `outer` and then `theta`, and a
-  proof is discarded if the pair is violated whatever the remaining variables become
+- Conditions on bound variables. `ruCheckDisjs` is given the substitution `theta` of
+  the new proof, which binds variables of the tree, and looks up in it the variables of
+  the assertion's disjoint pairs, which `theta` does not bind (they are in `outer`); so
+  it lets everything pass, and Russell finds a violated restriction only when the
+  finished proof is verified. Here the two binders of a pair are looked up through
+  `outer` and then `theta`, and the pair is judged (`judge`): a proof is discarded if
+  the pair is violated whatever the remaining variables become; a pair that can still
+  go either way is kept with the proof as an open condition, is carried up with it, and
+  is judged again under every substitution it meets (`openConds`). So a proof that is
+  doomed stops where it becomes doomed, and what reaches the root satisfies every
+  condition, up to the choice of what is put for the variables that are left
   (`docs/DESIGN.md`, "Where MM0 differs").
 -/
 import Whitehead.Prove.Env
@@ -47,14 +51,68 @@ def occursFor (task : Task) (x : Nat) (e : Exp) : Bool :=
     e.nodes.any fun n =>
       Node.isConst n && (task.consts[Node.appId n - Node.constBase]!.names.contains k)
 
-/-- The disjoint variable conditions of the assertion of `prop`, under `theta`: `false`
-if one of them is violated for certain. -/
-def checkDisjs (env : Env) (prop : PropNode) (theta : Subst) : Bool :=
+/-- What can be said of a condition "the name `x` does not occur in `e`", given the
+variables that the nodes above can still replace (`visible`). -/
+inductive Verdict where
+  /-- It is false, whatever the remaining variables become. -/
+  | violated
+  /-- It is true, whatever they become. -/
+  | settled
+  /-- It can still go either way. -/
+  | pending (c : Cond)
+
+/-- Judges a condition. `x` must be a name: one node.
+
+- A bound variable of the task: violated if it occurs in `e`, or a regular variable of
+  the task that depends on it does; settled if `e` has no variable left; else open.
+- A variable of the tree: violated if it occurs in `e`. Otherwise, if no node above can
+  replace it, it will become a dummy of its own (or be merged with another name that no
+  step needs it to differ from, `mergeNames`), which occurs in nothing: settled. If a
+  node above can still replace it, open. -/
+def judge (task : Task) (visible : Std.HashSet Nat) (x e : Exp) : Verdict :=
+  if x.size != 1 then .settled
+  else
+    let n := x.nodes[0]!
+    if occursFor task n e then .violated
+    else if Node.isVar n then
+      if visible.contains (Node.varId n) then .pending ⟨n, e⟩ else .settled
+    else if e.hasVars then .pending ⟨n, e⟩
+    else .settled
+
+/-- The conditions on bound variables of a proof of assertion node `prop` with
+substitution `theta` and the proofs `row` of its premises: those of its own assertion,
+and those that the proofs of the premises still carry, all under `theta`. `none` if one
+is violated; otherwise those that are still open. `visible` are the variables that
+remain in the expression of the node above. -/
+def openConds (env : Env) (prop : PropNode) (theta : Subst) (visible : Std.HashSet Nat)
+    (row : Array Proof) : Option (Array Cond) := Id.run do
   let a := env.db.asserts[prop.assertion]!
-  a.disjs.all fun (x, v) =>
-    let ex := theta.apply (prop.outer.lookupD a.vars[x]!)
-    let ev := theta.apply (prop.outer.lookupD a.vars[v]!)
-    !(ex.size == 1 && occursFor env.task ex.nodes[0]! ev)
+  let mut out : Array Cond := #[]
+  for (x, v) in a.disjs do
+    match judge env.task visible (theta.apply (prop.outer.lookupD a.vars[x]!))
+        (theta.apply (prop.outer.lookupD a.vars[v]!)) with
+    | .violated => return none
+    | .settled => pure ()
+    | .pending c => if !out.contains c then out := out.push c
+  for child in row do
+    for c in child.conds do
+      match judge env.task visible (theta.apply ⟨#[c.name]⟩) (theta.apply c.expr) with
+      | .violated => return none
+      | .settled => pure ()
+      | .pending c => if !out.contains c then out := out.push c
+  return some out
+
+/-- The open conditions as a part of the key of a proof: in an order that does not
+depend on how they were found. -/
+def condsKey (conds : Array Cond) : Array Nat :=
+  if conds.isEmpty then #[]
+  else
+    let rows := conds.map fun c => (#[c.name, c.expr.size] ++ c.expr.nodes)
+    let less (a b : Array Nat) : Bool := Id.run do
+      for i in [0:min a.size b.size] do
+        if a[i]! != b[i]! then return a[i]! < b[i]!
+      return a.size < b.size
+    (rows.qsort less).foldl (init := #[conds.size]) (· ++ ·)
 
 /-- `check_consistent` of `ruAddProof`: each child's expression under `theta` must be an
 instance of the premise of the assertion it stands for, by one substitution for all
@@ -78,7 +136,7 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
   let sets : Array (Array Proof) := prop.children.map fun c =>
     if c == hypProof.node then #[hypProof] else env.hyps[c]!.proofs
   if sets.any (·.isEmpty) then return
-  let hasPairs := !env.db.asserts[prop.assertion]!.disjs.isEmpty
+  let hypExpr := env.hyps[prop.parent]!.expr
   let mut counters := env.counters
   let mut proofs := prop.proofs
   let mut keys := prop.keys
@@ -94,20 +152,19 @@ def addProof (p : Nat) (hypProof : Proof) : ProverM Unit := do
       match prop.sub.compose s with
       | none => counters := { counters with notUnified := counters.notUnified + 1 }
       | some theta =>
-        if !checkDisjs env prop theta then
-          counters := { counters with disjoint := counters.disjoint + 1 }
-        else if !consistent env prop theta row then
-          counters := { counters with inconsistent := counters.inconsistent + 1 }
-        else
-          -- one proof for each substitution, but only among proofs that no condition on
-          -- bound variables can still spoil: see the note at the head of this file
-          let conds := hasPairs || row.any (·.conds)
-          let key := theta.key
-          if !conds && keys.contains key then
-            counters := { counters with duplicate := counters.duplicate + 1 }
+        match openConds env prop theta (theta.apply hypExpr).varIds row with
+        | none => counters := { counters with disjoint := counters.disjoint + 1 }
+        | some conds =>
+          if !consistent env prop theta row then
+            counters := { counters with inconsistent := counters.inconsistent + 1 }
           else
-            keys := keys.insert key
-            proofs := proofs.push (.prop p theta row conds)
+            -- one proof for each substitution with its open conditions
+            let key := theta.key ++ condsKey conds
+            if keys.contains key then
+              counters := { counters with duplicate := counters.duplicate + 1 }
+            else
+              keys := keys.insert key
+              proofs := proofs.push (.prop p theta row conds)
     -- the next tuple
     let mut i := sets.size
     more := false

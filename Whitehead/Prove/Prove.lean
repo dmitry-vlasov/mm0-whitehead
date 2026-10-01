@@ -140,8 +140,10 @@ def mergeNames (db : Db) (tree : ProofTree) : ProofTree := Id.run do
 
 /-- The proof with its leftover regular variables replaced, in up to `tries` ways: the
 `k`-th way takes the `k`-th choice for every variable (the last one, if there are
-fewer). Names that are left stay: they become dummies. -/
-def closings (env : Env) (tree : ProofTree) (tries : Nat := 4) : Array ProofTree := Id.run do
+fewer). Names that are left stay: they become dummies. `conds` are the conditions on
+bound variables that are still open in the proof; a choice must keep them true. -/
+def closings (env : Env) (tree : ProofTree) (conds : Array Cond := #[]) (tries : Nat := 4) :
+    Array ProofTree := Id.run do
   let regular := tree.vars.filter fun v => !Ty.isName (Node.ty v)
   if regular.isEmpty then return #[fit tree]
   let choices := (Array.range regular.size).map fun i => closers env (Node.ty regular[i]!) (env.fresh + i)
@@ -152,7 +154,13 @@ def closings (env : Env) (tree : ProofTree) (tries : Nat := 4) : Array ProofTree
     let map : Std.HashMap Nat SubExp := (Array.range regular.size).foldl (init := {}) fun m i =>
       let c := choices[i]!
       m.insert (Node.varId regular[i]!) (SubExp.mk' regular[i]! c[min k (c.size - 1)]!)
-    out := out.push (fit (tree.subst { map }))
+    -- a choice that makes an open condition false is left out
+    let closing : Subst := { map }
+    let fails := conds.any fun c =>
+      match judge env.task {} (closing.apply ⟨#[c.name]⟩) (closing.apply c.expr) with
+      | .violated => true
+      | _ => false
+    if !fails then out := out.push (fit (tree.subst closing))
   return out
 where
   /-- Names are merged only when there would be too many bound variables otherwise. -/
@@ -163,10 +171,11 @@ where
 
 /-- The proof body for a proof that reached the root, if the verifier accepts one of
 its closings; otherwise what the verifier said about the last one. -/
-def accept (vc : Verify.Ctx) (env : Env) (tree : ProofTree) : Except String ByteArray := Id.run do
+def accept (vc : Verify.Ctx) (env : Env) (tree : ProofTree) (conds : Array Cond) :
+    Except String ByteArray := Id.run do
   let db := env.db
   let mut why := "a variable is left in the proof that nothing can be put for"
-  for closed in closings env tree do
+  for closed in closings env tree conds do
     match emitBody db env.task closed with
     | none => why := "a variable that is not a name is left in the proof"
     | some cmds =>
@@ -178,7 +187,7 @@ def accept (vc : Verify.Ctx) (env : Env) (tree : ProofTree) : Except String Byte
 
 /-- Accepts every proof, with no proof body: for a task that is not a theorem of the
 file, such as a goal with variables to be found. -/
-def acceptAny (_ : Env) (_ : ProofTree) : Except String ByteArray := .ok ByteArray.empty
+def acceptAny (_ : Env) (_ : ProofTree) (_ : Array Cond) : Except String ByteArray := .ok ByteArray.empty
 
 /-- Why a search ended. -/
 inductive Ending where
@@ -212,19 +221,19 @@ structure Result where
   env : Env
 
 /-- The proofs that have reached the root: the first that the verifier accepts. -/
-def takeRootProofs (accept : Env → ProofTree → Except String ByteArray) (env : Env) :
+def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env) :
     Option (ProofTree × ByteArray × Exp) × Array (String × ProofTree) × Env := Id.run do
   let mut rejections := #[]
   for proof in env.rootProofs do
     let tree := makeProofTree env proof
-    match accept env tree with
+    match accept env tree proof.conds with
     | .ok body => return (some (tree, body, proof.expr), rejections, { env with rootProofs := #[] })
     | .error msg => rejections := rejections.push (msg, tree)
   return (none, rejections, { env with rootProofs := #[] })
 
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
 reaches the root is given to `accept`, which says whether it counts. -/
-partial def searchWith {σ : Type} (accept : Env → ProofTree → Except String ByteArray) (env : Env)
+partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
     (strategy : Strategy σ) (limits : Limits := {}) : IO Result := do
   let start ← IO.monoMsNow
   -- a goal that is one of the premises needs no assertion; Russell's root is not matched
@@ -235,7 +244,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Except String
       | some (.assertion _) => false
       | none => true
     if allowed then
-      if let .ok body := accept env (.hyp k) then
+      if let .ok body := accept env (.hyp k) #[] then
         return { ending := .proved, proof := some (.hyp k), body := some body, answer := some env.task.goal, env }
   let (_, env) := (expandHyp 0 strategy.root).run env
   let mut env := env

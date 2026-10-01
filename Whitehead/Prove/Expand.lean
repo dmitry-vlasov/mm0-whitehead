@@ -62,9 +62,15 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
   let prop := env.props[p]!
   let a := env.db.asserts[prop.assertion]!
   if a.hyps.isEmpty then
-    modify fun env => { env with props := env.props.modify p fun prop =>
-      { prop with proofs := prop.proofs.push (.prop p prop.sub #[] !a.disjs.isEmpty),
-                  keys := prop.keys.insert prop.sub.key } }
+    -- an assertion without premises is a proof at once, if its conditions on bound
+    -- variables allow it
+    let visible := (prop.sub.apply env.hyps[prop.parent]!.expr).varIds
+    match openConds env prop prop.sub visible #[] with
+    | none => modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
+    | some conds =>
+      modify fun env => { env with props := env.props.modify p fun prop =>
+        { prop with proofs := prop.proofs.push (.prop p prop.sub #[] conds),
+                    keys := prop.keys.insert (prop.sub.key ++ condsKey conds) } }
   else
     for i in [0:a.hyps.size] do
       let ex := prop.outer.apply (prop.sub.apply a.hyps[i]!)

@@ -11,6 +11,14 @@ import Whitehead.Prove.Db
 
 namespace Whitehead.Prove
 
+/-- A condition on a bound variable that a proof still depends on: the name `name` (a
+node: the constant for a bound variable of the task, or a variable) must not occur in
+`expr`. It is open as long as a variable in it can still be replaced. -/
+structure Cond where
+  name : Nat
+  expr : Exp
+  deriving BEq, Inhabited
+
 /-- `RuProverProof`: a substitution proof tree. -/
 inductive Proof where
   /-- `RuProverProofTop`: the expression node `node` is premise `premise` under `sub`;
@@ -20,9 +28,9 @@ inductive Proof where
   one of its assertion nodes. -/
   | stmt (node : Nat) (expr : Exp) (sub : Subst) (child : Proof)
   /-- `RuProverProofProp`: the assertion node `node` with a proof for each premise.
-  `conds` says that this step or one below it applies an assertion that has conditions
-  on bound variables. -/
-  | prop (node : Nat) (sub : Subst) (children : Array Proof) (conds : Bool)
+  `conds` are the conditions on bound variables, of this step and of those below it,
+  that are still open under `sub`. -/
+  | prop (node : Nat) (sub : Subst) (children : Array Proof) (conds : Array Cond)
   deriving Inhabited
 
 namespace Proof
@@ -43,9 +51,9 @@ def expr : Proof → Exp
   | .stmt _ e _ _ => e
   | .prop _ _ _ _ => default
 
-/-- Does the proof apply an assertion with conditions on bound variables? -/
-def conds : Proof → Bool
-  | .top _ _ _ _ => false
+/-- The conditions on bound variables that are still open in a proof. -/
+def conds : Proof → Array Cond
+  | .top _ _ _ _ => #[]
   | .stmt _ _ _ child => child.conds
   | .prop _ _ _ c => c
 
