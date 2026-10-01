@@ -1,0 +1,3 @@
+provable sort wff;
+sort set;
+term t: wff;

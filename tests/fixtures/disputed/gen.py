@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Hand-assembles the tiny .mmb files in this directory.
 
-Each file isolates one point where the written spec (mm0.md, mm0-c/mmb.md, the
-Lean formalization mm0-lean/mm0/mm0.lean) and the reference verifier mm0-c may
-disagree. They are evidence for the open questions in docs/MMB-NOTES.md, and
-they become differential-test cases once the questions are answered.
+Each file isolates one point where the sources disagree: the formal semantics
+(mm0.md, examples/mm0.mm0, mm0-lean/mm0/*.lean), the written format description
+(mm0-c/mmb.md), the reference implementation mm0-rs, and mm0-c. They are the
+evidence for section 9 of docs/MMB-NOTES.md, which says what each implementation
+does with each file and what our verifier must do.
 
-Usage: ./gen.py            (rewrites the .mmb files next to this script)
+Usage: ./gen.py            (rewrites the .mmb and .mm0 files next to this script)
 
 To try one by hand:
+    mm0-rs compile bound_arg_vars.mmb ; echo $?
     mm0-c bound_arg_vars.mmb < bound_arg_vars.mm0 ; echo $?
 """
 
@@ -66,8 +68,10 @@ def align8(buf):
 
 
 def assemble(sorts, terms, thms, stmts):
-    """sorts: [mods]; terms: [(args, ret, is_def, unify|None)];
-    thms: [(args, unify)]; stmts: [bytes] in declaration order."""
+    """sorts: [mods]; terms: [(args, ret, is_def, unify|None[, table sort])];
+    thms: [(args, unify)]; stmts: [bytes] in declaration order. The optional
+    fifth element of a term overrides the sort stored in the term table, which
+    otherwise is the sort of `ret`."""
     header_len = 40
     out = align8(bytes(header_len) + bytes(sorts))
     p_terms = len(out)
@@ -76,9 +80,10 @@ def assemble(sorts, terms, thms, stmts):
     out += bytes(8 * len(thms))
 
     term_rows, thm_rows = [], []
-    for args, ret, is_def, unify in terms:
+    for args, ret, is_def, unify, *table_sort in terms:
         out = align8(out)
-        term_rows.append((len(args), (ret >> 56) & 0x7F | (0x80 if is_def else 0), len(out)))
+        sort = table_sort[0] if table_sort else (ret >> 56) & 0x7F
+        term_rows.append((len(args), sort | (0x80 if is_def else 0), len(out)))
         out += b''.join(struct.pack('<Q', a) for a in args + [ret])
         if is_def:
             out += unify
@@ -186,6 +191,20 @@ FILES = {
                               extra_terms=[([], reg(0), False, None)],
                               extra_stmts=[stmt(STMT_LOCAL_DEF)]),
                    TRIV_MM0.replace('theorem triv', 'axiom ax')),
+    # An axiom whose proof stream builds `tru` while its unify stream, which is
+    # what a later `Thm` uses, says `fls`.
+    'axiom_body_mismatch': (
+        assemble([PROVABLE],
+                 [([], reg(0), False, None), ([], reg(0), False, None)],
+                 [([], cmd(UTERM, 1) + END)],
+                 [stmt(STMT_SORT), stmt(STMT_TERM), stmt(STMT_TERM),
+                  stmt(STMT_AXIOM, cmd(TERM, 0) + END)]),
+        'provable sort wff;\nterm tru: wff;\nterm fls: wff;\naxiom ax: $ fls $;\n'),
+    # A term whose table entry says sort 1 while its return type says sort 0.
+    'ret_sort_mismatch': (
+        assemble([PROVABLE, 0], [([], reg(0), False, None, 1)], [],
+                 [stmt(STMT_SORT), stmt(STMT_SORT), stmt(STMT_TERM)]),
+        'provable sort wff;\nsort set;\nterm t: wff;\n'),
 }
 
 if __name__ == '__main__':

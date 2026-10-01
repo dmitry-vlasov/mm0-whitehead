@@ -1,25 +1,29 @@
 # The `.mmb` format — our notes
 
-This is our own description of the MMB binary proof format, written from the spec and
-from reading the reference verifier. It is meant to be enough to re-implement the reader
-without opening either. Where the spec and the reference verifier disagree, both are
-recorded and the point is listed under [Disagreements and open questions](#9-disagreements-and-open-questions);
-none of them has been resolved by guessing.
+This is our own description of the MMB binary proof format, written from the format
+description, the formal semantics, and the reference implementation `mm0-rs`. It is meant
+to be enough to re-implement the reader without opening any of them.
 
-Sources, all in the local checkout `/home/dmitry/tools/mm0` at commit `0d414c0b`:
+Sources, all in the local checkout `/home/dmitry/tools/mm0` at commit `0d414c0b`, in
+order of authority:
 
-| Short name | File | Role |
-| ---------- | ---- | ---- |
-| **spec** | `mm0-c/mmb.md` | the written format description |
-| **mm0-c** | `mm0-c/{types,verifier_types,verifier,parser,index}.c` | the reference verifier; our oracle |
-| mm0.md | `mm0.md` | the `.mm0` language and the informal semantics |
-| mm0.mm0 | `examples/mm0.mm0` | the formal specification of MM0, written in MM0 |
-| mm0.lean | `mm0-lean/mm0/mm0.lean`, `mm0b.lean` | the Lean 3 formalization (semantics; MMB machine) |
-| mm0-rs | `mm0-rs/src/mmb/export.rs`, `mm0-rs/src/elab/verify.rs` | the writer of every `.mmb` we have; a second kernel |
-| mm0-js | `mm0-js/src/machine.ts` | a third verifier, a port of mm0-c |
+| Short name | Files | Role |
+| ---------- | ----- | ---- |
+| **formal semantics** | `mm0.md`; `examples/mm0.mm0`; `mm0-lean/mm0/mm0.lean`, `mm0b.lean` | the final judge of what is valid: the language, the formal specification written in MM0, its Lean mirror, and the Lean model of the MMB stack machine |
+| **mm0-rs** | `mm0-rs/components/mm0b_parser` (reader), `mm0-rs/src/mmb/import.rs`, `mm0-rs/src/elab/verify.rs` (kernel), `mm0-rs/src/mmb/export.rs` (writer) | the reference implementation; it also wrote every `.mmb` we have |
+| **mmb.md** | `mm0-c/mmb.md` | the written format description |
+| mm0-c | `mm0-c/*.c` | another verifier; **not** a reference (section 9) |
 
-Everything in sections 1–7 was checked by decoding real files with a throwaway script
-written from these notes alone: `mm0-js/test/hol.mmb`, `mm0-js/test/peano.mmb`,
+Where the formal semantics say nothing — file layout, framing, the index — `mm0-rs` is
+followed. Where they disagree with an implementation, they win. Section 9 lists every
+point on which the sources differ, what each implementation does, and what we do.
+
+`mm0-rs` is run as `mm0-rs compile file.mmb`, which reads the file and checks every
+declaration with its kernel (exit code 0 or 1). It has no command that checks a `.mmb`
+against a `.mm0` file.
+
+Sections 1–7 were checked by decoding real files with a throwaway script written from
+these notes alone: `mm0-js/test/hol.mmb`, `mm0-js/test/peano.mmb`,
 `examples/tutorial/03-mm1-intro.mmb`, `tests/mmb/pass/*.mmb`. Every statement, proof
 stream and unify stream in them decodes and every length field matches.
 
@@ -36,20 +40,31 @@ stream and unify stream in them decodes and every length field matches.
 
 ## 2. File layout
 
-A file is a header followed by sections reached through pointers. The format fixes only
-the header position; the order below is what `mm0-rs` writes and what every file we have
-looks like.
+A file is a header followed by sections reached through pointers, in this order:
 
 ```
 0x00  header (40 bytes)
 0x28  sort table            num_sorts bytes, then zero padding to a multiple of 8
       term table            num_terms entries of 8 bytes          <- p_terms
       theorem table         num_thms entries of 8 bytes           <- p_thms
-      term data, thm data   one 8-aligned block per entry          <- each entry's p_data
+      term data, thm data   one block per entry                    <- each entry's p_data
       proof stream          byte-aligned, ends with END           <- p_proof
       index payload         names, variable names, ...
       index                 the index header itself comes last     <- p_index
 ```
+
+`mm0-rs` requires this order when it opens a file (`Header::check`):
+
+- `40 + num_sorts <= p_terms`;
+- `p_terms + 4 * num_terms <= p_thms` and `p_thms + 4 * num_thms <= p_proof` (the factor
+  is 4 in the code although an entry is 8 bytes; the tables are bounds-checked exactly
+  afterwards);
+- `p_proof <= file size`;
+- `p_index = 0`, or `p_proof < p_index <= file size`.
+
+It also requires `p_terms`, `p_thms`, `p_index` and the pointer of the `Name` index table
+to be multiples of 8, because it reads those tables in place through 8-aligned types. The
+`p_data` blocks need no alignment (the writer aligns them to 8 anyway).
 
 ### Header
 
@@ -78,7 +93,7 @@ One byte per sort, a bit set of modifiers:
 | 1 | 2 | `strict` — no bound or dummy variable may have this sort |
 | 2 | 4 | `provable` — hypotheses and conclusions must have a sort with this bit |
 | 3 | 8 | `free` — no dummy variable may have this sort |
-| 4–7 | | unused, `0` |
+| 4–7 | | unused, `0`; `mm0-rs` rejects a sort that has any of them set |
 
 ### The `arg` word
 
@@ -121,9 +136,9 @@ Term data at `p_data`:
 | 8 | `ret` | the return type as an `arg` word; its sort equals the entry's `sort` |
 | varies | `unify` | **only if the def bit is set**: a unify stream, starting right after `ret` |
 
-Note that `unify` is not a pointer: the spec's table says `p32<unify_stream>`, but the
-stream is stored inline, immediately after `ret` (mm0-c reads it at `&args[num_args+1]`,
-and so do the real files).
+`unify` is not a pointer: the table in mmb.md says `p32<unify_stream>`, but the stream is
+stored inline, immediately after `ret`. Both implementations read it there, and so do the
+real files.
 
 ### Theorem table
 
@@ -136,9 +151,8 @@ and so do the real files).
 | 4 | 4 | `p_data` | `p32` to the theorem data |
 
 Theorem data at `p_data`: `8 * num_args` bytes of `arg` words, then a unify stream
-inline (again not a pointer, whatever the spec's table says). There is no return type and
-**no hypothesis count**: the number of hypotheses is the number of `UHyp` commands in the
-unify stream.
+inline. There is no return type and **no hypothesis count**: the number of hypotheses is
+the number of `UHyp` commands in the unify stream.
 
 ## 3. Commands
 
@@ -154,15 +168,17 @@ of `data`:
 | `11xxxxxx` | 5 | the next 4 bytes, little-endian |
 
 The encoding is not canonical: `data = 0` may be written in any width. Writers use the
-shortest; a reader must accept all.
-
-**Read-ahead rule.** mm0-c refuses to decode a command unless 5 bytes are readable at
-its position, whatever its actual size (`cmd + 5 <= end of file`). So the last command
-of the file must be followed by at least 4 more bytes. A file without an index therefore
-ends with 4 bytes of padding after the final `END`.
+shortest; a reader must accept all. A command must lie inside the file; nothing more is
+required to read it.
 
 In the low bit of the opcodes that come in pairs (`0x10/0x11`, `0x14/0x15`,
 `0x30/0x31`), `1` means "and save".
+
+**Padding for writers.** mmb.md asks that every `END` start at least 5 bytes before the
+end of the file "to permit read-ahead", so a file without an index ends with 4 bytes of
+padding after the last `END`. `mm0-rs` writes that padding and does not require it when
+reading; mm0-c refuses a file without it. A reader need not check it; a writer must
+produce it.
 
 ## 4. Unify streams
 
@@ -190,11 +206,16 @@ Shape:
 
 An expression is `URef i`, or `UDummy s`, or `UTerm[Save] t` followed by as many
 expressions as `t` has arguments. The grammar is self-delimiting, so a decoder can
-recover the tree (and the hypothesis count) from the stream and the term table.
+recover the tree (and the hypothesis count) from the stream and the term table. This is
+how `mm0-rs` reads it: it builds the tree directly and rejects a stream that ends early,
+has commands left over, refers to a heap index that does not exist yet, or has a `UHyp`
+inside an expression.
 
-`UTermSave` records the term *before* its arguments are read, so a stream can describe a
-cyclic term (`UTermSave 0, URef <itself>`). Such files are invalid; the verifier rules
-them out by checking a def's unify stream against the value its proof stream builds.
+`UTermSave` takes its heap index *before* its arguments are read, so a stream can
+describe a cyclic term (`UTermSave 0, URef <itself>`). Such files are invalid. `mm0-rs`
+rejects a reference to a saved term that is still being read ("cyclic reference"); the
+stack machine of mmb.md rules it out by checking a def's unify stream against the value
+its proof stream builds.
 
 ## 5. Proof stream
 
@@ -204,7 +225,7 @@ may contain a sequence of **proof commands**.
 ### Statements
 
 A statement is a command whose `data` is the distance in bytes from the start of this
-statement to the start of the next one. The stream ends at a byte equal to `0x00`.
+statement to the start of the next one. The stream ends at a command with opcode `0`.
 
 | Opcode | Name | Body | Needs a `.mm0` statement | Consumes |
 | ------ | ---- | ---- | ------------------------ | -------- |
@@ -219,16 +240,18 @@ Bit 3 (`0x08`) is the "local" flag. Statements are not numbered: the `k`-th stat
 a class refers to the `k`-th entry of the corresponding table. At the end of the stream
 all three counters must equal `num_sorts`, `num_terms`, `num_thms`.
 
-Framing, as mm0-c checks it:
+Framing:
 
-- a statement without a body has `data` equal to its own encoded size;
-- a statement with a body is followed directly by proof commands up to and including an
-  `END`, and `data` must point exactly past that `END`;
-- the next statement position must again satisfy the read-ahead rule.
+- `data` must not be smaller than the statement command itself;
+- a statement without a body (`Sort`, and `Term` on an entry without the def bit) has
+  `data` equal to its own encoded size;
+- a statement with a body is followed directly by proof commands and one `END`, and
+  `data` points exactly past that `END`. `END` is recognized by its opcode (the low six
+  bits of the byte).
 
 Whether `0x05` is a `term` or a `def` is decided by the def bit of the table entry, not
-by the opcode. (Consequence: `0x0D` on an entry without the def bit is a term that has no
-`.mm0` counterpart — see D8.)
+by the opcode. `0x0D` on an entry without the def bit would be a term that the `.mm0`
+file does not declare; that is not valid (section 9, point 7).
 
 ### Proof commands
 
@@ -250,10 +273,10 @@ by the opcode. (Consequence: `0x0D` on an entry without the def bit is a term th
 | `0x1C` | `ConvCut` | 0 | `e1 =?= e2  →  e1 = e2, e1 =?= e2` |
 | `0x1E` | `ConvSave` | 0 | pop `e1 = e2` and save it |
 | `0x1F` | `Save` | 0 | save the top of the stack without popping it |
-| `0x20` | `Sorry` | 0 | admit a goal; never valid (see D6) |
+| `0x20` | `Sorry` | 0 | admit a goal; never part of a valid proof (section 9, point 6) |
 
-Opcode `0x1D` is unassigned. Proofs are in **postfix** order: arguments first, then the
-constructor.
+Opcode `0x1D` is unassigned. The `data` of `Dummy` and `UDummy` must fit in a byte.
+Proofs are in **postfix** order: arguments first, then the constructor.
 
 Opcodes seen in the well-formed files we have: all of the above except `Sorry`; `data`
 widths 0, 1 and 2 bytes.
@@ -261,14 +284,18 @@ widths 0, 1 and 2 bytes.
 ## 6. What the commands mean
 
 The reader only decodes; this section is what the `dump` output has to be understood
-against, and it is the starting point for phase 2. It describes **mm0-c's behaviour**,
-line references to `mm0-c/verifier.c`.
+against, and it is the starting point for phase 2. The machine is the one described in
+mmb.md and modelled in `mm0b.lean`. Each rule is stated the way the formal semantics
+require; `mm0-rs` implements the same rules, on a different representation (it first
+turns the command stream into a proof DAG in `import.rs`, then checks the DAG in
+`verify.rs`). Where mm0-c or `mm0-rs` does something else, section 9 says so.
 
 ### Machine state
 
 - **store** — the expression nodes built so far in the current statement. Two nodes are
   *the same expression* only if they are the same node: equality is identity, never
-  structural comparison. `Term 0, Term 0` builds two different nodes.
+  structural comparison. `Term 0, Term 0` builds two different nodes. (mmb.md says so
+  explicitly; `mm0b.lean`, `mm0-rs` and mm0-c all work this way.)
 - **stack** `S` — elements are one of: `expr e`; `proof e` (written `⊢ e`); a conversion
   `e1 = e2`; an obligation `e1 =?= e2`.
 - **heap** `H` — `expr`, `proof` or conversion elements, addressed by index.
@@ -276,31 +303,31 @@ line references to `mm0-c/verifier.c`.
 - **next_bv** — how many bound variables exist; the next dummy gets this bit.
 
 Each node carries a sort, a `bound` flag (true only for bound variables and dummies), and
-a 55-bit set `deps(e)`.
+a set of bound variables `deps(e)`, represented as 55 bits.
 
 At the start of every statement the store, stack and hyps are emptied and the heap is
-loaded with one variable node per argument (`load_args`, l.178), checking the `arg`
-rules of section 2 against the sorts declared **so far**, and that no bound variable has
-a `strict` sort.
+loaded with one variable node per argument, checking the `arg` rules of section 2 against
+the sorts declared **so far**, and that no bound variable has a `strict` sort.
 
-### Proof commands (l.341–663)
+### Proof commands
 
 `Term t` / `TermSave t` — `t` must be less than the number of terms declared so far (no
 forward or self reference). Pop `num_args` elements, all of which must be `expr`. For
 argument `i` with binder `a_i`: the sorts must be equal, and if `a_i` is bound then the
 argument must be a bound variable. The new node has the term's result sort,
-`bound = false`, and
+`bound = false`, and its `deps` depend on what is being checked:
 
 ```
-deps(t e1 ... en) =   union over the REGULAR arguments i of  D_i
-                    ∪ (definitions only) union of deps(e_j) for the bound arguments j
-                                         that the return type depends on
-D_i = deps(e_i)                                              in a theorem or axiom
-D_i = deps(e_i) minus deps(e_j) for each bound argument j    in a definition
-      that a_i is declared to depend on
-```
+in an axiom or theorem (the variables of the term; `HasVar` in mm0.mm0):
+  deps(t e1 ... en) = deps(e1) ∪ ... ∪ deps(en)            all arguments
 
-A bound argument contributes nothing by itself in either mode (l.446–454; see D1).
+in a definition (the free variables of the term; `Free` in mm0.mm0):
+  deps(t e1 ... en) = union over the REGULAR arguments i of
+                        deps(e_i) minus deps(e_j) for each bound argument j
+                                              that a_i is declared to depend on
+                    ∪ union of deps(e_j) for the bound arguments j
+                        that the return type is declared to depend on
+```
 
 `Ref i` — `i` must be in range. If `H[i]` is a conversion `e1 = e2`, pop an obligation
 and require it to be exactly `e1 =?= e2`. Otherwise push `H[i]`.
@@ -341,13 +368,10 @@ stream in mode `UDef` with heap `[e1 ... en]` and target `e`; push `e =?= e'`.
 `ConvCut` — pop `e1 =?= e2`; push `e1 = e2`, push `e1 =?= e2`.
 `ConvSave` — pop `e1 = e2`; append it to the heap.
 `Save` — the top must not be an obligation; append a copy of it to the heap.
+`Sorry` — not a valid command: a proof that contains it is rejected.
 `END` — stop; the caller checks the result.
 
-Nothing in mm0-c forbids the conversion commands in a definition, but they cannot fire
-there: every one needs a `⊢` or an obligation, and a definition's stack and heap only
-ever hold `expr`.
-
-### Unify commands (`run_unify`, l.213–331)
+### Unify commands
 
 The unifier has its own stack, initially `[target]`, and its own heap, initially the
 substitution. It runs in one of three modes.
@@ -363,33 +387,35 @@ substitution. It runs in one of three modes.
   arguments so that the first is on top; if saving, append `e` to the heap, marked
   *saved*.
 - `UDummy s` — only in `UDef`. Pop `e`; it must be a bound variable of sort `s`; its
-  `deps` must be disjoint from every heap entry that is **not** marked saved (the
-  arguments and the earlier dummies); append it to the heap.
+  `deps` must be disjoint from the arguments and from the earlier dummies (the heap
+  entries not marked saved); append it to the heap.
 - `UHyp` — in `UThm`: pop `⊢ e` from the **main** stack, push `e`. In `UThmEnd`: the
   unify stack must be empty; pop the most recent entry of `HS`, push it. In `UDef`: error.
 - `END` — the unify stack must be empty; in `UThmEnd` the hyps must also be used up.
 
-### End of a statement (`verify`, l.670–819)
+### End of a statement
 
 - `Sort`: the counter must be below `num_sorts`.
 - `Term`/`Def`/`LocalDef`: result sort declared and not `pure`; `ret` checked like an
-  argument and its sort field must equal the table's sort. For a def: run the body; the
-  stack must hold exactly one `expr e`; `sort(e)` must equal the result sort; `deps(e)`
-  must be a subset of `ret.deps`; then unify in mode `UDef` against the def's own stream.
+  argument, and its sort must equal the sort in the table entry. For a def: run the body;
+  the stack must hold exactly one `expr e`; `sort(e)` must equal the result sort;
+  `deps(e)` must be a subset of `ret.deps`; then unify in mode `UDef` against the def's
+  own stream.
 - `Axiom`/`Thm`/`LocalThm`: run the body; the stack must hold exactly one element, an
   `expr e` for an axiom and a `⊢ e` for a theorem; `sort(e)` must be `provable`; then
   unify in mode `UThmEnd`.
-- After the last statement: the three counters must match the header, no proof may have
-  used `Sorry`, and the `.mm0` input must be at its end.
+- After the last statement: the three counters must equal the counts in the header.
 
-Non-local statements are matched against the next `.mm0` statement of the same kind
-before the counter is incremented; that matching (`parser.c`) is phase-2 material and is
-not described here.
+Every statement that is not local is matched against the next statement of the same kind
+in the `.mm0` file. That step is defined by the formal specification (the environment
+built from the proof file must *extend* the one built from the `.mm0` file: `env.extend`
+in `mm0.lean`). It is phase-2 material and is not described here.
 
 ## 7. The index
 
-The index is optional and advisory: it holds names and notation, and nothing in it
-affects verification. mm0-c reads it only to print error messages.
+The index is optional. It holds names and notation, and nothing in it affects whether a
+proof is valid. `mm0-rs` nevertheless checks its structure when it opens a file, and
+refuses a file whose index is damaged.
 
 At `p_index`: a `u64` count `num_entries`, then that many 16-byte entries.
 
@@ -399,7 +425,8 @@ At `p_index`: a `u64` count `num_entries`, then that many 16-byte entries.
 | 4 | 4 | `data` — depends on the type |
 | 8 | 8 | `ptr` — `p64` to the table |
 
-Unknown types must be skipped. The tables we will read:
+Entries of an unknown type are skipped. A known type may occur only once. The tables we
+read:
 
 **`"Name"`** — `num_sorts + num_terms + num_thms` entries of 16 bytes, sorts first, then
 terms, then theorems: `proof` (`p64?`, the statement in the proof stream that declares
@@ -414,19 +441,27 @@ stored as the name `_`.
 **`"HypN"`** — `num_thms` entries of 8 bytes, each a `p64?` to a string list naming the
 hypotheses in the order of the `Hyp` commands.
 
-The other defined types are `"Delm"` (delimiters), `"Nota"` (notations), `"Lisp"` and
-`"Deps"` (both `mm0-rs` extensions). They are specified in the spec; we do not need them
-for phase 1 and the reader will keep their entries as raw `(type, data, ptr)` triples.
-`"Delm"` and `"Nota"` would let `dump` print expressions in notation; that is a possible
-later addition, not a planned one.
+What is an error and what is not, following `mm0-rs`:
 
-`tests/mmb/fail-index/` in the MM0 repository holds files with a broken index that mm0-c
-accepts. Our reader must treat a damaged index as "no names available", not as a
-decoding failure of the file.
+- an error: the index header or its entries do not fit in the file; one of the three
+  tables above does not fit in the file at its `ptr`; a table type occurs twice;
+- not an error: a missing table; a name pointer that is null, out of range, or not valid
+  UTF-8; a string list that is missing or too short. The item then gets a generated name:
+  `s3` for a sort, `t5` for a term, `T7` for a theorem, `v0` for a variable, `h0` for a
+  hypothesis.
+
+The other defined types are `"Delm"` (delimiters), `"Nota"` (notations), `"Lisp"` and
+`"Deps"` (both specific to `mm0-rs`). They are specified in mmb.md; we do not need them
+for phase 1 and the reader keeps their entries as raw `(type, data, ptr)` triples.
+For `"Delm"` and `"Nota"` the reader checks only what `mm0-rs` checks when it opens the
+file: a `Delm` table is two NUL-terminated byte runs inside the file; a `Nota` table
+starts with a `p64` that lies in the file at or after the 8 bytes of that pointer itself.
+These two would let `dump` print expressions in notation; that is a possible later
+addition, not a planned one.
 
 ## 8. A complete small file
 
-`tests/fixtures/questions/regular_arg_vars.mmb` (244 bytes), for the specification
+`tests/fixtures/disputed/regular_arg_vars.mmb` (244 bytes), for the specification
 
 ```
 provable sort wff;
@@ -513,155 +548,128 @@ ef  00                         END of the proof stream
 f0  00 00 00 00                read-ahead padding
 ```
 
-This file decodes cleanly and is **rejected** by mm0-c at the `Thm 0` step ("disjoint
-variable violation"): `ph := (p x)` breaks the condition that `ph` does not depend on
-`x`. Its sibling
-`bound_arg_vars.mmb` differs in three bytes (the binder of the predicate) and is the
-subject of D1.
+This file decodes cleanly and its last proof is **rejected**, by `mm0-rs` and by mm0-c,
+at the `Thm 0` step: `ph := (p x)` breaks the condition that `ph` does not depend on `x`.
+Its sibling `bound_arg_vars.mmb` differs in three bytes (the binder of the predicate) and
+is the subject of point 1 in the next section.
 
-## 9. Disagreements and open questions
+## 9. Where the sources differ
 
-The brief says to stop and ask when the spec and mm0-c disagree. These are all the
-disagreements found in the `.mmb` format and its checking. Each has a proposal; **none
-is decided**. D1 is the one with consequences; D2–D9 are places where the spec text is
-wrong or silent and mm0-c is the better guide.
+Every point found on which the formal semantics, mmb.md, `mm0-rs` and mm0-c do not say
+the same thing. The rule for deciding is the one at the top of these notes: the formal
+semantics, then `mm0-rs`, then mmb.md; mm0-c is listed for comparison.
 
-The fixtures named below are in `tests/fixtures/questions/`, hand-assembled by `gen.py`
-there. What mm0-c (built from the checkout above, `gcc main.c -O2`) does with them:
+Each row marked with a fixture was checked by running both implementations on a
+hand-assembled file from `tests/fixtures/disputed/` (`gen.py` there), `mm0-rs` as
+`mm0-rs compile x.mmb` and mm0-c as `mm0-c x.mmb < x.mm0`. Rows without a fixture were
+checked on throwaway files in the same way, or on the mutants in `tests/mmb/` of the MM0
+repository.
 
-| Fixture | mm0-c exit code | Message |
-| ------- | --------------- | ------- |
-| `bound_arg_vars` | 0 | accepted |
-| `regular_arg_vars` | 255 | disjoint variable violation |
-| `sorry_expr` | 3 | some theorems used sorry |
-| `sorry_conv` | 255 | bad stack slot |
-| `local_term` | 0 | accepted |
+| # | Point | Formal semantics | `mm0-rs` | mm0-c | We |
+| - | ----- | ---------------- | -------- | ----- | -- |
+| 1 | variables of a term whose argument is in a bound position (`bound_arg_vars`) | counted | counted: rejects | not counted: **accepts** | reject |
+| 2 | which bound variables a regular argument must avoid | those it does not depend on | same | same | same; mmb.md's text is inverted |
+| 3 | free variables of a bound argument, in a definition | none, except through the return type | same | same | same; mmb.md's text is wrong |
+| 4 | `UDummy`: disjoint from what | the arguments | arguments, earlier dummies, finished saved terms | arguments, earlier dummies | arguments and earlier dummies |
+| 5 | dummies of a `free` sort; free variables of a def's value | unclear: `mm0.md` and `mm0.mm0` differ | no such dummies; all free variables in `ret` | same as `mm0-rs` | as the implementations — **to confirm** |
+| 6 | `Sorry` (`sorry_expr`, `sorry_conv`) | no such rule | accepts the file | rejects | reject |
+| 7 | `LocalDef` on an entry that is not a def (`local_term`) | not allowed | rejects | **accepts** | reject |
+| 8 | the proof body of an `axiom` or `def` (`axiom_body_mismatch`) | checked (`mm0b.lean`) | **not read** | checked | check |
+| 9 | sort in the term table vs sort of `ret` (`ret_sort_mismatch`) | — (mmb.md: must agree) | **not compared** | must agree | must agree |
+| 10 | more than 55 bound variables | — (not representable) | **accepts** | rejects | reject |
+| 11 | `deps` of a bound binder | — (mmb.md: exactly its own bit) | **ignored** | must be its own bit | must be its own bit |
+| 12 | reserved fields, bit 55 of `arg` | — (mmb.md: zero) | not checked | not checked | not checked by the reader; reported by `dump` |
+| 13 | 4 bytes of padding after the last `END` | — (mmb.md: required) | not required | required | not required to read; always written |
+| 14 | a damaged index | — | **rejects** | ignores the index | reject, as section 7 |
+| 15 | order and alignment of the sections | — | required, as section 2 | not checked | required |
+| 16 | unknown bits in a sort's modifiers | — | rejects | only through the `.mm0` comparison | reject |
+| 17 | the unify stream of a term or theorem | — (mmb.md: behind a pointer) | inline | inline | inline; mmb.md's table is wrong |
+| 18 | equality of expressions | identity of nodes (`mm0b.lean`) | identity | identity | identity |
+| 19 | fixed capacity limits | none | none | stack, heap, store, 256 hypotheses | none |
+| 20 | fewer statements than table entries | — | **accepts** | rejects | reject |
 
-### D1. Which variables does a term have in a theorem? (mm0-c accepts an unsound proof)
+What the implementations did with the fixtures (exit codes):
 
-- Spec: `V(t e1 ... en) = V(e1) ∪ ... ∪ V(en)`, all arguments. mm0.md says the same
-  (`Vars(foo e1 ... en) = ⋃ Si`), and so do mm0.mm0 (`HasVarApp`), mm0.lean
-  (`sexpr.has_var`) and the `mm0-rs` kernel (`verify.rs`, `accum |=` for every argument).
-- mm0-c (`verifier.c` l.446–454) adds nothing for an argument in a **bound** position,
-  in theorems as well as in definitions. mm0-js copies this.
-- It matters when a bound variable reaches the result only through the return type:
-  with `term foo {x: set}: wff x`, mm0-c computes that `(foo x)` has no variables.
-- Evidence: `tests/fixtures/questions/bound_arg_vars.{mm0,mmb}` proves
-  `imp (foo x) (al x (foo x))` from `ax5 {x: set} (ph: wff): $ imp ph (al x ph) $` by
-  taking `ph := (foo x)`. **mm0-c accepts it** (exit code 0, with and without the
-  `.mm0` check). The formal semantics reject it, and they are right to: `foo x` is
-  declared to depend on `x`. The control `regular_arg_vars` is rejected by mm0-c.
-- This puts two lines of the brief in conflict: "structurally close to the MM0 semantics
-  formalization" and "any case where we accept and mm0-c rejects (or vice versa) is a
-  bug".
-- Proposal: follow the formal semantics (reject), and record this as the one known,
-  documented deviation from the oracle, with the fixture as its regression test. It may
-  also be worth reporting upstream.
+| Fixture | `mm0-rs` | mm0-c | Our verifier must |
+| ------- | -------- | ----- | ----------------- |
+| `bound_arg_vars` | 1 | 0 | reject |
+| `regular_arg_vars` | 1 | 255 | reject |
+| `sorry_expr` | 0 | 3 | reject |
+| `sorry_conv` | 0 | 255 | reject |
+| `local_term` | 1 | 0 | reject |
+| `axiom_body_mismatch` | 0 | 255 | reject |
+| `ret_sort_mismatch` | 0 | 255 | reject |
 
-### D2. The disjointness condition in the spec's `Thm` rule is inverted
+Notes on the points that need more than a table cell.
 
-- Spec: "For each `j` such that `thm[T].args[i].deps[j]`: check that
-  `deps[j] ∩ FV(ei) = {}`" — i.e. for the bound variables the argument *does* depend on.
-- mm0-c (l.505–507) checks the bound variables the argument does **not** depend on.
-  mm0.md, mm0.mm0 and mm0.lean agree with mm0-c.
-- Proposal: follow mm0-c; the spec text is a slip.
+**1. Variables of a term in a theorem.** With `term foo {x: set}: wff x`, is `x` a
+variable of `(foo x)`? `mm0.md` (`Vars(foo e1 ... en) = ⋃ Si`), `mm0.mm0` (`HasVarApp`),
+`mm0.lean` (`sexpr.has_var`) and the `mm0-rs` kernel say yes: every argument counts.
+mm0-c (`verifier.c`, the `Term` rule) adds nothing for an argument in a bound position,
+so for it `(foo x)` has no variables. `bound_arg_vars` uses this to prove
+`imp (foo x) (al x (foo x))` from `ax5 {x: set} (ph: wff): $ imp ph (al x ph) $` with
+`ph := (foo x)`. The statement is not valid, since `foo x` is declared to depend on `x`,
+and mm0-c accepts the proof. This is the reason mm0-c is not a reference.
 
-### D3. Free variables of a bound argument, in a definition
+**4. `UDummy`.** mmb.md says "disjoint from every element of the unify heap". Read
+literally on the stack machine that cannot work: a `UTermSave` puts a term on the heap
+before its arguments are read, so a saved term that contains the dummy is already there
+when the dummy is reached. `mm0-rs` compares against the arguments, the earlier dummies
+and the saved terms that are *finished*; mm0-c skips saved terms altogether. The two give
+the same verdict: a finished saved term is built from arguments and earlier dummies, so
+it adds nothing. `mm0.mm0` (`VerifyConvUnfold`) compares against the arguments only and,
+as far as we can read it, does not ask the dummies of one unfolding to be distinct from
+each other. Both implementations do, and without it `E. y E. z ~ y = z` could be unfolded
+to `E. y E. y ~ y = y`, so we follow the implementations.
 
-- Spec: "if `term[t].args[i].bound`, `Si = FV(ei)`" — a bound argument contributes its
-  variable to the free variables of the term.
-- mm0-c: a bound argument contributes nothing; it comes back only through the return
-  type. mm0.md ("`FV(A. x ...) = FV(...) \ {x}`") and mm0.mm0 (`FreeApp`) agree with
-  mm0-c. With the spec's reading no quantifier would bind anything.
-- Proposal: follow mm0-c.
+**5. `free` sorts.** This is the one point the formal semantics do not settle, because
+its two parts disagree:
 
-### D4. `UDummy`: disjoint from which heap entries?
+- `mm0.md`, on sorts: "`free` means that definitions and theorems are not allowed to use
+  dummy variables with this sort";
+- `mm0.md`, on definition checking: "every free variable in the definiens with a `free`
+  sort is among the declared dependencies";
+- `mm0.mm0` (`DefOk`): a free variable of the value must be among the declared
+  dependencies *unless* its sort is `free`.
 
-- Spec: "`V(e) ∩ V(x) = {}` for all `e` in `H`".
-- mm0-c (l.284–288): only the entries not created by `UTermSave`. A saved term contains
-  the dummies that occur inside it, so the spec's reading would reject every definition
-  that saves a subterm containing a dummy. (mm0.mm0, `VerifyConvUnfold`, compares against
-  the arguments only and, as far as we can read it, does not ask the dummies to be
-  distinct from each other; mm0-c does.)
-- Proposal: follow mm0-c.
+`mm0-rs` and mm0-c both do the strictest thing: no dummy may have a `free` sort, and
+every free variable of a def's value must be among the dependencies of its return type.
+Whatever they accept is accepted under each of the three readings, so following them is
+safe. It is still a choice among readings, and needs confirming.
 
-### D5. `Dummy` and `free` sorts; what a definition may leave free
+**6. `Sorry`.** `mm0-rs` treats a theorem whose proof contains `Sorry` as a theorem
+without a proof, keeps it, and exits with 0. That is right for a compiler that may import
+unfinished work and wrong for a verifier. mmb.md: verifiers "are required to report
+failure for proofs using `Sorry`".
 
-- Spec: `Dummy s` requires `!sort[s].strict`. mm0-c also requires `!free` (l.399). mm0.md
-  agrees with mm0-c ("`free` means that definitions and theorems are not allowed to use
-  dummy variables with this sort").
-- Related: for the end-of-def check mm0-c requires **every** free variable of the value
-  to be among the return type's dependencies. mm0.mm0 (`DefOk`) exempts variables whose
-  sort is `free`; mm0.md's "Definition checking" section constrains only variables of a
-  `free` sort. These three do not say the same thing; mm0-c is the strictest and implies
-  the other two.
-- Proposal: follow mm0-c on both.
+**8. Bodies of axioms and definitions.** `mm0-rs` takes the statement of an axiom and the
+value of a definition from the unify stream in the table and never reads the proof body
+that mmb.md asks to be checked against it. In `axiom_body_mismatch` the body builds `tru`
+and the unify stream says `fls`. Checking the body is what mmb.md and `mm0b.lean`
+describe, so we check it. (`mm0-rs` does not need the body to rule out cyclic terms; see
+section 4.)
 
-### D6. `Sorry`
+**10. More than 55 bound variables.** The `mm0-rs` kernel does report this, but as a
+"non-fatal" error, and the `.mmb` importer drops non-fatal errors. The case is
+`tests/mmb/fail/gi_dummy_reserved_bit.mmb` in the MM0 repository.
 
-- Spec: pops an `expr e` and pushes `⊢ e`, or pops an obligation `e1 =?= e2`.
-- mm0-c (l.638–649): the second case requires a conversion `e1 = e2` on top, not an
-  obligation, so `Sorry` on an obligation fails with "bad stack slot". It is also
-  rejected in definitions. A file that uses `Sorry` is rejected either way.
-- Evidence: `sorry_expr.mmb` exits with code 3 ("some theorems used sorry");
-  `sorry_conv.mmb` exits with 255 ("bad stack slot").
-- Proposal: decode `0x20` as `Sorry`; the verifier rejects any proof that contains it, as
-  the spec allows ("verifiers are permitted to not recognize its existence").
+**18. Equality is identity.** The brief suggests hash-consing as the place for
+performance work in the verifier. A verifier that hash-conses treats structurally equal
+terms as the same node and therefore accepts files that the format, `mm0b.lean` and both
+implementations reject — for example one in which a `TermSave` was turned into a `Term`.
+We use the model of the format: a node is its allocation index in a per-statement store.
+That needs no hashing and is also the fastest. Hash-consing remains the right tool for
+the prover.
 
-### D7. Things mm0-c does not check
+Noticed in passing, in the formal specification: in `VerifyProofThm` (`mm0.mm0`) and
+`safe_subst` (`mm0.lean`) the test "`u` is a bound variable" looks `u` up in the *proof
+context*, while `u` indexes the *theorem's* binders. It reads like a slip (it should be
+the theorem's argument list), and both implementations use the theorem's binders. Worth
+confirming before the verifier is modelled on it.
 
-- The reserved fields (`reserved`, `reserved2`, the term and theorem table padding) and
-  bit 55 of an `arg` word are not checked to be zero, except that a non-local statement's
-  binders are compared with the `.mm0` binders, which catches bit 55 on regular variables.
-- The alignment of `p_terms`, `p_thms` and `p_data` is not checked.
-- `END` inside a stream is recognized by its low six bits, so `0x40 nn` also ends a
-  stream; the END of the whole proof stream must be the exact byte `0x00`.
-- The index is never validated.
-- Proposal: the **reader** accepts all of these and reports the non-zero reserved fields
-  and misaligned pointers in `dump` as warnings. Whether the **verifier** should reject
-  them is a phase-2 question (it would make us stricter than the oracle on mutated
-  files).
+Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.md`.
 
-### D8. A local term
-
-- A `LocalDef` statement (`0x0D`) whose table entry has no def bit is accepted by mm0-c
-  as a term constructor with no `.mm0` counterpart. The spec's statement table does not
-  mention this case. A new uninterpreted term is harmless, but it is not a definition.
-- Evidence: `local_term.mmb` declares a term `hidden` this way; mm0-c accepts it against
-  a `.mm0` file that never mentions `hidden`.
-- Proposal: decode it as "local term" and accept it, as mm0-c does.
-
-### D9. The unify stream is inline, not behind a pointer
-
-- Spec: the `unify` field of `term_data` and `thm_data` has type `p32<unify_stream>`.
-- mm0-c reads the stream itself at that position (`&args[num_args + 1]` for a def,
-  `&args[num_args]` for a theorem), and so do all the files we have.
-- Proposal: follow mm0-c; the type in the spec's table is a slip.
-
-Differences between `mm0.md` and mm0-c's parser of the **`.mm0`** file are a separate
-list, in `DESIGN.md`.
-
-### Questions for phase 2 (no answer needed to write the reader)
-
-- **Q1. Identity or structural equality?** mm0-c compares expressions by node identity,
-  and the spec insists on it (`Term 0, Term 0` builds two different terms). The brief
-  suggests hash-consing as the place for performance work. A hash-consing verifier
-  accepts strictly more files than mm0-c — for example a mutant in which a `TermSave` was
-  turned into a `Term` — which the differential test would count as a bug. Proposal: use
-  mm0-c's model (a node is its allocation index in a per-statement store; no hashing,
-  which is also the fastest), and keep hash-consing for the prover.
-- **Q2. mm0-c's fixed limits.** Stack and heap 65536 entries, store 64 MB, 256
-  hypotheses, unify stack 256. Files beyond them are rejected by mm0-c for capacity, not
-  for being wrong. Proposal: no fixed limits on our side; the differential test
-  classifies "mm0-c ran out of room" separately.
-- **Q3. Noticed in passing, in the formalization.** In `VerifyProofThm` (mm0.mm0) and
-  `safe_subst` (mm0.lean) the test "`u` is a bound variable" looks up the *proof context*
-  `ctx`, while `u` indexes the *theorem's* binders. It reads like a slip (it should be the
-  theorem's argument list). Worth confirming before the verifier is modelled on it.
-
-## 10. The reader we intend to write
-
-For review before any of it is written.
+## 10. The reader
 
 - Input: the whole file as one `ByteArray` (core Lean has no memory mapping).
 - **Decoded eagerly**: header, sort table, term table and theorem table with their
@@ -674,10 +682,13 @@ For review before any of it is written.
   use the second: `peano.mmb` alone has 250,000 proof commands in under a megabyte, the
   set.mm translation will be far larger, and one heap object per command is a cost the
   phase-2 time budget cannot afford.
-- Commands are decoded faithfully: `Term`/`TermSave` stay distinct constructors' worth of
-  information (a `save` flag), the `data` width is not preserved (it carries no meaning),
-  and an unknown opcode is an error at the offset where it occurs.
-- Every read is bounds-checked and every error carries a file offset. The 5-byte
-  read-ahead rule is enforced as mm0-c enforces it, so that we agree with it on truncated
-  files.
-- A missing or damaged index never fails the read (section 7).
+- Commands are decoded faithfully: `Term`/`TermSave` keep their `save` flag, the `data`
+  width is not preserved (it carries no meaning), and an unknown opcode is an error at
+  the offset where it occurs.
+- The reader rejects what `mm0-rs` rejects when it opens and walks a file: a bad magic
+  number or version, the layout rules of section 2, tables or data blocks that leave the
+  file, unknown modifier bits in a sort, a damaged index (section 7), a statement whose
+  framing is wrong (section 5), an unknown statement or command opcode, a unify stream
+  that is not a well-formed pattern (section 4). Every error carries a file offset.
+- The reader does not judge proofs. Everything in section 6, and points 1–11 of section
+  9, belong to the verifier.

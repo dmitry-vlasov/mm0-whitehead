@@ -5,11 +5,11 @@
 `mm0-whitehead` is a Lean 4 implementation of tooling for **Metamath Zero (MM0)**:
 
 1. a reader for the `.mm0` specification format and the `.mmb` binary proof format;
-2. an **independent verifier** for MM0, written in Lean, cross-checked against the
-   reference C verifier `mm0-c`;
+2. an **independent verifier** for MM0, written in Lean, implementing the formal
+   semantics of MM0 and cross-checked against the reference implementation `mm0-rs`;
 3. an **automated prover** for MM0, based on the proof-search engine of the author's
    earlier system *Russell* (a Metamath-based prover), emitting `.mmb` proofs that
-   `mm0-c` accepts;
+   our verifier and `mm0-rs` accept;
 4. later: proof-pattern mining ("linear subproofs") and a learned ranking layer on top of
    the prover.
 
@@ -19,20 +19,38 @@ acceptance tests** (defined below). The name: Whitehead was Russell's co-author 
 
 Reference material (read before writing code):
 - MM0 repository: https://github.com/digama0/mm0 — the format specifications
-  (`mm0.md` for `.mm0`, the `.mmb` binary format description, and `mm0-c/` for the
-  reference verifier), plus the `examples/` directory.
+  (`mm0.md` for `.mm0`, `mm0-c/mmb.md` for the `.mmb` binary format), the formal
+  specification, the implementations, plus the `examples/` directory.
 - The paper: M. Carneiro, *Metamath Zero: The Cartesian Theorem Prover* (CADE 2020).
-- The formalization of MM0's semantics used for the verified verifier (search the mm0
-  repository and its sister repos for the Lean formalization); treat its definitions as
-  the specification of what "verify" means.
+
+Who is right when sources disagree, in this order:
+
+1. **The formal semantics are the final judge**: `mm0.md` together with the formal
+   specification `examples/mm0.mm0` (mirrored in Lean in `mm0-lean/mm0/mm0.lean`, with
+   the MMB stack machine in `mm0-lean/mm0/mm0b.lean`). They define what a valid
+   specification is and what "verify" means. For `.mm0` files the reference is
+   `mm0.md` plus the formal specification, not any implementation's parser.
+2. **`mm0-rs` is the reference implementation**: the `.mmb` reader
+   (`mm0-rs/components/mm0b_parser`), the kernel (`mm0-rs/src/elab/verify.rs`), the
+   `.mm0`/`.mm1` parser (`mm0-rs/components/mm1_parser`) and `import`
+   (`mm0-rs/src/joiner.rs`). Where the formal semantics are silent — file layout,
+   framing, the index — follow `mm0-rs`.
+3. `mm0-c/mmb.md` is the written description of the `.mmb` format.
+4. **`mm0-c` is not a reference.** It accepts proofs that the formal semantics reject
+   (`docs/MMB-NOTES.md`). It may be run as an additional comparison, and it is the
+   speed yardstick, but a disagreement with it is not by itself a bug.
+
+`import "file";` in `.mm0` files is an `mm0-rs` extension that is not in `mm0.md`; the
+example files use it and our reader must support it.
 
 Local checkouts:
-- MM0: `/home/dmitry/tools/mm0/` (`mm0.md`, `mm0-c/mmb.md`, `mm0-c/*.c`, `examples/`,
-  `tests/`).
+- MM0: `/home/dmitry/tools/mm0/` (`mm0.md`, `mm0-c/mmb.md`, `examples/`, `mm0-rs/`,
+  `mm0-lean/`, `mm0-c/`, `tests/`).
 - Russell: `/home/dmitry/dev/russell-flow/` (see the next section).
 
-When the spec and `mm0-c` disagree, or when something is unclear, **stop and ask**
-rather than guessing.
+When the formal semantics and `mm0-rs` disagree, follow the formal semantics and record
+the case in `docs/MMB-NOTES.md`. When the sources above do not settle a question, or
+when something is unclear, **stop and ask** rather than guessing.
 
 ## Russell — the reference implementation of the prover
 
@@ -73,8 +91,8 @@ Phase 3 ports an existing, working engine; it does not design a new one.
   arises, and say why.
 - `lakefile.toml` has `autoImplicit = false`. Keep it. Every variable is declared.
 - `lean-toolchain` is pinned; do not bump it without asking.
-- Performance matters from phase 2 on: the reference verifier checks the set.mm
-  translation in well under a second; our target is within an order of magnitude.
+- Performance matters from phase 2 on: `mm0-c` checks the set.mm translation in well
+  under a second; our target is within an order of magnitude.
   Lean performance idioms to respect:
   - keep `Array`/`ByteArray` updates in place by never holding a second reference to
     the array being mutated (uniqueness); prefer `modify`/`set!` in loops over
@@ -92,7 +110,7 @@ Phase 3 ports an existing, working engine; it does not design a new one.
   adds tests before features.
 - Keep `docs/DESIGN.md` up to date: data structures, the proof-tree model, decisions
   taken and why. Keep `docs/MMB-NOTES.md` as our own description of the `.mmb` format as
-  understood from the spec and from reading `mm0-c` — it must be enough for someone to
+  understood from the spec and from reading `mm0-rs` — it must be enough for someone to
   re-implement the reader from it.
 
 ## Phase 1 — readers
@@ -101,14 +119,15 @@ Deliverables:
 - `.mm0` parser (parser combinators from core `Std.Internal.Parsec` are fine; no need for
   a parser generator): sorts, term declarations with binder/dependency information,
   axioms, theorems (statements only), `def`s, notation declarations needed to parse the
-  example files. Produce an AST with source positions and good error messages.
+  example files, and `import`. Produce an AST with source positions and good error
+  messages.
 - `.mmb` reader: full decoding of the binary format into in-memory structures — the
   statement table, the term/theorem/def tables, and the **proof instruction streams**
   (the `.mmb` proof format is a stack machine; decode instructions faithfully, including
   save/reuse of subproofs and `unfold`).
 - `dump` subcommand that pretty-prints a decoded `.mmb` (statements and proofs) in a
-  readable text form, for debugging and for diffing against `mm0-rs`/`mm0-c` output
-  where available.
+  readable text form, for debugging and for diffing against `mm0-rs` output where
+  available.
 
 Acceptance:
 - All example `.mm0`/`.mmb` pairs in the MM0 repository, and the set.mm translation,
@@ -127,12 +146,19 @@ Deliverables:
   logic; put performance work in the data representation (hash-consing of expressions,
   arrays, in-place stacks), not in the logic.
 
-Acceptance (differential testing against `mm0-c`, which is the oracle):
-- Every `.mmb` accepted by `mm0-c` is accepted by us, including the set.mm translation.
+Acceptance (differential testing against `mm0-rs`, with the formal semantics as the
+judge of any disagreement):
+- Every valid `.mmb` is accepted by us, including the set.mm translation and every file
+  the example sources compile to.
 - A corpus of **mutated** `.mmb` files (bit flips, swapped instructions, altered
-  statements, broken dependency declarations) is rejected by both; add a `tests/mutate`
-  tool that generates them. Any case where we accept and `mm0-c` rejects (or vice
-  versa) is a bug to be fixed before moving on.
+  statements, broken dependency declarations) is run through both; add a `tests/mutate`
+  tool that generates them. Any case where we accept and `mm0-rs` rejects (or vice
+  versa) is examined before moving on: it is a bug in our verifier unless the formal
+  semantics side with us, in which case it is recorded in `docs/MMB-NOTES.md` with a
+  fixture.
+- `mm0-rs` reads and checks a `.mmb` on its own (`mm0-rs compile file.mmb`); it has no
+  command that checks a `.mmb` against a `.mm0`. That step follows the formal
+  specification, and is tested on hand-written cases.
 - Benchmark: set.mm translation verified within 10x of `mm0-c`'s time.
 
 ## Phase 3 — prover (the Russell engine, ported)
@@ -154,7 +180,7 @@ the final judge; see `docs/DESIGN.md` for the evolving details):
   allowed in the initial goal and premises; the prover must then *find* substitutions
   that make the goal provable (Prolog-style answer substitutions).
 - **Soundness by construction**: every closed path in the tree corresponds to a valid
-  MM0 proof; emit it as `.mmb` and check it with our verifier and with `mm0-c`.
+  MM0 proof; emit it as `.mmb` and check it with our verifier and with `mm0-rs`.
 - **Completeness**: with a fair expansion strategy (iterative deepening or equivalent),
   any existing proof is found. The engine must not lose this property; ranking and
   heuristics live in a separate layer that only chooses *which* existing variants to
@@ -169,7 +195,7 @@ the final judge; see `docs/DESIGN.md` for the evolving details):
 Acceptance:
 - **Replay test**: given an existing set.mm proof as the *sequence of statements used*,
   the engine reconstructs the full proof by unification alone; the emitted `.mmb` passes
-  `mm0-c`. This tests the unifier and emission on real data.
+  our verifier and `mm0-rs`. This tests the unifier and emission on real data.
 - **Search test**: a benchmark set of theorems from the set.mm translation (start with
   propositional calculus and predicate calculus sections) proved from scratch under a
   time budget; report the fraction proved and the proof lengths. This is the baseline
@@ -187,7 +213,7 @@ Design only after phase 3's search baseline exists.
 
 ## How to work
 
-- Start by reading the MM0 spec and `mm0-c`, then write `docs/MMB-NOTES.md`; show it
+- Start by reading the MM0 spec and `mm0-rs`, then write `docs/MMB-NOTES.md`; show it
   to me before writing the reader.
 - Work in small, reviewable steps: one module or one feature per PR-sized change, with
   tests. Explain Lean-specific choices (uniqueness/in-place updates, `partial`, data

@@ -1,0 +1,4 @@
+provable sort wff;
+term tru: wff;
+term fls: wff;
+axiom ax: $ fls $;
