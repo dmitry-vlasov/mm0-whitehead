@@ -80,11 +80,11 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
       -- the premises of the task that this expression unifies with
       let restriction : Option Only := only.map (·[i]!)
       let env ← get
-      let unified := (env.premises.unify ex).filter fun u =>
+      let unified :=
         match restriction with
-        | none => true
-        | some (.premise k) => u.data == k
-        | some (.assertion _) => false
+        | none => env.premises.unify ex
+        | some (.premise k) => (env.premises.unify ex).filter (·.data == k)
+        | some (.assertion _) => #[]
       for unif in unified do
         let proof := Proof.top h unif.expr unif.data unif.sub
         modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof } }
