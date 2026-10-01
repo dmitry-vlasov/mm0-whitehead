@@ -12,7 +12,7 @@ def usage : String :=
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
                                  reconstruct the proofs of a file from the assertions they use
-  prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--ms T] [--max-nodes N] [--verbose]
+  prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--verbose]
                                  prove the theorems of a file from scratch, breadth first
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
@@ -225,6 +225,12 @@ def proveDb (path : String) : IO UInt32 := do
     more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
   return 0
 
+/-- A line of a report, written at once also when the output is a file: a search can
+run for an hour. -/
+def logLine (line : String) : IO Unit := do
+  IO.println line
+  (← IO.getStdout).flush
+
 /-- The value of the option `name` among `args`, as a number. -/
 def numOption (args : List String) (name : String) (default : Nat) : Nat :=
   match args.dropWhile (· != name) with
@@ -255,7 +261,7 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose" }
   let start ← IO.monoMsNow
-  let (stats, bodies) ← Prove.replay db opts IO.println
+  let (stats, bodies) ← Prove.replay db opts logLine
   let ms := (← IO.monoMsNow) - start
   IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed, \
     {stats.conversions} with conversions and {stats.tooLarge} too large left out, in {ms} ms"
@@ -287,10 +293,11 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       return 1
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
+      every := max 1 (numOption args "--every" 1),
       limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000 },
       verbose := args.contains "--verbose" }
   let start ← IO.monoMsNow
-  let (rows, bodies) ← Prove.searchAll db opts IO.println
+  let (rows, bodies) ← Prove.searchAll db opts logLine
   let ms := (← IO.monoMsNow) - start
   let proved := rows.filter (·.ending == .proved)
   let steps := proved.foldl (init := 0) (· + ·.steps)

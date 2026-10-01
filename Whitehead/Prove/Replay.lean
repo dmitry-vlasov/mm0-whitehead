@@ -99,6 +99,8 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
 structure SearchOptions where
   first : Nat := 0
   last : Nat := 1000000000
+  /-- Only every `every`-th theorem of the range: a sample. -/
+  every : Nat := 1
   limits : Limits := {}
   /-- Report every theorem. -/
   verbose : Bool := false
@@ -129,7 +131,7 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
     let isThm := match s.kind with
       | .thm _ => true
       | _ => false
-    if !isThm || s.index < opts.first || s.index ≥ opts.last then continue
+    if !isThm || s.index < opts.first || s.index ≥ opts.last || s.index % opts.every != 0 then continue
     let known := match db.skeleton s with
       | .ok (some skel) => skel.size
       | _ => 0
