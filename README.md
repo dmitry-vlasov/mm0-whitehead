@@ -23,8 +23,19 @@ Lean.
     mm0-whitehead join file.mm0              # a specification with every import included
     mm0-whitehead bench file ...             # time the .mm0 front end or the .mmb reader
 
+    mm0-whitehead prove replay file.mmb -o out.mmb   # reconstruct every proof from the assertions it uses
+    mm0-whitehead prove search file.mmb --ms 1000    # prove every theorem from scratch, breadth first
+    mm0-whitehead prove db file.mmb                  # what the prover reads from a proof file
+
 `verify` exits with 0 if the file is accepted; otherwise it prints the first error with
-its file offset and statement. `prove` is not implemented yet.
+its file offset and statement.
+
+`prove replay` forgets every expression of a proof, keeps only which assertions it uses
+and how they nest, and lets the engine find the rest by unification; `prove search` is
+given no proof at all. Both take `--from A --to B` (numbers of theorems) and `--verbose`,
+check every proof they find with the verifier, and with `-o` write the file with the new
+proofs. The engine is a port of the Russell prover; see [docs/DESIGN.md](docs/DESIGN.md),
+"The prover".
 
 ## Reference tools and test corpus
 

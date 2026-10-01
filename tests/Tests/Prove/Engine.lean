@@ -115,6 +115,29 @@ def engineTests : TestM Unit := do
     match Whitehead.Verify.checkProofs f2 with
     | .ok () => check "search: the file with the proofs found is valid" true
     | .error e => check "search: the file with the proofs found is valid" false (e.format f2 "searched")
+  -- a goal with a variable to be found: from ph and ph -> ps, something of the shape
+  -- `?q -> ps`. Constants 0 and 1 are ph and ps; the variable is the first fresh one.
+  let wffTy := Ty.mk 0 false
+  let c (k : Nat) : Exp := ⟨#[Node.const k wffTy]⟩
+  let q : Exp := Exp.ofVar (Node.var freshBase wffTy)
+  let wi (a b : Exp) : Exp := Exp.mkApp 0 wffTy #[a, b]
+  let answerTask : Task :=
+    { limit := id "syl" + 1, sorts := 1, terms := 2,
+      consts := #[{ ty := wffTy, names := #[] }, { ty := wffTy, names := #[] }],
+      premises := #[c 0, wi (c 0) (c 1)], goal := wi q (c 1) }
+  let answerEnv := { Env.init db index answerTask with fresh := freshBase + 1 }
+  let answered ← searchWith acceptAny answerEnv breadthFirst { maxProps := 5000 }
+  checkEq "answer: a goal with a variable is proved, and the variable found"
+    ((answered.answer.map (db.showExp · #["ph", "ps"])).getD "none") "(wi ps ps)"
+  checkEq "answer: the first proof, breadth first, is the shortest way to such a goal"
+    ((answered.proof.map (proofText db)).getD "none") "id"
+  -- without `id` and what follows it, a premise is needed: from ph, by ax_3,
+  -- (~ps -> ~ph) -> ps
+  let earlier ← searchWith acceptAny { answerEnv with task := { answerTask with limit := id "id" } }
+    breadthFirst { maxProps := 5000 }
+  checkEq "answer: another answer when less may be used"
+    ((earlier.answer.map (db.showExp · #["ph", "ps"])).getD "none", (earlier.proof.map (proofText db)).getD "none")
+    ("(wi (wi (wn ps) (wn ph)) ps)", "(mpd (a1i h0) ax_3)")
   -- the condition on bound variables, on an application of ax_5 in the task of alimi,
   -- whose constants are x, ph and ps, the last two depending on x
   let env := Env.init db index task

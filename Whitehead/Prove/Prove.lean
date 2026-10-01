@@ -176,6 +176,10 @@ def accept (vc : Verify.Ctx) (env : Env) (tree : ProofTree) : Except String Byte
       | .error msg => why := msg
   return .error why
 
+/-- Accepts every proof, with no proof body: for a task that is not a theorem of the
+file, such as a goal with variables to be found. -/
+def acceptAny (_ : Env) (_ : ProofTree) : Except String ByteArray := .ok ByteArray.empty
+
 /-- Why a search ended. -/
 inductive Ending where
   | proved
@@ -196,6 +200,9 @@ structure Result where
   proof : Option ProofTree := none
   /-- The proof body, with its `END`. -/
   body : Option ByteArray := none
+  /-- The goal as it was proved: with the variables it had replaced by what the proof
+  needs them to be. Variables that the proof leaves open are still there. -/
+  answer : Option Exp := none
   /-- The proofs that reached the root and were not accepted by the verifier, and what
   it said about the last of them. -/
   rejected : Nat := 0
@@ -205,19 +212,20 @@ structure Result where
   env : Env
 
 /-- The proofs that have reached the root: the first that the verifier accepts. -/
-def takeRootProofs (vc : Verify.Ctx) (env : Env) :
-    Option (ProofTree × ByteArray) × Array (String × ProofTree) × Env := Id.run do
+def takeRootProofs (accept : Env → ProofTree → Except String ByteArray) (env : Env) :
+    Option (ProofTree × ByteArray × Exp) × Array (String × ProofTree) × Env := Id.run do
   let mut rejections := #[]
   for proof in env.rootProofs do
     let tree := makeProofTree env proof
-    match accept vc env tree with
-    | .ok body => return (some (tree, body), rejections, { env with rootProofs := #[] })
+    match accept env tree with
+    | .ok body => return (some (tree, body, proof.expr), rejections, { env with rootProofs := #[] })
     | .error msg => rejections := rejections.push (msg, tree)
   return (none, rejections, { env with rootProofs := #[] })
 
-/-- `ruProve`: searches for a proof of the task of `env` with a strategy. -/
-partial def search {σ : Type} (vc : Verify.Ctx) (env : Env) (strategy : Strategy σ) (limits : Limits := {}) :
-    IO Result := do
+/-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
+reaches the root is given to `accept`, which says whether it counts. -/
+partial def searchWith {σ : Type} (accept : Env → ProofTree → Except String ByteArray) (env : Env)
+    (strategy : Strategy σ) (limits : Limits := {}) : IO Result := do
   let start ← IO.monoMsNow
   -- a goal that is one of the premises needs no assertion; Russell's root is not matched
   -- with the premises
@@ -227,8 +235,8 @@ partial def search {σ : Type} (vc : Verify.Ctx) (env : Env) (strategy : Strateg
       | some (.assertion _) => false
       | none => true
     if allowed then
-      if let .ok body := accept vc env (.hyp k) then
-        return { ending := .proved, proof := some (.hyp k), body := some body, env }
+      if let .ok body := accept env (.hyp k) then
+        return { ending := .proved, proof := some (.hyp k), body := some body, answer := some env.task.goal, env }
   let (_, env) := (expandHyp 0 strategy.root).run env
   let mut env := env
   let mut st := strategy.init
@@ -248,14 +256,21 @@ partial def search {σ : Type} (vc : Verify.Ctx) (env : Env) (strategy : Strateg
         let (_, env') := (proveProp p only).run env
         env := env'
         if !env.rootProofs.isEmpty then
-          let (found, r, env') := takeRootProofs vc env
+          let (found, r, env') := takeRootProofs accept env
           env := env'
           rejected := rejected + r.size
           if let some (msg, tree) := r.back? then
             rejection := msg
             rejectedProof := some tree
-          if let some (tree, body) := found then
-            return { ending := .proved, proof := some tree, body := some body, rejected, rejection, rejectedProof, env }
+          if let some (tree, body, answer) := found then
+            return { ending := .proved, proof := some tree, body := some body, answer := some answer,
+                     rejected, rejection, rejectedProof, env }
   return { ending := .exhausted, rejected, rejection, rejectedProof, env }
+
+/-- `searchWith` for a theorem of the file: a proof counts if the verifier accepts its
+proof body. -/
+def search {σ : Type} (vc : Verify.Ctx) (env : Env) (strategy : Strategy σ) (limits : Limits := {}) :
+    IO Result :=
+  searchWith (accept vc) env strategy limits
 
 end Whitehead.Prove
