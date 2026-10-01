@@ -118,6 +118,10 @@ inductive StmtKind where
       (lits : Array NotaLit)
   /-- `input kind: ...;` (`isInput`) or `output kind: ...;` -/
   | inout (isInput : Bool) (kind : Ident) (args : Array InoutArg)
+  /-- `import "path";` — an extension of `mm0-rs`, not in `mm0.md`. The path is relative
+  to the directory of the file that contains the statement; `pathSpan` is the span of
+  the string literal. Imports are resolved by `Whitehead.Mm0.load`. -/
+  | importFile (path : String) (pathSpan : Span)
   deriving Repr, Inhabited
 
 structure Stmt where

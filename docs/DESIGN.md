@@ -11,14 +11,17 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Mm0/Lexer.lean` | bytes → tokens; line/column and error formatting |
 | `Whitehead/Mm0/Parser.lean` | tokens → statements (the grammar of `mm0.md`) |
 | `Whitehead/Mm0/Print.lean` | statements → normalized `.mm0` text |
-| `Main.lean` | the command line: `dump`, `bench`; `verify` and `prove` are stubs |
+| `Whitehead/Mm0/Load.lean` | a specification with its `import`s resolved |
+| `Main.lean` | the command line: `dump`, `join`, `bench`; `verify` and `prove` are stubs |
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
-| `tests/Tests/Mm0/Corpus.lean` | the parser over the `.mm0` files of the MM0 repository |
-| `tests/fixtures/questions/` | hand-assembled `.mmb` files behind the open questions |
-| `scripts/build-oracles.sh` | builds `mm0-c` into `.tools/bin` |
+| `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
+| `tests/Tests/Mm0/Corpus.lean` | the parser and loader over the `.mm0` files of the MM0 repository |
+| `tests/fixtures/disputed/` | hand-assembled `.mmb` files on which the sources disagree |
+| `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` and `mm0-hs` into `.tools/bin` |
+| `scripts/build-corpus.sh` | builds the `.mm0`/`.mmb` pairs for acceptance testing into `.tools/corpus` |
 
-There is no `.mmb` reader yet. Its intended shape is section 10 of `MMB-NOTES.md`.
+There is no `.mmb` reader yet. Its shape is section 10 of `MMB-NOTES.md`.
 
 ## The `.mm0` front end
 
@@ -40,18 +43,18 @@ The lexer reads a `ByteArray`, not a `String`.
 - Illegal bytes (tab, carriage return, non-ASCII, NUL) are detected where they stand and
   reported by name.
 
-A math string's text must be valid UTF-8, because it becomes a `String`.
+The text of a math string, and of a string literal, must be valid UTF-8, because it
+becomes a `String`.
 
 ### A pull lexer, no token array
 
 `Lexer.nextToken src pos` returns the token that starts at or after `pos`. The parser
 holds one token of lookahead and asks for the next one when it consumes it. No array of
 tokens is built: a token is up to four heap objects, and the `.mm0` side of the set.mm
-translation will be much larger than the example files. For the same reason the parser's
-entry point is `parseStmt?`, one statement at a time; `parse` (the whole file as an
-array) is a loop around it. A verifier that walks the `.mm0` file in step with the `.mmb`
-statements, as `mm0-c` does, can use `parseStmt?` and drop each statement after checking
-it.
+translation is 20 MB. For the same reason the parser's entry point is `parseStmt?`, one
+statement at a time; `parse` (the whole file as an array) is a loop around it. A verifier
+that walks the `.mm0` file in step with the `.mmb` statements can use `parseStmt?` and
+drop each statement after checking it.
 
 ### The parser monad
 
@@ -75,61 +78,107 @@ expected and what was found.
 The grammar has four binder productions (`type-binder`, `formula-type-binder`,
 `dummy-binder`, and the binders of `notation`). They differ only in what they allow, so
 there is one function with a context argument (`BinderCtx`): formulas only in the `(...)`
-binders of `axiom`/`theorem`; `.x` dummies only in `def`; `_` in a `{...}` binder only in
-`def`.
+binders of `axiom`/`theorem`; `.x` dummies only in `def`.
 
-### Where we follow `mm0.md`, and where we do not
+### What the parser accepts, and by whose authority
 
-The primary parser implements the grammar of `mm0.md` literally, with one exception. The
-`mm0-c` column is that verifier's own `.mm0` parser (`mm0-c/parser.c`); each row was
-checked by running `mm0-c` on a small file pair.
+The reference for `.mm0` files is `mm0.md` together with the formal specification
+(`examples/mm0.mm0`, which contains a lexer, a grammar and an elaborator for MM0, written
+in MM0). `mm0-rs` is not the reference here: its parser is the parser of the larger MM1
+language and accepts more. The table lists every point found where the three differ. The
+`mm0-rs` column was checked by running `mm0-rs compile` on a small file for each row.
 
-| Input | `mm0.md` | `mm0-c` | This parser |
-| ----- | -------- | ------- | ----------- |
-| `def all: type > term;` (arrows in a `def`) | no: a single `type` | accepts | **accepts** — `examples/hol.mm0` uses it |
-| `strict pure sort s;` (modifiers out of order) | no | accepts | rejects |
-| `prec 01` (leading zero) | no | accepts | rejects |
-| `term b {_: s}: s;` (`_` in a `{...}` binder outside `def`) | no | accepts | rejects |
-| `input ...;`, `output ...;` | optional | rejects | parses |
-| a comment ended by the end of the file | no: needs `\n` | accepts | accepts |
-| a NUL byte inside a math string | allowed by `[^$]*` | rejects | rejects |
-| `import "file";` | not in the grammar | rejects | rejects |
+| Input | `mm0.md` | formal spec | `mm0-rs` | This parser |
+| ----- | -------- | ----------- | -------- | ----------- |
+| `import "file";` | no | no | accepts | **accepts** — extension, see below |
+| `def all: type > term;` (arrows in a `def`) | no: a single `type` | no | accepts | **accepts** — extension, see below |
+| `strict pure sort s;` (modifiers out of order) | no | no | accepts | rejects |
+| `prec 01` (leading zero) | no | no | accepts | rejects |
+| a comment ended by the end of the file | no: needs `\n` | no | accepts | rejects |
+| `term a (.x: s): s;` (dummy outside `def`) | no | no (elaboration) | accepts | rejects |
+| `term b {_: s}: s;` (`_` in `{...}` outside `def`) | no | yes | accepts | accepts |
+| a NUL byte inside a math string | allowed by `[^$]*` | allowed | rejects | accepts |
+| `input ...;`, `output ...;` | optional | parsed, but such a file has no valid elaboration | `output string` only | parses |
+| a variable binder after a hypothesis binder | grammar allows it | no (elaboration) | rejects | parses; for the elaborator to reject |
 
-The MM0 repository's own tests (`tests/mm0_mmu/fail/bad-sort*`, `bad-int5`) expect the
-out-of-order modifiers and the leading zero to be rejected, which is why the grammar is
-followed there rather than `mm0-c`. This matters for phase 2: "every `.mmb` accepted by
-`mm0-c` is accepted by us" is stated for proof files, but the rows where `mm0-c` accepts
-and we reject are cases where the two would disagree on a *specification* file. It is an
-open question in `STATUS.md`.
+Two extensions go beyond both references, because the example files need them:
 
-`import` is an `mm0-rs` extension, resolved by `mm0-rs join`; nine of the example files
-start with it. The corpus test overwrites those lines with spaces so that the rest of the
-file is parsed.
+- **`import "file";`** is an `mm0-rs` extension, and nine of the example specifications
+  use it. It is a statement in the syntax tree (`StmtKind.importFile`), and
+  `Whitehead.Mm0.load` resolves it. The string literal has the escapes of `mm0-rs`
+  (`\\`, `\"`, `\n`, `\r`, `\xHH`); an unknown escape is an error here and a warning there.
+- **Arrows in a `def`** (`def all: type > term;`) are used by `examples/hol.mm0`. Neither
+  `mm0.md` nor the formal specification has them; `mm0-rs` and mm0-c accept them.
+
+Where `mm0.md` and the formal specification disagree with each other (the `_` row), the
+formal specification is followed.
 
 The grammar accepts some things that are wrong for reasons the primary parser does not
-look at, and that the later stages must check: unknown sorts and terms, a variable
-declared twice, dependencies on variables that are not bound, a bound variable given
-dependencies, a variable binder after a hypothesis, precedences out of range.
+look at, and that the elaborator must check: unknown sorts and terms, a variable declared
+twice, dependencies on variables that are not bound, a bound variable given dependencies,
+a variable binder after a hypothesis, precedences out of range.
+
+### Imports
+
+`load path` returns a `Spec`: the files that were read and one flat list of statements,
+each tagged with the file it stands in, with no `import` left. The meaning is that of
+`mm0-rs join`: textual inclusion at the place of the statement; the path is relative to
+the directory of the importing file; a file that has already been included is skipped.
+Files are identified by their canonical path (`IO.FS.realPath`).
+
+One deliberate difference: every import cycle is an error. `mm0-rs join` reports only a
+cycle that goes through the file it started from and silently skips the others (`mm0-rs
+compile` reports them all).
+
+Errors keep their place: a parse error in an imported file is reported in that file, and
+an unreadable import or a cycle is reported at the string literal of the `import`.
+
+The loader keeps the whole statement list in memory. When the verifier needs to stream
+(one statement at a time across files) it can do so with the same pieces — `parseStmt?`
+and a stack of open files — but nothing needs that yet.
 
 ### Printing
 
 `printStmts` writes the tree back as `.mm0`, one statement per line, math strings
-verbatim. It is the `dump` output for `.mm0` files and the round-trip check: printing a
-parsed file and parsing the result must give text that prints identically.
+verbatim. It is the `dump` output for `.mm0` files, the `join` output, and the round-trip
+check: printing a parsed file and parsing the result must give text that prints
+identically.
 
 ## Testing
 
-`lake test` builds and runs the `test` executable.
+`lake test` builds and runs the `test` executable, from the package root.
 
 - Snippet tests are self-contained. A rejection test marks the expected error position
   with `@` in the source and names a fragment of the expected message, so both where and
   what are checked.
+- Import tests run on the small files in `tests/fixtures/imports`.
 - Corpus tests need a checkout of the MM0 repository, named by `MM0_REPO`; without it they
   are reported as skipped. Every `.mm0` file there must parse and round-trip; every file
   of `tests/mm0_mmu/fail` must be rejected, except the one that is grammatical and wrong
-  for a later reason.
-- `tests/fixtures/questions/gen.py` assembles small `.mmb` files by hand. They are the
-  evidence for the disagreements in `MMB-NOTES.md` and will become differential tests.
+  for a later reason. If `mm0-rs` is available (`.tools/bin/mm0-rs`, or `MM0_RS`), the
+  joined form of every file with imports is compared with `mm0-rs join`.
+- `tests/fixtures/disputed/gen.py` assembles small `.mmb` files by hand, one for each
+  point on which the sources disagree about proof checking (`MMB-NOTES.md`, section 9).
+  They are the regression tests for the verifier's deliberate differences from
+  `mm0-rs` and mm0-c.
+
+### External tools and the acceptance corpus
+
+Neither is under version control; both are rebuilt by scripts.
+
+- `scripts/build-oracles.sh` builds `mm0-rs` (the reference implementation), `mm0-c` (a
+  second verifier and the speed yardstick) and, with `--with-hs`, `mm0-hs` (needed only
+  to translate set.mm) into `.tools/bin`, without writing into the MM0 checkout.
+- `scripts/build-corpus.sh` compiles every example that has a specification into
+  `.tools/corpus/<name>.mmb` with its joined `<name>.mm0`, translates set.mm into
+  `setmm.mm0`/`setmm.mmb`, and prints what `mm0-rs` and mm0-c say about each pair.
+
+Two workarounds are needed for set.mm, both because `mm0-hs` is older than its
+surroundings; the script documents them. It cannot read the double-quoted strings that
+`$j` comments in set.mm now contain, so they are requoted in a copy. And it writes the
+index in a layout that predates mmb.md, which `mm0-rs` rejects, so the index is removed
+from the translated file. The names of the set.mm statements are still available from
+`setmm.mm0`, where every one of them is declared.
 
 ## The prover
 

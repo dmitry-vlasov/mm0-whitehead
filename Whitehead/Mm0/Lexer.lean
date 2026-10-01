@@ -20,6 +20,9 @@ inductive TokenKind where
   | math (text : String)
   /-- One of `* . : ; ( ) > { } = _`. -/
   | sym (c : Char)
+  /-- A string literal `"..."`, with its escapes resolved. Not part of `mm0.md`: it
+  exists for the `import` statement, an extension of `mm0-rs`. -/
+  | str (value : String)
   | eof
   deriving Repr, BEq, Inhabited
 
@@ -47,17 +50,20 @@ namespace Lexer
 partial def scanWhile (src : ByteArray) (p : UInt8 → Bool) (pos : Nat) : Nat :=
   if pos < src.size && p (src.get! pos) then scanWhile src p (pos + 1) else pos
 
-/-- Skips whitespace (space and newline only) and `--` line comments. A comment may be
-ended by the end of the file instead of a newline. -/
-partial def skipWs (src : ByteArray) (pos : Nat) : Nat :=
+/-- Skips whitespace (space and newline only) and `--` line comments. A comment runs up
+to and including a newline; one that is cut off by the end of the file is an error, as
+in `mm0.md` and in the formal specification (`regexLineComment`). -/
+partial def skipWs (src : ByteArray) (pos : Nat) : Except ParseError Nat :=
   if pos < src.size then
     let c := src.get! pos
     if c == 0x20 || c == 0x0A then
       skipWs src (pos + 1)
     else if c == 0x2D && pos + 1 < src.size && src.get! (pos + 1) == 0x2D then
-      skipWs src (scanWhile src (· != 0x0A) (pos + 2))
-    else pos
-  else pos
+      let stop := scanWhile src (· != 0x0A) (pos + 2)
+      if stop < src.size then skipWs src (stop + 1)
+      else .error ⟨pos, "a comment must end with a newline"⟩
+    else .ok pos
+  else .ok pos
 
 def describeByte (c : UInt8) : String :=
   if c == 0x00 then "NUL"
@@ -71,9 +77,44 @@ def describeByte (c : UInt8) : String :=
 partial def decimal (src : ByteArray) (pos stop : Nat) (acc : Nat := 0) : Nat :=
   if pos < stop then decimal src (pos + 1) stop (acc * 10 + (src.get! pos).toNat - 0x30) else acc
 
+def hexDigit (c : UInt8) : Option UInt8 :=
+  if isDigit c then some (c - 0x30)
+  else if 0x41 ≤ c && c ≤ 0x46 then some (c - 0x41 + 10)
+  else if 0x61 ≤ c && c ≤ 0x66 then some (c - 0x61 + 10)
+  else none
+
+/-- The contents of a string literal whose opening `"` is at `start`, and the position
+after its closing `"`. The escapes are those of `mm0-rs`: `\\`, `\"`, `\n`, `\r` and
+`\xHH`. `mm0-rs` warns about any other escape and keeps the backslash; here it is an
+error. `pos` is the next byte to read and `acc` the bytes collected so far. -/
+partial def scanString (src : ByteArray) (start pos : Nat) (acc : ByteArray) :
+    Except ParseError (ByteArray × Nat) :=
+  if pos ≥ src.size then
+    .error ⟨start, "unclosed string literal"⟩
+  else
+    let c := src.get! pos
+    if c == 0x22 then
+      .ok (acc, pos + 1)
+    else if c == 0x5C then
+      if pos + 1 ≥ src.size then
+        .error ⟨start, "unclosed string literal"⟩
+      else
+        let e := src.get! (pos + 1)
+        if e == 0x5C || e == 0x22 then scanString src start (pos + 2) (acc.push e)
+        else if e == 0x6E then scanString src start (pos + 2) (acc.push 0x0A)
+        else if e == 0x72 then scanString src start (pos + 2) (acc.push 0x0D)
+        else if (e == 0x78 || e == 0x58) && pos + 3 < src.size then
+          match hexDigit (src.get! (pos + 2)), hexDigit (src.get! (pos + 3)) with
+          | some h, some l => scanString src start (pos + 4) (acc.push (h * 16 + l))
+          | _, _ => .error ⟨pos, "invalid hex escape in a string literal: expected `\\xHH`"⟩
+        else
+          .error ⟨pos, "unknown escape sequence in a string literal"⟩
+    else
+      scanString src start (pos + 1) (acc.push c)
+
 /-- The token that starts at or after `pos`, after skipping whitespace and comments. -/
-def nextToken (src : ByteArray) (pos : Nat) : Except ParseError Token :=
-  let start := skipWs src pos
+def nextToken (src : ByteArray) (pos : Nat) : Except ParseError Token := do
+  let start ← skipWs src pos
   if start ≥ src.size then
     .ok ⟨.eof, ⟨start, start⟩⟩
   else
@@ -93,15 +134,18 @@ def nextToken (src : ByteArray) (pos : Nat) : Except ParseError Token :=
       else
         .ok ⟨.number (decimal src start stop), ⟨start, stop⟩⟩
     else if c == 0x24 then
-      let stop := scanWhile src (fun b => b != 0x24 && b != 0x00) (start + 1)
+      let stop := scanWhile src (· != 0x24) (start + 1)
       if stop ≥ src.size then
         .error ⟨start, "unterminated math string: no closing `$`"⟩
-      else if src.get! stop == 0x00 then
-        .error ⟨stop, "illegal character NUL in a math string"⟩
       else
         match String.fromUTF8? (src.extract (start + 1) stop) with
         | some text => .ok ⟨.math text, ⟨start, stop + 1⟩⟩
         | none => .error ⟨start, "this math string is not valid UTF-8"⟩
+    else if c == 0x22 then
+      let (bytes, stop) ← scanString src start (start + 1) ByteArray.empty
+      match String.fromUTF8? bytes with
+      | some value => .ok ⟨.str value, ⟨start, stop⟩⟩
+      | none => .error ⟨start, "this string literal is not valid UTF-8"⟩
     else if isSymbol c then
       .ok ⟨.sym (Char.ofNat c.toNat), ⟨start, start + 1⟩⟩
     else

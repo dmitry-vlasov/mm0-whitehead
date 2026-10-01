@@ -63,8 +63,11 @@ def lexerTests : TestM Unit := do
     (.ok [.math " a -> b ", .math "", .math "\n x\n", .eof])
   checkEq "lex: no space needed between lexemes" (tokenKinds "a:b>c$x$;")
     (.ok [.ident "a", .sym ':', .ident "b", .sym '>', .ident "c", .math "x", .sym ';', .eof])
-  checkEq "lex: comments" (tokenKinds "a -- b c\n--| doc\n d --")
+  checkEq "lex: comments" (tokenKinds "a -- b c\n--| doc\n d --\n")
     (.ok [.ident "a", .ident "d", .eof])
+  checkEq "lex: string literals and their escapes"
+    (tokenKinds "\"a/b.mm0\" \"\" \"q\\\"\\\\\\n\\r\\x41\"")
+    (.ok [.str "a/b.mm0", .str "", .str "q\"\\\n\rA", .eof])
   checkEq "lex: a comment marker inside a math string is text" (tokenKinds "$ a -- b $")
     (.ok [.math " a -- b ", .eof])
   checkEq "lex: empty input" (tokenKinds "") (.ok [.eof])
@@ -106,6 +109,8 @@ def acceptTests : TestM Unit := do
     "term foo {x y: set} (_: wff x): wff x y > set > wff y;\n"
   printsAs "term with no arguments" "term bot: wff;" "term bot: wff;\n"
   printsAs "binder with no names" "term foo (: wff): wff;" "term foo (: wff): wff;\n"
+  -- the grammar of mm0.md has no `_` here; the formal specification allows it
+  printsAs "anonymous bound variable" "term foo {_ x: s}: s;" "term foo {_ x: s}: s;\n"
   printsAs "axiom with hypotheses as arrows"
     "axiom ax_mp (ph ps: wff): $ ph $ > $ ph -> ps $ > $ ps $;"
     "axiom ax_mp (ph ps: wff): $ ph $ > $ ph -> ps $ > $ ps $;\n"
@@ -148,7 +153,15 @@ def acceptTests : TestM Unit := do
       ++ "prefix prefix: $x$ prec 0; coercion coercion: sort > pure;"
       ++ "notation notation (input: sort): sort = ($y$: max) input; input input:; output output: output;")
   accepts "empty file" ""
-  accepts "only comments" "-- nothing\n   -- here"
+  accepts "only comments" "-- nothing\n   -- here\n"
+  -- a math string is any bytes other than `$`
+  accepts "NUL inside a math string" "axiom a: $ x\x00 $;"
+  -- `import` is an mm0-rs extension, not in mm0.md
+  printsAs "import" "import  \"peano.mm0\" ;" "import \"peano.mm0\";\n"
+  printsAs "import between statements, path with escapes"
+    "sort s; import \"a\\\\b \\\"c\\\".mm0\"; sort t;"
+    "sort s;\nimport \"a\\\\b \\\"c\\\".mm0\";\nsort t;\n"
+  accepts "import as a name" "sort import; term import: import;"
 
 def rejectTests : TestM Unit := do
   -- tests/mm0_mmu/fail
@@ -178,7 +191,11 @@ def rejectTests : TestM Unit := do
   rejects "fail/non-ascii2" "sort s@ ;" "non-ASCII"
   -- lexical
   rejects "NUL byte" "sort s@\x00;" "NUL"
-  rejects "NUL byte in a math string" "axiom a: $ x@\x00 $;" "NUL"
+  rejects "comment without a final newline" "sort s; @-- the end" "newline"
+  rejects "unclosed string literal" "import @\"peano.mm0;\n" "unclosed string literal"
+  rejects "unknown escape in a string literal" "import \"a@\\qb\";" "escape"
+  rejects "bad hex escape in a string literal" "import \"a@\\xZ1\";" "escape"
+  rejects "string literal that is not UTF-8" "import @\"\\xff\";" "UTF-8"
   rejects "single dash" "sort s; @- comment" "illegal character"
   rejects "number glued to a letter" "prefix p: $+$ prec 12@a;" "number"
   rejects "repeated modifier" "pure @pure sort s;" "order"
@@ -196,7 +213,6 @@ def rejectTests : TestM Unit := do
   rejects "dangling arrow" "term foo: wff > @;" "expected a sort name"
   rejects "dummy outside def" "term foo (x @.y: s): s;" "only allowed in a `def`"
   rejects "dummy without a name" "def foo (.@: s): s;" "expected a variable name"
-  rejects "anonymous bound variable" "term foo {@_: s}: s;" "not allowed in a `{...}` binder"
   rejects "formula as a term argument" "term foo (h: @$ x $): s;" "only allowed in an `axiom` or `theorem`"
   rejects "formula as a term result" "term foo: @$ x $;" "expected a sort name"
   rejects "formula in a curly binder" "theorem foo {x: @$ a $}: $ a $;" "must have a sort"
@@ -216,6 +232,10 @@ def rejectTests : TestM Unit := do
   rejects "delimiter without a math string" "delimiter @;" "expected a math string"
   rejects "input kind missing" "input @: $x$;" "expected an input kind"
   rejects "stray token in input" "input ast: $x$ @5;" "expected `;`"
+  rejects "import without a string" "import @peano;" "expected a string literal"
+  rejects "import without semicolon" "import \"x.mm0\"@" "expected `;`"
+  rejects "string literal where a name belongs" "sort @\"s\";" "expected a sort name"
+  rejects "modifier before import" "pure @import \"x.mm0\";" "expected `sort`"
 
 def errorFormatTests : TestM Unit := do
   let src := "sort s;\nterm foo (x: ): s;\n"

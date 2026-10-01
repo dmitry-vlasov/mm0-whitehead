@@ -4,7 +4,7 @@ Runs the `.mm0` parser over the `.mm0` files of a checkout of the MM0 repository
 The checkout is found through the environment variable `MM0_REPO`; without it these
 tests are skipped. Nothing from that repository is copied here.
 -/
-import Whitehead.Mm0.Parser
+import Whitehead.Mm0.Load
 import Whitehead.Mm0.Print
 import Tests.Harness
 
@@ -25,25 +25,29 @@ def rejectDir : String := "tests/mm0_mmu/fail"
 the primary parser looks at. -/
 def grammaticalFailures : List String := ["blank_binder_alias.mm0"]
 
-/-- `import "file";` is an extension of `mm0-rs` (resolved by `mm0-rs join`) and is not
-part of the grammar in `mm0.md`. To exercise the parser on the files that use it, lines
-that start with `import "` are overwritten with spaces, which keeps all offsets. Returns
-the new source and the number of lines blanked. -/
-def blankImports (src : ByteArray) : ByteArray × Nat := Id.run do
-  let key := "import \"".toUTF8
-  let mut out := src
-  let mut count := 0
-  let mut lineStart := 0
-  while lineStart < src.size do
-    let mut lineEnd := lineStart
-    while lineEnd < src.size && src.get! lineEnd != 0x0A do
-      lineEnd := lineEnd + 1
-    if lineEnd - lineStart ≥ key.size && src.extract lineStart (lineStart + key.size) == key then
-      count := count + 1
-      for i in [lineStart:lineEnd] do
-        out := out.set! i 0x20
-    lineStart := lineEnd + 1
-  return (out, count)
+/-- The `mm0-rs` executable to compare `import` resolution against: `$MM0_RS`, or the one
+that `scripts/build-oracles.sh` puts in `.tools/bin`. -/
+def findMm0Rs : IO (Option String) := do
+  if let some p ← IO.getEnv "MM0_RS" then return some p
+  let p : System.FilePath := ".tools/bin/mm0-rs"
+  return if ← p.pathExists then some p.toString else none
+
+/-- Our joined form of `path` against that of `mm0-rs join --bare`, both printed by our
+printer so that layout and comments do not matter. -/
+def checkJoin (mm0rs : String) (path : System.FilePath) : TestM Unit := do
+  let name := s!"join: {path}"
+  match ← load path with
+  | .error e => check name false e.format
+  | .ok spec =>
+    let out ← IO.Process.output { cmd := mm0rs, args := #["join", "--bare", path.toString] }
+    if out.exitCode != 0 then
+      check name false s!"mm0-rs join failed: {out.stderr}"
+    else
+      match parseString out.stdout with
+      | .error e => check name false s!"output of mm0-rs join rejected: {e.format "<join>" out.stdout.toUTF8}"
+      | .ok theirs =>
+        check name (printStmts theirs == printStmts (spec.stmts.map (·.stmt)))
+          "our joined specification differs from that of mm0-rs join"
 
 def mm0Files (dir : System.FilePath) : IO (Array System.FilePath) := do
   if !(← dir.isDir) then return #[]
@@ -59,11 +63,10 @@ def corpusTests : TestM Unit := do
   let mut files := 0
   let mut bytes := 0
   let mut stmts := 0
-  let mut withImports := 0
+  let mut withImports := #[]
   for dir in acceptDirs do
     for path in ← mm0Files (root / dir) do
-      let (src, imports) := blankImports (← IO.FS.readBinFile path)
-      if imports > 0 then withImports := withImports + 1
+      let src ← IO.FS.readBinFile path
       let name := s!"corpus: {path}"
       match parse src with
       | .error e => check name false (e.format path.toString src)
@@ -71,6 +74,8 @@ def corpusTests : TestM Unit := do
         files := files + 1
         bytes := bytes + src.size
         stmts := stmts + ss.size
+        if ss.any (fun s => s.kind matches .importFile ..) then
+          withImports := withImports.push path
         let printed := printStmts ss
         match parseString printed with
         | .error e => check name false s!"printed form rejected: {e.format "<printed>" printed.toUTF8}"
@@ -82,7 +87,13 @@ def corpusTests : TestM Unit := do
     match parse src with
     | .ok _ => check name grammatical "accepted, but it is in the fail corpus"
     | .error e => check name (!grammatical) s!"rejected, but it is grammatical: {e.msg}"
-  IO.println s!"mm0 corpus: parsed {files} files, {bytes} bytes, {stmts} statements \
-    ({withImports} files with `import` lines blanked)"
+  IO.println s!"mm0 corpus: parsed {files} files, {bytes} bytes, {stmts} statements"
+  -- import resolution, compared with mm0-rs on every file that has imports
+  match ← findMm0Rs with
+  | none => skip "join against mm0-rs" "no mm0-rs: run scripts/build-oracles.sh or set MM0_RS"
+  | some mm0rs =>
+    for path in withImports do
+      checkJoin mm0rs path
+    IO.println s!"mm0 corpus: joined {withImports.size} files with imports, same as mm0-rs join"
 
 end Tests.Mm0

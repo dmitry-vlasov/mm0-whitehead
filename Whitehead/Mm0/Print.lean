@@ -54,6 +54,16 @@ def SimpleNotaKind.print : SimpleNotaKind → String
   | .infl => "infixl"
   | .infr => "infixr"
 
+/-- A string literal that the lexer reads back as `s`. -/
+def quoteString (s : String) : String :=
+  let body := s.foldl (init := "") fun acc c =>
+    if c == '\\' then acc ++ "\\\\"
+    else if c == '"' then acc ++ "\\\""
+    else if c == '\n' then acc ++ "\\n"
+    else if c == '\r' then acc ++ "\\r"
+    else acc.push c
+  "\"" ++ body ++ "\""
+
 def Stmt.print (s : Stmt) : String :=
   match s.kind with
   | .sort mods name => mods.print ++ "sort " ++ name.name ++ ";"
@@ -88,6 +98,7 @@ def Stmt.print (s : Stmt) : String :=
   | .inout isInput kind args =>
     let args := args.foldl (fun acc a => acc ++ " " ++ a.print) ""
     (if isInput then "input " else "output ") ++ kind.name ++ ":" ++ args ++ ";"
+  | .importFile path _ => "import " ++ quoteString path ++ ";"
 
 /-- All statements, one per line. -/
 def printStmts (stmts : Array Stmt) : String :=

@@ -1,0 +1,3 @@
+import "left.mm0";
+import "sub/right.mm0";
+sort main;

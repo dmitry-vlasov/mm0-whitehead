@@ -6,6 +6,7 @@ def usage : String :=
   "usage: mm0-whitehead <command> [arguments]
 
   dump <file.mm0>                print the parsed statements of a specification file
+  join <file.mm0>                print a specification with its imports included
   dump <file.mmb>                print a decoded proof file            (not implemented yet)
   verify <file.mm0> <file.mmb>   check a proof file against its specification  (phase 2)
   prove ...                      automated proof search                        (phase 3)
@@ -25,6 +26,15 @@ def dumpMm0 (path : String) : IO UInt32 := do
     return 0
   | .error e =>
     IO.eprintln (e.format path src)
+    return 1
+
+def joinMm0 (path : String) : IO UInt32 := do
+  match ← Mm0.load path with
+  | .ok spec =>
+    IO.print (Mm0.printStmts (spec.stmts.map (·.stmt)))
+    return 0
+  | .error e =>
+    IO.eprintln e.format
     return 1
 
 def dump (path : String) : IO UInt32 :=
@@ -55,6 +65,7 @@ def benchMm0 (path : String) : IO UInt32 := do
 def main (args : List String) : IO UInt32 := do
   match args with
   | ["dump", path] => dump path
+  | ["join", path] => joinMm0 path
   | "bench" :: path :: paths =>
     let mut code : UInt32 := 0
     for p in path :: paths do

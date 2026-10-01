@@ -28,6 +28,7 @@ def describe : TokenKind → String
   | .number n => s!"number {n}"
   | .math _ => "a math string"
   | .sym c => s!"`{c}`"
+  | .str _ => "a string literal"
   | .eof => "end of file"
 
 @[inline] def peek : ParserM Token :=
@@ -102,29 +103,29 @@ inductive BinderCtx where
   | term
   /-- `formula-type-binder`, in `axiom` and `theorem`: formulas allowed in `(...)` -/
   | assert
-  /-- `dummy-binder`, in `def`: `.x` allowed, and `_` allowed in `{...}` too -/
+  /-- `dummy-binder`, in `def`: `.x` allowed -/
   | defn
   deriving BEq
 
-/-- The names of one binder, up to but not including the `:`. -/
-partial def parseBinderNames (ctx : BinderCtx) (curly : Bool) (acc : Array LocalName) :
+/-- The names of one binder, up to but not including the `:`. The grammar of `mm0.md`
+has no `_` in a `{...}` binder outside `def`; the formal specification (`parseCurlyBinder`
+in `mm0.mm0`) allows it everywhere, and that is what is done here. -/
+partial def parseBinderNames (ctx : BinderCtx) (acc : Array LocalName) :
     ParserM (Array LocalName) := do
   let t ← peek
   match t.kind with
   | .ident name =>
     advance
-    parseBinderNames ctx curly (acc.push ⟨some name, false, t.span⟩)
+    parseBinderNames ctx (acc.push ⟨some name, false, t.span⟩)
   | .sym '_' =>
-    if curly && ctx != .defn then
-      errorAt t.span.start "the anonymous variable `_` is not allowed in a `{...}` binder"
     advance
-    parseBinderNames ctx curly (acc.push ⟨none, false, t.span⟩)
+    parseBinderNames ctx (acc.push ⟨none, false, t.span⟩)
   | .sym '.' =>
     if ctx != .defn then
       errorAt t.span.start "dummy variables (`.x`) are only allowed in a `def`"
     advance
     let x ← expectIdent "a variable name"
-    parseBinderNames ctx curly (acc.push ⟨some x.name, true, ⟨t.span.start, x.span.stop⟩⟩)
+    parseBinderNames ctx (acc.push ⟨some x.name, true, ⟨t.span.start, x.span.stop⟩⟩)
   | .sym ':' => return acc
   | _ => expected "a variable name or `:`"
 
@@ -137,7 +138,7 @@ partial def parseBinders (ctx : BinderCtx) (acc : Array Binder) : ParserM (Array
     | .sym '(' => pure false
     | _ => return acc
   advance
-  let names ← parseBinderNames ctx curly #[]
+  let names ← parseBinderNames ctx #[]
   expectSym ':'
   let ty ← peek
   let type ←
@@ -299,6 +300,12 @@ def parseStmtKind (kw : String) : ParserM StmtKind := do
     let kind ← expectIdent (if kw == "input" then "an input kind" else "an output kind")
     expectSym ':'
     return .inout (kw == "input") kind (← parseInoutArgs #[])
+  | "import" =>
+    advance
+    let t ← peek
+    match t.kind with
+    | .str path => advance; return .importFile path t.span
+    | _ => expected "a string literal (the path of the file to import)"
   | _ => expected "a statement"
 
 /-- The next statement, or `none` at the end of the file. -/
