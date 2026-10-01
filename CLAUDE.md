@@ -143,8 +143,11 @@ Deliverables:
   conditions, `unfold` side conditions, and the proof stack machine.
 - A verifier that is **structurally close to the MM0 semantics formalization**, so that
   it can be verified against it later. Prefer clarity over cleverness in the checking
-  logic; put performance work in the data representation (hash-consing of expressions,
-  arrays, in-place stacks), not in the logic.
+  logic; put performance work in the data representation (arrays, in-place stacks), not
+  in the logic.
+- Expressions are compared by **node identity**, as the format, `mm0b.lean` and `mm0-rs`
+  do: a node is its allocation index in a per-statement store. No hash-consing in the
+  verifier (it would accept files the format rejects); hash-consing is for the prover.
 
 Acceptance (differential testing against `mm0-rs`, with the formal semantics as the
 judge of any disagreement):

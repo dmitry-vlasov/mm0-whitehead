@@ -4,18 +4,8 @@ Last updated: 2026-10-01.
 
 ## Phase
 
-**Phase 1 — readers**: the deliverables are done and the acceptance tests pass. Waiting
-for confirmation before phase 2 is started.
-
-| Deliverable | State |
-| ----------- | ----- |
-| `docs/MMB-NOTES.md` | reviewed; reworked on the formal semantics and `mm0-rs` |
-| `.mm0` primary parser (statements, binders, source positions, error messages) | done |
-| `.mm0` `import` | done, same result as `mm0-rs join` |
-| `.mm0` secondary parser and elaboration (notations, coercions, formulas as trees) | done |
-| `.mmb` reader | done |
-| `dump` for `.mm0` and `.mmb`, `join` | done |
-| acceptance corpus (example pairs, set.mm translation) | built, by script |
+**Phase 1 — readers**: done; the acceptance tests pass (report below).
+**Phase 2 — independent verifier**: in progress.
 
 ### Phase 1 acceptance
 
@@ -48,9 +38,13 @@ for confirmation before phase 2 is started.
 1. The formal semantics are the final judge: `mm0.md` plus the formal specification
    (`examples/mm0.mm0`, `mm0-lean/mm0/*.lean`).
 2. `mm0-rs` is the reference implementation, not mm0-c. mm0-c accepts a proof that the
-   formal semantics reject (`tests/fixtures/disputed/bound_arg_vars`).
+   formal semantics reject (`tests/fixtures/disputed/bound_arg_vars`). mm0-c is kept for
+   the speed comparison.
 3. For `.mm0` files the reference is `mm0.md` plus the formal specification.
 4. The reader supports `import`.
+5. The verifier compares expressions by node identity; no hash-consing there.
+6. `free` sorts: as both implementations do (no dummy of a `free` sort; every free
+   variable of a def's value among the dependencies of its return type).
 
 `CLAUDE.md` states this order of authority; `MMB-NOTES.md` section 9 applies it to each
 point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` grammar.
@@ -123,23 +117,13 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 
 ## Open points
 
-Questions that the sources do not settle, or where what was done goes beyond them. None
-blocks the `.mmb` reader.
-
-1. **`free` sorts** (`MMB-NOTES.md` section 9, point 5). `mm0.md` and `mm0.mm0` give three
-   different readings; both implementations do the strictest thing. Proposal: do the
-   same. To confirm before phase 2.
-2. **Identity, not hash-consing, in the verifier** (point 18). The brief puts
-   hash-consing among the performance techniques for phase 2. The format, `mm0b.lean`
-   and both implementations compare expressions by node identity, and a hash-consing
-   verifier would accept files they reject. Proposal: identity in the verifier,
-   hash-consing in the prover. To confirm before phase 2.
-3. **Arrows in `def`** are accepted because `examples/hol.mm0` needs them, although
-   neither `mm0.md` nor the formal specification has them (`DESIGN.md`).
-4. **Checking a `.mmb` against its `.mm0`** has no counterpart in `mm0-rs`. That step
-   will follow the formal specification; mm0-c is the only other implementation of it
-   and can serve as a comparison there. mm0-c is also kept as the speed yardstick.
-5. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
+1. **Arrows in `def`** (`def all: type > term;`, five statements in `examples/hol.mm0`)
+   are accepted although neither `mm0.md` nor the formal specification has them
+   (`DESIGN.md`). Asked on 2026-10-01; details given, no decision yet.
+2. **Checking a `.mmb` against its `.mm0`** has no counterpart in `mm0-rs`. That step
+   follows the formal specification and is tested on hand-written cases and on the
+   corpus pairs.
+3. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
    corpus script removes it. Our reader reads the current layout only, so `setmm.mmb`
    dumps with generated names (`T5198`); the real names are in `setmm.mm0`.
 

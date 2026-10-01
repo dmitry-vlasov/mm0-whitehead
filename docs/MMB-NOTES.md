@@ -571,7 +571,7 @@ repository.
 | 2 | which bound variables a regular argument must avoid | those it does not depend on | same | same | same; mmb.md's text is inverted |
 | 3 | free variables of a bound argument, in a definition | none, except through the return type | same | same | same; mmb.md's text is wrong |
 | 4 | `UDummy`: disjoint from what | the arguments | arguments, earlier dummies, finished saved terms | arguments, earlier dummies | arguments and earlier dummies |
-| 5 | dummies of a `free` sort; free variables of a def's value | unclear: `mm0.md` and `mm0.mm0` differ | no such dummies; all free variables in `ret` | same as `mm0-rs` | as the implementations — **to confirm** |
+| 5 | dummies of a `free` sort; free variables of a def's value | unclear: `mm0.md` and `mm0.mm0` differ | no such dummies; all free variables in `ret` | same as `mm0-rs` | as the implementations |
 | 6 | `Sorry` (`sorry_expr`, `sorry_conv`) | no such rule | accepts the file | rejects | reject |
 | 7 | `LocalDef` on an entry that is not a def (`local_term`) | not allowed | rejects | **accepts** | reject |
 | 8 | the proof body of an `axiom` or `def` (`axiom_body_mismatch`) | checked (`mm0b.lean`) | **not read** | checked | check |
@@ -635,7 +635,7 @@ its two parts disagree:
 `mm0-rs` and mm0-c both do the strictest thing: no dummy may have a `free` sort, and
 every free variable of a def's value must be among the dependencies of its return type.
 Whatever they accept is accepted under each of the three readings, so following them is
-safe. It is still a choice among readings, and needs confirming.
+safe. This choice among the readings was confirmed on 2026-10-01.
 
 **6. `Sorry`.** `mm0-rs` treats a theorem whose proof contains `Sorry` as a theorem
 without a proof, keeps it, and exits with 0. That is right for a compiler that may import
@@ -653,13 +653,13 @@ section 4.)
 "non-fatal" error, and the `.mmb` importer drops non-fatal errors. The case is
 `tests/mmb/fail/gi_dummy_reserved_bit.mmb` in the MM0 repository.
 
-**18. Equality is identity.** The brief suggests hash-consing as the place for
-performance work in the verifier. A verifier that hash-conses treats structurally equal
+**18. Equality is identity.** A verifier that hash-conses treats structurally equal
 terms as the same node and therefore accepts files that the format, `mm0b.lean` and both
 implementations reject — for example one in which a `TermSave` was turned into a `Term`.
 We use the model of the format: a node is its allocation index in a per-statement store.
 That needs no hashing and is also the fastest. Hash-consing remains the right tool for
-the prover.
+the prover. (The brief first listed hash-consing among the verifier's techniques; that
+was changed on 2026-10-01.)
 
 Noticed in passing, in the formal specification: in `VerifyProofThm` (`mm0.mm0`) and
 `safe_subst` (`mm0.lean`) the test "`u` is a bound variable" looks `u` up in the *proof
