@@ -8,3 +8,4 @@ import Tests.Mmb.Reader
 import Tests.Mmb.Corpus
 import Tests.Verify.Proofs
 import Tests.Verify.Spec
+import Tests.Verify.Cases

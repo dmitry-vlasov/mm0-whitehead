@@ -1,0 +1,48 @@
+base	OK	A	A	
+conv_all	OK	A	A	
+dummy_thm	OK	A	A	
+stack_underflow	stack underflow	R	R	
+ref_range	heap entry 9 does not exist	R	R	
+term_forward	not declared before this statement	A	R	point 8
+thm_forward	not declared before this statement	R	R	
+term_arg_sort	Term: argument 0 has sort 1	R	R	
+bound_position	must be a bound variable	R	R	
+dummy_strict	strict or free	R	R	
+dummy_free	strict or free	R	R	
+dummy_sort_range	sort 9 is not declared	R	R	
+hyp_not_provable	provable sort	R	R	
+thm_in_def	Thm in a definition	A	R	point 8
+hyp_in_def	Hyp in a definition	A	R	point 8
+thm_arg_sort	Thm: argument 0 has sort 1	R	R	
+thm_missing_subproof	subproof is missing	R	R	
+conv_no_proof	expected a proof	R	R	
+refl_not_identical	not the same expression	R	R	
+cong_mismatch	not applications of the same term	R	R	
+unfold_nondef	is not a definition	R	R	
+unfold_wrong	unify failure	R	R	
+save_coconv	cannot be saved	R	R	
+convref_mismatch	not the obligation on the stack	R	R	
+dv_bound_twice	occurs in an earlier argument	R	R	
+dv_regular	not declared to depend on	R	R	
+udummy_in_args	also occurs in the arguments or is another dummy	R	R	
+udummy_twice	also occurs in the arguments or is another dummy	R	R	
+def_free_var	free variables that the return type does not declare	R	R	
+def_sort	the value has sort 1	R	R	
+def_unify_mismatch	unify failure	A	R	point 8
+def_two_on_stack	exactly one expression	A	R	point 8
+binder_strict_bound	strict sort	R	R	
+binder_bound_deps	exactly its own bit	A	R	point 11
+binder_deps_later	not declared before it	R	R	
+ret_bound	marked as a bound variable	R	R	
+ret_deps	the return type depends	R	R	
+pure_result	pure sort	R	R	
+many_bound	more than 55 bound variables	A	R	point 10
+sort_forward	sort 1 is not declared before this statement	R	R	
+axiom_two_on_stack	exactly one element	A	R	point 8
+axiom_with_proof	must leave its statement, an expression	A	R	point 8
+thm_with_expr	must leave a proof	R	R	
+concl_not_provable	provable sort	R	R	
+hyp_extra	more hypotheses than the statement	R	R	
+hyp_missing	more hypotheses than the proof declares	A	R	point 8
+concl_mismatch	unify failure	R	R	
+counters	the header has	A	R	point 20
