@@ -29,7 +29,13 @@ def sig : Sig where
              ("wceq", wff, #[cls, cls]), ("cv", cls, #[setvar]), ("wtru", wff, #[])]
   consts := #[("ph", wff), ("ps", wff), ("X", name), ("Y", name), ("U", setvar), ("C", cls)]
   vars := #[("a", wff), ("b", wff), ("c", wff), ("d", wff), ("x", name), ("y", name),
-            ("z", name), ("A", cls), ("B", cls), ("u", setvar), ("w", setvar)]
+            ("z", name), ("A", cls), ("B", cls), ("u", setvar), ("w", setvar),
+            -- a second set, for expressions that must share no variable with the first
+            ("p", wff), ("q", wff), ("r", wff), ("x'", name), ("y'", name), ("P", cls), ("Q", cls),
+            ("u'", setvar)]
+
+/-- Where the second set of variables of `sig` starts. -/
+def secondVars : Nat := 11
 
 namespace Sig
 
