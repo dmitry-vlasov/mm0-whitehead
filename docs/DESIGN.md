@@ -835,9 +835,10 @@ the same limit and sent 361 proofs to the verifier to be rejected; with the cond
 carried, 374 are proved and none is rejected.
 
 Speed: a search makes about 500,000 assertion nodes per second, with 300 to 2,800
-assertions in the index. A profile of a search (callgrind) has the lookup in the index
-at 30% and the making of the nodes at most of the rest; `addProof` is small as long as
-the tree is shallow.
+assertions to choose from. A profile of a search (callgrind), taken when it made
+300,000, had the lookup in the index at 30% and 45% in a list of leaves that was
+filtered on every expansion; that list is now cleaned once per round. `addProof` is
+small as long as the tree is shallow, which is why `ruUnifySubsProd` could wait.
 
 ### Questions
 
