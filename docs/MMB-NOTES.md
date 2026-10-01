@@ -671,24 +671,63 @@ Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.m
 
 ## 10. The reader
 
+`Whitehead/Mmb/Types.lean`, `Reader.lean`, `Encode.lean`, `Dump.lean`.
+
 - Input: the whole file as one `ByteArray` (core Lean has no memory mapping).
-- **Decoded eagerly**: header, sort table, term table and theorem table with their
-  binders as structured values (`sort`, `bound`, `deps`), every unify stream as an
-  `Array UnifyCmd`, the statement list (kind, byte range of the body, the table index it
-  consumes), and the `Name`/`VarN`/`HypN` index tables.
-- **Proof bodies are decoded on demand.** The reader gives a function that decodes one
-  statement's body into an `Array ProofCmd`, and a non-allocating step function
-  `(bytes, pos) -> (opcode, data, next pos)`. `dump` uses the first. The verifier will
-  use the second: `peano.mmb` alone has 250,000 proof commands in under a megabyte, the
-  set.mm translation will be far larger, and one heap object per command is a cost the
-  phase-2 time budget cannot afford.
+- **`MmbFile.parse` opens a file.** It decodes the header, the sort table, the entries of
+  the term and theorem tables, the index with its names, and the list of statements
+  (kind, offsets of the statement and of its body, the table entry it declares). The
+  statement list needs only the length fields, not the bodies.
+- **Everything behind a table entry is read on demand**: the binders (`termArgs`,
+  `thmArgs`, as `Arg` words with `sort`, `bound` and `deps` accessors), the unify streams
+  (`termUnifyCmds`, `thmUnifyCmds`, or as trees: `termValue`, `thmStatement`) and the
+  proof bodies (`proofCmds`). The first plan was to decode binders and unify streams when
+  opening; the set.mm translation has 49,156 theorems and 6.6 MB of such data, which is
+  not worth turning into heap objects for a verifier that reads them from the bytes.
+  Opening `setmm.mmb` (39 MB) takes 8 ms; decoding every stream in it takes 0.35 s.
+- `MmbFile.checkStreams` decodes every unify stream (as a tree) and every proof body once
+  and reports the first error. Opening a file and running it is "the file decodes".
 - Commands are decoded faithfully: `Term`/`TermSave` keep their `save` flag, the `data`
   width is not preserved (it carries no meaning), and an unknown opcode is an error at
-  the offset where it occurs.
+  the offset where it occurs. `Encode.lean` is the inverse, in the shortest encoding;
+  every stream of every file we have encodes back to its original bytes.
 - The reader rejects what `mm0-rs` rejects when it opens and walks a file: a bad magic
   number or version, the layout rules of section 2, tables or data blocks that leave the
   file, unknown modifier bits in a sort, a damaged index (section 7), a statement whose
   framing is wrong (section 5), an unknown statement or command opcode, a unify stream
-  that is not a well-formed pattern (section 4). Every error carries a file offset.
-- The reader does not judge proofs. Everything in section 6, and points 1–11 of section
-  9, belong to the verifier.
+  that is not a well-formed pattern (section 4). It also decodes the proof bodies of
+  axioms and definitions, which `mm0-rs` skips (section 9, point 8). Every error carries
+  a file offset.
+- The reader does not judge proofs. Everything in section 6, and points 1–11 and 20 of
+  section 9, belong to the verifier.
+
+On the mutated files of the MM0 repository (`tests/mmb/`): the reader rejects 14 and
+decodes 7. The 14 are the files `mm0-rs` rejects while reading — with the same offsets
+where it reports one — plus `unknown_op`, whose bad opcode sits in an axiom's body. The 7
+that decode are wrong in ways only a verifier can see (`bad_return`, `disjoint`,
+`gi_dummy_reserved_bit`, `one_bad_decl`, `pure_sort`, `unify_mismatch`, `uses_sorry`).
+
+### `dump`
+
+`mm0-whitehead dump file.mmb` prints every statement as the `.mm0` declaration it stands
+for, formulas as s-expressions, and under it the proof commands with their file offsets:
+
+```
+theorem t (a: wff): $ dbl a $;
+  0x16e: Ref 0  -- a
+  0x16f: Term dbl
+  0x171: Ref 0  -- a
+  0x172: Ref 0  -- a
+  0x173: Ref 0  -- a
+  0x174: TermSave imp  -- heap[1]
+  0x175: Thm ax1
+  0x177: Conv
+  0x178: Ref 1
+  0x17a: Unfold
+  0x17b: Refl
+```
+
+A `Ref` to a variable or hypothesis is annotated with its name; a command that adds to
+the heap is annotated with the index it gets. Names come from the index, or are generated
+as in section 7. Non-zero reserved fields and a term-table sort that differs from the
+return type are printed as `-- note:` lines.

@@ -1,0 +1,58 @@
+-- MMB version 1: 2 sorts, 4 terms, 5 theorems
+-- index: Name VarN HypN
+
+provable sort wff;
+sort set;
+term imp (a b: wff): wff;
+term al {x: set} (ph: wff x): wff;
+def dbl (a: wff): wff = $ imp a a $;
+  0x14e: Ref 0  -- a
+  0x14f: Ref 0  -- a
+  0x150: Term imp
+def allself (ph: wff) {.y: set}: wff = $ al y ph $;
+  0x154: Dummy set  -- heap[1]: y
+  0x156: Ref 0  -- ph
+  0x157: Term al
+axiom mp (a b: wff) (h1: $ a $) (h2: $ imp a b $): $ b $;
+  0x15c: Ref 0  -- a
+  0x15d: Hyp  -- heap[2]: h1
+  0x15e: Ref 0  -- a
+  0x15f: Ref 1  -- b
+  0x161: Term imp
+  0x162: Hyp  -- heap[3]: h2
+  0x163: Ref 1  -- b
+axiom ax1 (a: wff): $ imp a a $;
+  0x168: Ref 0  -- a
+  0x169: Ref 0  -- a
+  0x16a: Term imp
+theorem t (a: wff): $ dbl a $;
+  0x16e: Ref 0  -- a
+  0x16f: Term dbl
+  0x171: Ref 0  -- a
+  0x172: Ref 0  -- a
+  0x173: Ref 0  -- a
+  0x174: TermSave imp  -- heap[1]
+  0x175: Thm ax1
+  0x177: Conv
+  0x178: Ref 1
+  0x17a: Unfold
+  0x17b: Refl
+theorem t2 (a b: wff) (h1: $ a $) (h2: $ imp a b $): $ b $;
+  0x17f: Ref 0  -- a
+  0x180: Hyp  -- heap[2]: h1
+  0x181: Ref 0  -- a
+  0x182: Ref 1  -- b
+  0x184: Term imp
+  0x185: Hyp  -- heap[3]: h2
+  0x186: Ref 2  -- h1
+  0x188: Ref 3  -- h2
+  0x18a: Ref 0  -- a
+  0x18b: Ref 1  -- b
+  0x18d: Ref 1  -- b
+  0x18f: Thm mp
+local theorem loc (a: wff): $ imp a a $;
+  0x193: Ref 0  -- a
+  0x194: Ref 0  -- a
+  0x195: Ref 0  -- a
+  0x196: Term imp
+  0x197: ThmSave ax1  -- heap[1]

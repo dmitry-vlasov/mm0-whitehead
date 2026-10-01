@@ -14,97 +14,12 @@ To try one by hand:
     mm0-c bound_arg_vars.mmb < bound_arg_vars.mm0 ; echo $?
 """
 
-import struct
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-
-# Sort modifiers (mmb.md, "Sort Table").
-PURE, STRICT, PROVABLE, FREE = 1, 2, 4, 8
-
-# Statement opcodes.
-STMT_AXIOM, STMT_SORT, STMT_TERM, STMT_THM = 0x02, 0x04, 0x05, 0x06
-# Proof opcodes.
-TERM, TERM_SAVE, REF, DUMMY, THM, HYP = 0x10, 0x11, 0x12, 0x13, 0x14, 0x16
-CONV, REFL, UNFOLD = 0x17, 0x18, 0x1B
-# Unify opcodes.
-UTERM, UTERM_SAVE, UREF, UDUMMY, UHYP = 0x30, 0x31, 0x32, 0x33, 0x36
-
-
-def cmd(op, data=0):
-    """One (cmd, data) pair in the shortest encoding."""
-    if data == 0:
-        return bytes([op])
-    if data < 1 << 8:
-        return bytes([op | 0x40, data])
-    if data < 1 << 16:
-        return bytes([op | 0x80]) + struct.pack('<H', data)
-    return bytes([op | 0xC0]) + struct.pack('<I', data)
-
-
-END = cmd(0)
-
-
-def bound(sort, bit):
-    """arg for the `bit`-th bound variable."""
-    return (1 << 63) | (sort << 56) | (1 << bit)
-
-
-def reg(sort, deps=0):
-    """arg for a regular variable; `deps` is a bitset of bound variables."""
-    return (sort << 56) | deps
-
-
-def stmt(op, body=b''):
-    """A statement: opcode, then the length of the whole statement as data."""
-    # Statements here are short, so the 1-byte data form always fits.
-    n = 2 + len(body)
-    assert n < 256
-    return bytes([op | 0x40, n]) + body
-
-
-def align8(buf):
-    return buf + bytes(-len(buf) % 8)
-
-
-def assemble(sorts, terms, thms, stmts):
-    """sorts: [mods]; terms: [(args, ret, is_def, unify|None[, table sort])];
-    thms: [(args, unify)]; stmts: [bytes] in declaration order. The optional
-    fifth element of a term overrides the sort stored in the term table, which
-    otherwise is the sort of `ret`."""
-    header_len = 40
-    out = align8(bytes(header_len) + bytes(sorts))
-    p_terms = len(out)
-    out += bytes(8 * len(terms))
-    p_thms = len(out)
-    out += bytes(8 * len(thms))
-
-    term_rows, thm_rows = [], []
-    for args, ret, is_def, unify, *table_sort in terms:
-        out = align8(out)
-        sort = table_sort[0] if table_sort else (ret >> 56) & 0x7F
-        term_rows.append((len(args), sort | (0x80 if is_def else 0), len(out)))
-        out += b''.join(struct.pack('<Q', a) for a in args + [ret])
-        if is_def:
-            out += unify
-    for args, unify in thms:
-        out = align8(out)
-        thm_rows.append((len(args), len(out)))
-        out += b''.join(struct.pack('<Q', a) for a in args)
-        out += unify
-
-    p_proof = len(out)
-    # The final END must start at least 5 bytes before the end of the file.
-    out += b''.join(stmts) + END + bytes(4)
-
-    out = bytearray(out)
-    struct.pack_into('<4sBBHIIIIIIQ', out, 0, b'MM0B', 1, len(sorts), 0,
-                     len(terms), len(thms), p_terms, p_thms, p_proof, 0, 0)
-    for i, (n, sort, p) in enumerate(term_rows):
-        struct.pack_into('<HBBI', out, p_terms + 8 * i, n, sort, 0, p)
-    for i, (n, p) in enumerate(thm_rows):
-        struct.pack_into('<HHI', out, p_thms + 8 * i, n, 0, p)
-    return bytes(out)
+sys.path.insert(0, str(HERE.parent))
+from mmbasm import *  # noqa: E402,F401  (the assembler shared by all fixture scripts)
 
 
 WFF, SET = 0, 1
@@ -166,8 +81,6 @@ TRIV_MM0 = """provable sort wff;
 term tru: wff;
 theorem triv: $ tru $;
 """
-
-SORRY, STMT_LOCAL_DEF = 0x20, 0x0D
 
 FILES = {
     # D1. ph := (foo x) where x sits in a *bound* argument position of foo and

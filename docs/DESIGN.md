@@ -12,16 +12,22 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Mm0/Parser.lean` | tokens → statements (the grammar of `mm0.md`) |
 | `Whitehead/Mm0/Print.lean` | statements → normalized `.mm0` text |
 | `Whitehead/Mm0/Load.lean` | a specification with its `import`s resolved |
+| `Whitehead/Mmb/Types.lean` | the data of a `.mmb` file: tables, commands, statements, patterns |
+| `Whitehead/Mmb/Reader.lean` | opening a `.mmb` file; decoding binders, unify streams and proof bodies on demand |
+| `Whitehead/Mmb/Encode.lean` | command streams back to bytes |
+| `Whitehead/Mmb/Dump.lean` | a `.mmb` file as text |
 | `Main.lean` | the command line: `dump`, `join`, `bench`; `verify` and `prove` are stubs |
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
 | `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
 | `tests/Tests/Mm0/Corpus.lean` | the parser and loader over the `.mm0` files of the MM0 repository |
+| `tests/Tests/Mmb/Reader.lean` | the reader on two small files, and on corruptions of one of them |
+| `tests/Tests/Mmb/Corpus.lean` | the reader over real `.mmb` files, with the round trip |
+| `tests/fixtures/mmbasm.py` | a hand assembler for small `.mmb` files, used by the `gen.py` scripts |
+| `tests/fixtures/mmb/` | `small.mmb`: a valid file with one of everything, and its expected dump |
 | `tests/fixtures/disputed/` | hand-assembled `.mmb` files on which the sources disagree |
 | `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` and `mm0-hs` into `.tools/bin` |
 | `scripts/build-corpus.sh` | builds the `.mm0`/`.mmb` pairs for acceptance testing into `.tools/corpus` |
-
-There is no `.mmb` reader yet. Its shape is section 10 of `MMB-NOTES.md`.
 
 ## The `.mm0` front end
 
@@ -144,6 +150,34 @@ verbatim. It is the `dump` output for `.mm0` files, the `join` output, and the r
 check: printing a parsed file and parsing the result must give text that prints
 identically.
 
+## The `.mmb` reader
+
+The format and what the reader accepts are in `MMB-NOTES.md` (sections 1–5, 7 and 10).
+What is specific to the Lean code:
+
+- **The file stays a `ByteArray`.** `MmbFile` holds the bytes and what is cheap and small:
+  the header, one structure per table entry and per statement, and the names. Binders,
+  unify streams and proof bodies are decoded by accessor functions when asked for. A
+  verifier will not ask for them as arrays at all: it will step through the bytes with
+  `Reader.readCmd`.
+- **`Arg` is a structure around one `UInt64`**, which Lean represents as the bare scalar,
+  with `bound`, `sort` and `deps` as bit operations. 64-bit words are assembled with
+  `UInt64` operations, not through `Nat`, so that a set top bit (every bound variable)
+  does not create a big number.
+- **`readCmd` returns an `Except` of a triple** and is `@[inline]`. That is fine for the
+  reader, which builds arrays anyway. Whether the verifier's inner loop can use it
+  without allocating is a phase-2 measurement, not something assumed here.
+- **Errors are an offset and a message**, as for `.mm0`; the reader stops at the first.
+- The stream decoders are `partial def` loops over the bytes; `readPattern` recurses on
+  the term structure of a unify stream, which is as deep as the formula it describes.
+
+`Encode.lean` exists because the acceptance test needs the inverse of the stream decoders
+(decode, encode, compare with the original bytes). It writes the shortest encoding, as
+`mm0-rs` does. The prover's `.mmb` emission will build on it.
+
+`dump` writes line by line through a callback rather than building a string: the dump of
+the set.mm translation is 15.6 million lines (390 MB), written in 3.5 s.
+
 ## Testing
 
 `lake test` builds and runs the `test` executable, from the package root.
@@ -157,6 +191,15 @@ identically.
   of `tests/mm0_mmu/fail` must be rejected, except the one that is grammatical and wrong
   for a later reason. If `mm0-rs` is available (`.tools/bin/mm0-rs`, or `MM0_RS`), the
   joined form of every file with imports is compared with `mm0-rs join`.
+- Reader tests decode the file that `MMB-NOTES.md` section 8 annotates byte by byte and
+  compare every decoded field with that listing; then they corrupt single bytes of it and
+  check the offset and the message of each rejection. A second file, `small.mmb`, has an
+  index, a definition with a dummy, hypotheses and a proof by conversion; its dump is
+  compared with the checked-in `small.dump`.
+- The `.mmb` corpus test runs over the proof files of the MM0 repository and of
+  `.tools/corpus`: each must decode, every stream must re-encode to its original bytes,
+  and the dump must run to the end. The mutants of `tests/mmb/` in the MM0 repository
+  have a fixed expected verdict each (rejected by the reader, or left to the verifier).
 - `tests/fixtures/disputed/gen.py` assembles small `.mmb` files by hand, one for each
   point on which the sources disagree about proof checking (`MMB-NOTES.md`, section 9).
   They are the regression tests for the verifier's deliberate differences from

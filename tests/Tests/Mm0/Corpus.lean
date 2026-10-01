@@ -64,8 +64,13 @@ def corpusTests : TestM Unit := do
   let mut bytes := 0
   let mut stmts := 0
   let mut withImports := #[]
+  -- the specifications of the MM0 repository, and the joined ones of the built corpus
+  let mut paths := #[]
   for dir in acceptDirs do
-    for path in ← mm0Files (root / dir) do
+    paths := paths ++ (← mm0Files (root / dir))
+  paths := paths ++ (← mm0Files ".tools/corpus")
+  for path in paths do
+    do
       let src ← IO.FS.readBinFile path
       let name := s!"corpus: {path}"
       match parse src with

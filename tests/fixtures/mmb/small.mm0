@@ -1,0 +1,11 @@
+delimiter $ ( $ $ ) $;
+provable sort wff;
+sort set;
+term imp (a b: wff): wff;
+term al {x: set} (ph: wff x): wff;
+def dbl (a: wff): wff = $ imp a a $;
+def allself (ph: wff) {.y: set}: wff = $ al y ph $;
+axiom mp (a b: wff): $ a $ > $ imp a b $ > $ b $;
+axiom ax1 (a: wff): $ imp a a $;
+theorem t (a: wff): $ dbl a $;
+theorem t2 (a b: wff) (h1: $ a $) (h2: $ imp a b $): $ b $;
