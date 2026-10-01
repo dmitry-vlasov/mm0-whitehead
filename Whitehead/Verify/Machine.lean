@@ -97,7 +97,11 @@ def maxStore : Nat := 0x3FFFFFFF
 /-- What the machine needs from the file, laid out for fast access. Binder types are in
 the encoding of `Ty`. -/
 structure Ctx where
+  /-- The file: the unify streams are read from here. -/
   bytes : ByteArray
+  /-- Where proof commands are read from: the file, or a proof body that is checked on
+  its own (`checkBody`). -/
+  proof : ByteArray
   /-- Per sort: its modifier bits (pure 1, strict 2, provable 4, free 8). -/
   sortMods : Array Nat
   termNargs : Array Nat
@@ -140,7 +144,7 @@ def Ctx.ofFile (f : MmbFile) : Ctx := Id.run do
     for a in f.thmArgs i do
       argTys := argTys.push (Ty.ofArg a)
     thmUnify := thmUnify.push (f.thmUnifyPos i)
-  return { bytes := f.bytes, sortMods := f.sorts.map (·.raw.toNat), termNargs, termArgs, termRet,
+  return { bytes := f.bytes, proof := f.bytes, sortMods := f.sorts.map (·.raw.toNat), termNargs, termArgs, termRet,
            termRetDeps, termUnify, thmNargs, thmArgs, thmUnify, argTys }
 
 /-- The state of the machine. -/
@@ -544,7 +548,7 @@ partial def run (c : Ctx) (isDef : Bool) (stop pos : Nat) (store stack heap usta
     (m : Machine) : EStateM.Result String Machine Unit :=
   if pos ≥ stop then halt "the proof does not end with END" m pos store stack heap ustack uheap
   else
-    let b := c.bytes
+    let b := c.proof
     let first := b.get! pos
     let next := pos + cmdSize first
     let op := first &&& 0x3F

@@ -172,6 +172,101 @@ def verifyPair (mm0 mmb : String) : IO UInt32 := do
       matching {ms checked done}, total {ms start done}"
     return 0
 
+/-- `prove db`: what the prover reads from a proof file, with timings. -/
+def proveDb (path : String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let t0 ← IO.monoNanosNow
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok file => pure file
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let t1 ← IO.monoNanosNow
+  let index := db.index
+  let t2 ← IO.monoNanosNow
+  let ms (a b : Nat) : String := s!"{(b - a) / 1000000} ms"
+  let nodes := db.asserts.foldl (init := 0) fun n a => a.hyps.foldl (init := n + a.concl.size) (· + ·.size)
+  let pairs := db.asserts.foldl (init := 0) fun n a => n + a.disjs.size
+  IO.println s!"{path}: {db.terms.size} terms, {db.asserts.size} assertions, {nodes} expression nodes, \
+    {pairs} pairs of binders to keep apart ({ms t0 t1})"
+  IO.println s!"index of the conclusions: {index.nodes.size} nodes ({ms t1 t2})"
+  -- the proofs as trees of assertions
+  let mut steps := 0
+  let mut proofs := 0
+  let mut withConv := 0
+  let mut biggest := 0
+  let mut over : Array Nat := #[0, 0, 0, 0]
+  for s in file.stmts do
+    if let .thm _ := s.kind then
+      match db.skeleton s with
+      | .error msg =>
+        IO.eprintln s!"{path}: theorem {file.thmName s.index}: {msg}"
+        return 1
+      | .ok none => withConv := withConv + 1
+      | .ok (some sk) =>
+        let n := sk.size 100000000
+        proofs := proofs + 1
+        steps := steps + n
+        biggest := max biggest n
+        for k in [0:4] do
+          if n > #[100, 1000, 10000, 100000][k]! then over := over.modify k (· + 1)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"proofs: {proofs} without conversions, {withConv} with; as trees {steps} steps, the largest {biggest}; \
+    more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
+  return 0
+
+/-- The value of the option `name` among `args`, as a number. -/
+def numOption (args : List String) (name : String) (default : Nat) : Nat :=
+  match args.dropWhile (· != name) with
+  | _ :: value :: _ => value.toNat?.getD default
+  | _ => default
+
+def strOption (args : List String) (name : String) : Option String :=
+  match args.dropWhile (· != name) with
+  | _ :: value :: _ => some value
+  | _ => none
+
+/-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/
+def proveReplay (path : String) (args : List String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok file => pure file
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let opts : Prove.ReplayOptions :=
+    { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
+      maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose" }
+  let start ← IO.monoMsNow
+  let (stats, bodies) ← Prove.replay db opts IO.println
+  let ms := (← IO.monoMsNow) - start
+  IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed, \
+    {stats.conversions} with conversions and {stats.tooLarge} too large left out, in {ms} ms"
+  IO.println s!"  steps of the known proofs {stats.stepsIn}, of the reconstructed ones {stats.stepsOut}; \
+    proof bodies {stats.bytesIn} bytes before, {stats.bytesOut} after"
+  let c := stats.counters
+  IO.println s!"  assertion nodes {c.props}, expanded {c.expanded}; tuples of proofs {c.tuples}: \
+    {c.notUnified} not unified, {c.disjoint} against a disjoint variable condition, \
+    {c.inconsistent} inconsistent, {c.duplicate} duplicates; root proofs rejected by the verifier {stats.rejected}"
+  if let some out := strOption args "-o" then
+    IO.FS.writeBinFile out (file.withBodies bodies)
+    IO.println s!"  written to {out}"
+  return if stats.failed == 0 then 0 else 1
+
 def bench (path : String) : IO UInt32 :=
   if (path : System.FilePath).extension == some "mmb" then benchMmb path else benchMm0 path
 
@@ -186,6 +281,8 @@ def main (args : List String) : IO UInt32 := do
     return code
   | ["verify", path] => verifyMmb path
   | ["verify", mm0, mmb] => verifyPair mm0 mmb
+  | ["prove", "db", path] => proveDb path
+  | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: _ => notImplemented "prove (phase 3)"
   | _ =>
     IO.eprintln usage

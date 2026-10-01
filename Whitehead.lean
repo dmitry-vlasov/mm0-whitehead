@@ -13,3 +13,6 @@ import Whitehead.Mmb.Dump
 import Whitehead.Verify.Machine
 import Whitehead.Verify.Check
 import Whitehead.Verify.Spec
+import Whitehead.Mmb.Write
+import Whitehead.Prove.Db
+import Whitehead.Prove.Replay

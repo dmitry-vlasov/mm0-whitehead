@@ -155,4 +155,16 @@ def checkProofs (f : MmbFile) : Except VerifyError Unit := do
     throw { pos := h.pProof, stmt := none,
             msg := s!"the proof stream declares {m.numSorts} sorts, {m.numTerms} terms and {m.numThms} theorems; the header has {h.numSorts}, {h.numTerms} and {h.numThms}" }
 
+/-- Checks a proof body that is not in the file: `body` (the commands and their `END`)
+must prove theorem `t` of the file, using only what is declared before it, of which
+there are `numSorts` sorts and `numTerms` terms. This is what the prover runs on a proof
+it has found, before it reports it. -/
+def checkBody (c : Ctx) (f : MmbFile) (t numSorts numTerms : Nat) (body : ByteArray) : Except String Unit :=
+  let c := { c with proof := body }
+  let s : Stmt := { kind := .thm false, pos := 0, bodyStart := 0, stop := body.size, index := t }
+  let m : Machine := { numSorts, numTerms, numThms := t }
+  match checkThm c f s false m with
+  | .ok () _ => .ok ()
+  | .error msg m => .error s!"at 0x{hex m.pos} of the body: {msg}"
+
 end Whitehead.Verify
