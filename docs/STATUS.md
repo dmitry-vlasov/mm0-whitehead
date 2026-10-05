@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-06.
 
 ## Phase
 
@@ -132,10 +132,10 @@ nothing else, breadth first, 1 s per theorem.
 | | propositional calculus | predicate calculus |
 | - | - | - |
 | theorems | 1,520 | 1,262 |
-| proved | 825 (54.3%) | 383 (30.3%) |
+| proved | 816 (53.7%) | 377 (29.9%) |
 | steps of a proof found: median, largest | 2, 4 | 1, 3 |
-| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 512, 276, 9 | 3, 300, 64, 16, 0 |
-| shorter than in the file / the same / longer | 15 / 610 / 200 | 233 / 141 / 9 |
+| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 509, 270, 9 | 3, 300, 59, 15, 0 |
+| shorter than in the file / the same / longer | 15 / 604 / 197 | 233 / 136 / 8 |
 | proofs rejected by the verifier | 0 | 0 |
 
 The files with the proofs found are accepted by our verifier against `setmm.mm0` and by
@@ -146,12 +146,12 @@ set.mm, 3 are proved. With 10 s or 3,000,000 nodes, on a sample of every tenth t
 sample at 1 s), still by proofs of at most four steps. More in `DESIGN.md`, "The search
 test".
 
-Both tests were run again on 2026-10-05, after the change in which proofs are kept (one
-per whole substitution, as in Russell); the tables above are of that run. The run of
-2026-10-01 had 805 and 374 proved. The limit is time, so two runs differ, and whether
-this difference comes from the change is not known; keeping all variants costs nothing
-that shows here. The two samples of the paragraph above (the rest of set.mm, and 10 s)
-are of the earlier run.
+Both tests were run again on 2026-10-05, with every proof kept (no dedup that is not
+proved safe); the tables above are of that run. The search test had 805 and 374 proved
+on 2026-10-01, with one proof kept per restricted substitution, and 825 and 383 with
+one per whole substitution. The limit is time, so two runs differ; keeping every proof
+costs nothing that shows here. The two samples of the paragraph above (the rest of
+set.mm, and 10 s) are of the first run.
 
 What is not done of the engine model of the brief: definitions are not unfolded
 (set.mm has none; a proposal is in `DESIGN.md`).
@@ -161,11 +161,13 @@ every tenth theorem of the two sections, 1 s per theorem:
 
 | | propositional (154) | predicate (127) |
 | - | - | - |
-| backward, breadth first | 91 | 41 |
-| forward alone | 28 | 10 |
-| both in turn | 108 | 48 |
+| backward, breadth first | 89 | 41 |
+| forward alone | 21 | 10 |
+| both in turn | 108 | 46 |
 
-All proofs found are accepted by the verifier.
+All proofs found are accepted by the verifier. Every derivation of a statement is now
+a fact of the front; while a statement was a fact once, forward alone proved 38 of the
+281, and both in turn 156 or 157.
 
 ## Decisions (2026-10-01)
 
@@ -188,18 +190,22 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 1. A disjoint-variable condition on a fresh name is dropped once the name does not
    occur in the statement of the parent `RuProverExp` under the proof's substitution.
    This is what the code did.
-2. All variants of a proof are needed: keeping one proof per restricted substitution
-   breaks completeness. `addProof` keeps one per whole substitution, as `ruAddProof`.
+2. All variants of a proof are needed, and a proof is dropped only where it is proved
+   that this is safe. The two places where the Russell source keeps one proof of
+   several have no such proof (`ruProofSubKey` in `ruAddProof`; the set `seen` and "one
+   proof per matched fact" in `ruApplyForward`), so the port keeps every proof of an
+   assertion node, and every derivation of a statement as a fact of the forward front.
 3. A variable of a goal is a free variable or a metavariable, by a mark. How the mark is
    written is a stub, MM0 having no syntax for it: `prove search --meta`.
 4. `>` in the type of a `def` (`def all: type > term;`, five statements in
    `examples/hol.mm0`; neither `mm0.md` nor the formal specification has it): as `mm0-rs`
    does, which accepts it. So did the parser already.
+5. Unfolding a definition is a proof step of its own, not a part of unification.
 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-828 checks, 0 failures, in 13 seconds:
+830 checks, 0 failures, in 13 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -219,8 +225,9 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 - Prover, hand-written and random: expressions and substitutions; unification and the
   index, also compared with a reference unifier on 27,000 random inputs; the engine on
   the logic fixture (database, replay of its 16 proofs, breadth-first search, the
-  forward direction, conditions on bound variables, two proofs that differ only below a
-  node both kept, variables marked as metavariables and the values found for them).
+  forward direction, conditions on bound variables, every variant of a proof kept in
+  the tree and in the forward front and none made twice, variables marked as
+  metavariables and the values found for them).
 - Prover, corpus: the first 6,000 statements of set.mm replayed, the resulting file
   verified.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
@@ -284,14 +291,13 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
    built. Still open:
-   3. what to do about an unfolding inside a variable of the goal: an example and three
-      ways to go on are in `DESIGN.md`;
+   3. whether the unfolding step is also made where a statement has a variable, with
+      `?A := f(fresh variables)`: (b) of the proposal in `DESIGN.md`, which is proposed;
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
       `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
-   8. whether "all variants" also means the two places where the Russell source itself
-      keeps one proof of several: `ruProofSubKey` in `ruAddProof`, and one proof per
-      fact in `ruApplyForward`.
+   9. the two limits of the forward front that are not dedup — 512 facts, and four
+      facts joined with a new subgoal (`fwd_cap`) — are kept as in the source.
 
 ## Next steps
 
@@ -300,5 +306,7 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. For tasks with metavariables: a way to write the marking, and a check of the proof
    found (it proves an instance of the theorem, which no file states).
 4. The cost of joins in a search in both directions (see the forward report above):
-   which joins a strategy admits is the lever that Russell's tactic layer has.
+   which joins a strategy admits is the lever that Russell's tactic layer has. And the
+   cost of one forward application, which the clock does not interrupt: with a front of
+   2,048 facts a search ran for minutes past its limit.
 5. Phase 4 is designed only after the search baseline is accepted.
