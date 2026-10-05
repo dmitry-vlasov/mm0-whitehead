@@ -326,6 +326,8 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     {(rows.filter (·.ending == .exhausted)).size} with nothing left to expand, in {ms} ms"
   IO.println s!"  steps of the proofs found {steps}, of the proofs in the file for the same theorems {known}; \
     proofs rejected by the verifier {rows.foldl (init := 0) (· + ·.rejected)}"
+  IO.println s!"  proofs of assertion nodes made {rows.foldl (init := 0) (· + ·.made)}, of them not kept, \
+    having the whole substitution of another, {rows.foldl (init := 0) (· + ·.duplicate)}"
   if !opts.metas.isEmpty then
     IO.println "  with metavariables a proof proves an instance of its theorem: it is not written or checked"
   if let some out := strOption args "-o" then

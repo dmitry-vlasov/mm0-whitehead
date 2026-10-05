@@ -126,6 +126,10 @@ structure SearchRow where
   /-- Facts of the forward front, and joins of a fact with a subgoal or the goal. -/
   facts : Nat := 0
   joins : Nat := 0
+  /-- Proofs of assertion nodes that `addProof` made, and those among them that it did
+  not keep because the node had a proof with the same whole substitution. -/
+  made : Nat := 0
+  duplicate : Nat := 0
 
 /-- Searches for a proof of every theorem of `db.file` in the range, each from the
 assertions before it, with the strategy of `opts`. Returns a row per theorem and the new
@@ -164,7 +168,8 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
     let row : SearchRow :=
       { thm := s.index, name := f.thmName s.index, ending := result.ending, steps, knownSteps := known, ms,
         props := result.env.props.size, rejected := result.rejected,
-        facts := result.env.counters.facts, joins := result.env.counters.joins }
+        facts := result.env.counters.facts, joins := result.env.counters.joins,
+        made := result.env.counters.made, duplicate := result.env.counters.duplicate }
     rows := rows.push row
     if opts.verbose then
       let what := match result.ending with

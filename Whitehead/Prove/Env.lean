@@ -27,6 +27,8 @@ structure Counters where
   disjoint : Nat := 0
   inconsistent : Nat := 0
   duplicate : Nat := 0
+  /-- Proofs of assertion nodes that passed every check, kept or duplicate. -/
+  made : Nat := 0
   /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
   root. -/
   facts : Nat := 0

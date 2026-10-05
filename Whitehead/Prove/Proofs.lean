@@ -203,6 +203,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM
           -- are made when the node gets its second proof: a node with one proof, as
           -- every node of a replay, needs none.
           let proof := Proof.prop p theta row conds
+          counters := { counters with made := counters.made + 1 }
           if proofs.isEmpty then proofs := proofs.push proof
           else
             if keys.isEmpty then keys := keys.insert (proofKey proofs[0]!)
