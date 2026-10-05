@@ -189,7 +189,10 @@ structure ConstInfo where
   names : Array Nat
   deriving Inhabited
 
-/-- `RuProverTask`: premises and a goal, over constants. -/
+/-- `RuProverTask`: premises and a goal. A variable of the statement to be proved is
+either a *free variable* — the proof must hold for every value of it, so the prover must
+not replace it, and it is a constant here — or a *metavariable*: the prover has to find
+a value for it, and it is a variable of the tree. -/
 structure Task where
   /-- The assertions that may be used are those with a smaller number. -/
   limit : Nat
@@ -199,6 +202,9 @@ structure Task where
   consts : Array ConstInfo
   premises : Array Exp
   goal : Exp
+  /-- The metavariables: variables with the numbers `freshBase`, `freshBase + 1`, ...,
+  which the prover leaves to them (`Env.init`). -/
+  metas : Array Nat := #[]
   deriving Inhabited
 
 /-- The constants for the binders of a statement. -/
@@ -213,18 +219,39 @@ def constInfos (binders : Array Arg) : Array ConstInfo := Id.run do
         names := (Array.range boundAt.size).filterMap fun k =>
           if (b.deps >>> k.toUInt64) &&& 1 != 0 then some boundAt[k]! else none }
 
-/-- The substitution that turns the binders of an assertion into constants. -/
-def constSubst (a : Assertion) : Subst :=
-  { map := a.vars.foldl (init := {}) fun m v =>
-      m.insert (Node.varId v) (SubExp.mk' v ⟨#[Node.const (Node.varId v) (Node.ty v)]⟩) }
+/-- Why the binders with the numbers `metas` of theorem `thm` cannot all be marked as
+metavariables, if they cannot. Only a regular binder can be marked. For a bound one,
+the regular variables that are declared to depend on it would depend on whatever is
+found for it, and the conditions on bound variables (`judge` in `Proofs.lean`) read the
+dependencies of a constant as fixed. -/
+def Db.metasFault (db : Db) (thm : Nat) (metas : Array Nat) : Option String :=
+  let a := db.asserts[thm]!
+  metas.findSome? fun k =>
+    match a.binders[k]? with
+    | none => some s!"theorem {a.name} has no binder {k}: it has {a.binders.size}"
+    | some b => if b.bound then some s!"binder {k} of theorem {a.name} is a bound variable" else none
 
 /-- `ruConstProverTask`, for a theorem of the file: prove its conclusion from its
-hypotheses, with what comes before it. -/
-def Db.task (db : Db) (thm : Nat) : Task :=
+hypotheses, with what comes before it. The variables of the theorem are free variables,
+and become constants. The binders with the numbers `metas` are marked as metavariables
+instead; the marks that `Db.metasFault` objects to are not followed.
+
+Where the marks come from is a stub. MM0 has no syntax to say of a variable of a
+statement that it is a metavariable, so a file cannot carry them, and a caller gives
+them by the number of the binder (`prove search --meta`). A proof found for a task with
+metavariables proves an instance of the theorem, which is not a statement of the file:
+it is reported, and not written or checked (`acceptAny` in `Prove.lean`). -/
+def Db.task (db : Db) (thm : Nat) (metas : Array Nat := #[]) : Task :=
   let a := db.asserts[thm]!
-  let s := constSubst a
+  let marked := (Array.range a.binders.size).filter fun k => metas.contains k && !a.binders[k]!.bound
+  let image (v : Nat) : Exp :=
+    match marked.findIdx? (· == Node.varId v) with
+    | some j => Exp.ofVar (Node.var (freshBase + j) (Node.ty v))
+    | none => ⟨#[Node.const (Node.varId v) (Node.ty v)]⟩
+  let s : Subst := { map := a.vars.foldl (init := {}) fun m v => m.insert (Node.varId v) (SubExp.mk' v (image v)) }
   { limit := thm, sorts := a.sortsBefore, terms := a.termsBefore, consts := constInfos a.binders,
-    premises := a.hyps.map s.apply, goal := s.apply a.concl }
+    premises := a.hyps.map s.apply, goal := s.apply a.concl,
+    metas := marked.map fun k => (image a.vars[k]!).nodes[0]! }
 
 /-! ### Proofs of the file as trees of assertions -/
 

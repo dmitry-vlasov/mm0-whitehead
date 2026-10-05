@@ -116,8 +116,8 @@ def engineTests : TestM Unit := do
     match Whitehead.Verify.checkProofs f2 with
     | .ok () => check "search: the file with the proofs found is valid" true
     | .error e => check "search: the file with the proofs found is valid" false (e.format f2 "searched")
-  -- a goal with a variable to be found: from ph and ph -> ps, something of the shape
-  -- `?q -> ps`. Constants 0 and 1 are ph and ps; the variable is the first fresh one.
+  -- a goal with a variable to be found: something of the shape `?q -> ps`. Constants 0
+  -- and 1 are ph and ps; the variable is the first fresh one.
   let wffTy := Ty.mk 0 false
   let c (k : Nat) : Exp := ⟨#[Node.const k wffTy]⟩
   let q : Exp := Exp.ofVar (Node.var freshBase wffTy)
@@ -125,20 +125,52 @@ def engineTests : TestM Unit := do
   let answerTask : Task :=
     { limit := id "syl" + 1, sorts := 1, terms := 2,
       consts := #[{ ty := wffTy, names := #[] }, { ty := wffTy, names := #[] }],
-      premises := #[c 0, wi (c 0) (c 1)], goal := wi q (c 1) }
-  let answerEnv := { Env.init db index answerTask with fresh := freshBase + 1 }
+      premises := #[c 0], goal := wi q (c 1), metas := #[q.nodes[0]!] }
+  let answerEnv := Env.init db index answerTask
   let answered ← searchWith acceptAny answerEnv breadthFirst { maxProps := 5000 }
   checkEq "answer: a goal with a variable is proved, and the variable found"
     ((answered.answer.map (db.showExp · #["ph", "ps"])).getD "none") "(wi ps ps)"
   checkEq "answer: the first proof, breadth first, is the shortest way to such a goal"
     ((answered.proof.map (proofText db)).getD "none") "id"
-  -- without `id` and what follows it, a premise is needed: from ph, by ax_3,
+  -- without `id` and what follows it, the premise is needed: from ph, by ax_3,
   -- (~ps -> ~ph) -> ps
   let earlier ← searchWith acceptAny { answerEnv with task := { answerTask with limit := id "id" } }
     breadthFirst { maxProps := 5000 }
   checkEq "answer: another answer when less may be used"
     ((earlier.answer.map (db.showExp · #["ph", "ps"])).getD "none", (earlier.proof.map (proofText db)).getD "none")
     ("(wi (wi (wn ps) (wn ph)) ps)", "(mpd (a1i h0) ax_3)")
+  checkEq "answer: the value of the metavariable" (earlier.values.map (db.showExp · #["ph", "ps"]))
+    #["(wi (wn ps) (wn ph))"]
+  -- with ph -> ps as a second premise the goal unifies with it, and that is the proof
+  let byPremise ← searchWith acceptAny
+    (Env.init db index { answerTask with premises := #[c 0, wi (c 0) (c 1)] }) breadthFirst { maxProps := 5000 }
+  checkEq "answer: a goal that unifies with a premise is proved by it"
+    ((byPremise.answer.map (db.showExp · #["ph", "ps"])).getD "none", (byPremise.proof.map (proofText db)).getD "none",
+      byPremise.values.map (db.showExp · #["ph", "ps"]))
+    ("(wi ph ps)", "h1", #["ph"])
+  -- the marking of the variables of a theorem: free variables, which become constants,
+  -- or metavariables. a1i (ph ps: wff) (h: ph): ps -> ph, with ph to be found
+  let marked := db.task (id "a1i") #[0]
+  checkEq "metavariables: a marked binder is a variable of the tree, the others are constants"
+    (db.showExp marked.goal #["ph", "ps"], marked.premises.map (db.showExp · #["ph", "ps"]), marked.metas.size)
+    ("(wi ps ?0)", #["?0"], 1)
+  checkEq "metavariables: without marks the task is as before" (db.task (id "a1i") #[]).metas.size 0
+  check "metavariables: a bound binder cannot be marked"
+    ((db.metasFault (id "alimi") #[0]).isSome && (db.metasFault (id "alimi") #[1]).isNone)
+  check "metavariables: nor a binder that is not there" (db.metasFault (id "a1i") #[2]).isSome
+  checkEq "metavariables: a mark that cannot be followed is not" (db.task (id "alimi") #[0]).metas.size 0
+  let markedFound ← searchWith acceptAny (Env.init db index marked) breadthFirst { maxProps := 5000 }
+  checkEq "metavariables: the prover finds a value, and reports the goal as it is proved"
+    ((markedFound.proof.map (proofText db)).getD "none", (markedFound.answer.map (db.showExp · #["ph", "ps"])).getD "none",
+      markedFound.values.map (db.showExp · #["ph", "ps"]))
+    ("ax_1", "(wi ps (wi ?1 ps))", #["(wi ?1 ps)"])
+  -- mpd (ph ps ch) (h1: ph -> ps) (h2: ph -> ps -> ch): ph -> ch, with ch to be found:
+  -- the goal unifies with the first premise, and not with the second (ch would contain
+  -- itself)
+  let direct ← searchWith acceptAny (Env.init db index (db.task (id "mpd") #[2])) breadthFirst { maxProps := 5000 }
+  checkEq "metavariables: a goal that unifies with a premise is proved by it"
+    ((direct.proof.map (proofText db)).getD "none", direct.values.map (db.showExp · #["ph", "ps", "ch"]))
+    ("h0", #["ps"])
   -- all variants: D from A, B, A -> C, B -> C and C -> D by modus ponens twice. C has
   -- two proofs, which give the node above the same instance and differ below it; both
   -- must reach the root (`ruProofSubKey` is of the whole substitution). Every proof is

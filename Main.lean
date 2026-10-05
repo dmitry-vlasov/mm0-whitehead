@@ -13,9 +13,10 @@ def usage : String :=
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
                                  reconstruct the proofs of a file from the assertions they use
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--max-facts N] [--verbose]
+               [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
-                                 forward from the premises, or both in turn
+                                 forward from the premises, or both in turn. --meta: the binders
+                                 with these numbers are metavariables, for which values are found
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
@@ -278,6 +279,12 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"  written to {out}"
   return if stats.failed == 0 then 0 else 1
 
+/-- The numbers of the option `name` among `args`, separated by commas. -/
+def numsOption (args : List String) (name : String) : Array Nat :=
+  match strOption args name with
+  | some value => ((value.splitOn ",").filterMap (·.toNat?)).toArray
+  | none => #[]
+
 /-- `prove search`: proves the theorems of a file from scratch, breadth first. -/
 def proveSearch (path : String) (args : List String) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
@@ -299,7 +306,14 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       strategy := (strOption args "--strategy").getD "bfs",
       limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
                   maxFacts := numOption args "--max-facts" 512 },
+      metas := numsOption args "--meta",
       verbose := args.contains "--verbose" }
+  -- the marks must fit every theorem of the range
+  for a in db.asserts do
+    if a.id ≥ opts.first && a.id < opts.last && a.id % opts.every == 0 then
+      if let some why := db.metasFault a.id opts.metas then
+        IO.eprintln s!"{path}: --meta: {why}"
+        return 1
   let start ← IO.monoMsNow
   let (rows, bodies) ← Prove.searchAll db opts logLine
   let ms := (← IO.monoMsNow) - start
@@ -312,6 +326,8 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     {(rows.filter (·.ending == .exhausted)).size} with nothing left to expand, in {ms} ms"
   IO.println s!"  steps of the proofs found {steps}, of the proofs in the file for the same theorems {known}; \
     proofs rejected by the verifier {rows.foldl (init := 0) (· + ·.rejected)}"
+  if !opts.metas.isEmpty then
+    IO.println "  with metavariables a proof proves an instance of its theorem: it is not written or checked"
   if let some out := strOption args "-o" then
     IO.FS.writeBinFile out (file.withBodies bodies)
     IO.println s!"  written to {out}"

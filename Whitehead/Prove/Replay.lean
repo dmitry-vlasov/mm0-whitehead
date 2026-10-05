@@ -105,6 +105,10 @@ structure SearchOptions where
   `"both"`: a round of the one and a wave of the other in turn. -/
   strategy : String := "bfs"
   limits : Limits := {}
+  /-- The binders, by their numbers, that are metavariables in every theorem of the
+  range (`Db.task`): the stub for a marking that MM0 has no syntax for. A proof found
+  for such a task is reported, and not written or checked. -/
+  metas : Array Nat := #[]
   /-- Report every theorem. -/
   verbose : Bool := false
 
@@ -144,14 +148,19 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
       | .ok (some skel) => skel.size
       | _ => 0
     let start ← IO.monoMsNow
-    let env := Env.init db index (db.task s.index) hypIndexes
+    let task := db.task s.index opts.metas
+    let env := Env.init db index task hypIndexes
+    -- with metavariables what is proved is an instance of the theorem: nothing to check
+    -- against, and no body for the file
+    let accept := if task.metas.isEmpty then accept vc else acceptAny
     let result ←
-      if opts.strategy == "forward" then search vc env forwardOnly opts.limits
-      else if opts.strategy == "both" then search vc env bidirectional opts.limits
-      else search vc env breadthFirst opts.limits
+      if opts.strategy == "forward" then searchWith accept env forwardOnly opts.limits
+      else if opts.strategy == "both" then searchWith accept env bidirectional opts.limits
+      else searchWith accept env breadthFirst opts.limits
     let ms := (← IO.monoMsNow) - start
     let steps := (result.proof.map (·.size)).getD 0
-    if let some body := result.body then bodies := bodies.set! i (some body)
+    if task.metas.isEmpty then
+      if let some body := result.body then bodies := bodies.set! i (some body)
     let row : SearchRow :=
       { thm := s.index, name := f.thmName s.index, ending := result.ending, steps, knownSteps := known, ms,
         props := result.env.props.size, rejected := result.rejected,
@@ -165,6 +174,11 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
       log s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
         {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}\
         {if opts.strategy == "bfs" then "" else s!", {row.facts} facts, {row.joins} joins"}"
+      if result.ending == .proved && !task.metas.isEmpty then
+        let names := f.thmVarNames s.index
+        let found := (Array.range task.metas.size).map fun j =>
+          s!"{Db.varName (Node.varId task.metas[j]!)} := {db.showExp result.values[j]! names}"
+        log s!"  found {", ".intercalate found.toList}; proved {(result.answer.map (db.showExp · names)).getD ""}"
   return (rows, bodies)
 
 end Whitehead.Prove

@@ -38,6 +38,12 @@ check every proof they find with the verifier, and with `-o` write the file with
 proofs. The engine is a port of the Russell prover; see [docs/DESIGN.md](docs/DESIGN.md),
 "The prover".
 
+A variable of a theorem is a free variable: the proof holds for every value of it.
+`prove search --meta 0,2` marks the binders 0 and 2 of the theorems in the range as
+metavariables instead: the prover finds values for them, and `--verbose` prints what it
+found. This marking is a stub — MM0 has no syntax for it — and such a proof, which proves
+an instance of the theorem, is not written or checked.
+
 ## Reference tools and test corpus
 
 The tests compare against `mm0-rs`, the reference implementation, and the acceptance

@@ -85,9 +85,10 @@ def Env.dropExpanded (env : Env) : Env :=
 
 abbrev ProverM := StateM Env
 
-/-- `ruInitProverEnv`, up to the first expansion of the root. -/
+/-- `ruInitProverEnv`, up to the first expansion of the root. The first fresh variables
+are the metavariables of the task. -/
 def Env.init (db : Db) (assertions : Index Nat) (task : Task) (hypIndexes : HypIndexes := {}) : Env :=
-  { db, task, assertions, hypIndexes,
+  { db, task, assertions, hypIndexes, fresh := freshBase + task.metas.size,
     premises := (Array.range task.premises.size).foldl (init := {}) fun ix k => ix.insert task.premises[k]! k,
     hyps := #[{ ind := 0, expr := task.goal, parent := none }] }
 

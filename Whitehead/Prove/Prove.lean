@@ -221,7 +221,7 @@ def accept (vc : Verify.Ctx) (env : Env) (tree : ProofTree) (conds : Array Cond)
   return .error why
 
 /-- Accepts every proof, with no proof body: for a task that is not a theorem of the
-file, such as a goal with variables to be found. -/
+file, such as one with metavariables, whose proof proves an instance of the theorem. -/
 def acceptAny (_ : Env) (_ : ProofTree) (_ : Array Cond) : Except String ByteArray := .ok ByteArray.empty
 
 /-- Why a search ended. -/
@@ -249,6 +249,9 @@ structure Result where
   /-- The goal as it was proved: with the variables it had replaced by what the proof
   needs them to be. Variables that the proof leaves open are still there. -/
   answer : Option Exp := none
+  /-- What the proof puts for each metavariable of the task. One that the proof leaves
+  open stands for itself. -/
+  values : Array Exp := #[]
   /-- The proofs that reached the root and were not accepted by the verifier, and what
   it said about the last of them. -/
   rejected : Nat := 0
@@ -257,14 +260,23 @@ structure Result where
   rejectedProof : Option ProofTree := none
   env : Env
 
-/-- The proofs that have reached the root: the first that the verifier accepts. -/
+/-- What a proof at the root puts for the metavariables of the task. -/
+def metaValues (env : Env) (proof : Proof) : Array Exp :=
+  if env.task.metas.isEmpty then #[]
+  else
+    let all := allBindings proof
+    env.task.metas.map fun m => makeProofTree.resolve all (Exp.ofVar m)
+
+/-- The proofs that have reached the root: the first that the verifier accepts, as the
+proof, its body, the goal as it is proved, and the values of the metavariables. -/
 def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env) :
-    Option (ProofTree × ByteArray × Exp) × Array (String × ProofTree) × Env := Id.run do
+    Option (ProofTree × ByteArray × Exp × Array Exp) × Array (String × ProofTree) × Env := Id.run do
   let mut rejections := #[]
   for proof in env.rootProofs do
     let tree := makeProofTree env proof
     match accept env tree proof.conds with
-    | .ok body => return (some (tree, body, proof.expr), rejections, { env with rootProofs := #[] })
+    | .ok body =>
+      return (some (tree, body, proof.expr, metaValues env proof), rejections, { env with rootProofs := #[] })
     | .error msg => rejections := rejections.push (msg, tree)
   return (none, rejections, { env with rootProofs := #[] })
 
@@ -306,15 +318,16 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     (strategy : Strategy σ) (limits : Limits := {}) : IO Result := do
   let start ← IO.monoMsNow
   -- a goal that is one of the premises needs no assertion; Russell's root is not matched
-  -- with the premises
-  if let some k := env.task.premises.findIdx? (· == env.task.goal) then
-    let allowed := match strategy.root with
-      | some (.premise j) => j == k
-      | some (.assertion _) => false
-      | none => true
-    if allowed then
-      if let .ok body := accept env (.hyp k) #[] then
-        return { ending := .proved, proof := some (.hyp k), body := some body, answer := some env.task.goal, env }
+  -- with the premises. With metavariables: a goal that unifies with one.
+  let direct := (env.premises.unify env.task.goal).filter fun u =>
+    match strategy.root with
+    | some (.premise j) => j == u.data
+    | some (.assertion _) => false
+    | none => true
+  for u in direct.qsort (·.data < ·.data) do
+    if let .ok body := accept env (.hyp u.data) #[] then
+      return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
+               values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
   let mut env := { env with admitJoin := strategy.admitJoin }
   let mut rejected := 0
   let mut rejection := ""
@@ -327,8 +340,8 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     let (found, r, env') := takeRootProofs accept env
     env := env'
     rejected := rejected + r.size
-    if let some (tree, body, answer) := found then
-      return { ending := .proved, proof := some tree, body := some body, answer := some answer, rejected, env }
+    if let some (tree, body, answer, values) := found then
+      return { ending := .proved, proof := some tree, body := some body, answer := some answer, values, rejected, env }
   env := ((expandHyp 0 strategy.root).run env).2
   let mut st := strategy.init
   -- a wave that leaves no front lets the strategy decide once more; two in a row end
@@ -348,8 +361,8 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
       if let some (msg, tree) := r.back? then
         rejection := msg
         rejectedProof := some tree
-      if let some (tree, body, answer) := found then
-        return { ending := .proved, proof := some tree, body := some body, answer := some answer,
+      if let some (tree, body, answer, values) := found then
+        return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                  rejected, rejection, rejectedProof, env }
       if env.props.size > limits.maxProps || (← IO.monoMsNow) - start > limits.maxMs then
         return { ending := .limit, rejected, rejection, rejectedProof, env }
@@ -372,8 +385,8 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
           if let some (msg, tree) := r.back? then
             rejection := msg
             rejectedProof := some tree
-          if let some (tree, body, answer) := found then
-            return { ending := .proved, proof := some tree, body := some body, answer := some answer,
+          if let some (tree, body, answer, values) := found then
+            return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                      rejected, rejection, rejectedProof, env }
   return { ending := .exhausted, rejected, rejection, rejectedProof, env }
 
