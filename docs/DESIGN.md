@@ -138,6 +138,10 @@ Two extensions go beyond both references, because the example files need them:
   (`\\`, `\"`, `\n`, `\r`, `\xHH`); an unknown escape is an error here and a warning there.
 - **Arrows in a `def`** (`def all: type > term;`) are used by `examples/hol.mm0`. Neither
   `mm0.md` nor the formal specification has them; `mm0-rs` and mm0-c accept them.
+  Decided (2026-10-05): do as `mm0-rs` does. It reads what follows the `:` of a `def`
+  with the function that reads it for a `term` (`decl` and `arrows` in `mm1_parser`):
+  every type before a `>` is an anonymous regular variable after the named binders, and
+  a value may follow or not. This parser does the same.
 
 Where `mm0.md` and the formal specification disagree with each other (the `_` row), the
 formal specification is followed.
@@ -547,8 +551,9 @@ and the tactic language.
   product of it with the proofs of the siblings is walked; for each tuple the most
   general unifier of their substitutions (`unifySubs`) is composed with the node's `sub`,
   the conditions on bound variables are checked, and the result is a proof of the
-  assertion node. `buildPropProofs` and `buildExpProofs` carry new proofs to the parent,
-  up to the root.
+  assertion node; of the proofs with the same whole substitution one is kept
+  (`ruProofSubKey`). `buildPropProofs` and `buildExpProofs` carry new proofs to the
+  parent, up to the root.
 - **The proofs on the nodes** (`Proof`: `RuProverProof`) are the substitution proof trees
   of the paper, immutable as in Russell.
 - **Forward** (`Forward.lean`). The mirror of `expandHyp`: a *fact* is unified with the
@@ -583,9 +588,14 @@ by an expression over the goal's variables or by a fresh variable.
 - **Assertions.** An axiom or theorem is `h1, ..., hk ⊢ c` over its binders. As in
   Metamath, a binder need not occur in the conclusion (`ph` in `ax_mp`); these are the
   variables that `expandHyp` renames to fresh ones.
-- **The statement being proved.** Its variables must not be replaced: the paper's
-  "non-replaceable" variables. Russell turns them into constants (`ruMakeConstEnv`);
-  here they are applications without arguments, in a number range of their own.
+- **The statement being proved.** Its variables are free variables: they must not be
+  replaced, the paper's "non-replaceable" variables. Russell turns them into constants
+  (`ruMakeConstEnv`); here they are applications without arguments, in a number range of
+  their own. A variable can be marked as a *metavariable* instead (`Db.task`): it stays
+  a variable of the tree, the prover finds a value for it, and the value is reported.
+  How the mark is written is a stub (`prove search --meta`, by the number of the
+  binder): MM0 has no syntax for it. Only regular binders can be marked, and the proof
+  found, which proves an instance of the theorem, is not written or checked.
 - **Definitions** are, in the set.mm translation, axioms (`df_an`): its 1,436 terms
   include no `def`, and its 15.6 million proof commands include no conversion. Both
   acceptance tests of this phase therefore run without `Unfold`. See question 3.
@@ -664,7 +674,9 @@ So a proof that is doomed stops where it becomes doomed, and a proof at the root
 satisfies every condition up to the choice of what is put for the variables that are
 left; that choice leaves out what would make an open condition false. "No node above
 can replace it" is decided by change 5 below: the variables visible above a node are
-those of its expression under the substitution of the proof.
+those of its expression under the substitution of the proof. That a condition on a
+fresh name may be forgotten once the name is not visible above was confirmed on
+2026-10-05.
 
 The first version did less, which is what Russell does in effect (change 3 below): it
 discarded what was violated for certain and remembered nothing. On the logic fixture
@@ -706,12 +718,19 @@ Each of these is also noted in the file it concerns.
    node goes up with the bindings of the variables of that node's expression only. The
    others are of variables made below the node, which occur nowhere else, so the same
    tuples unify with the same result on everything visible. The same proof takes
-   0.38 s. One consequence beyond speed: `ruProofSubKey` keeps one proof per
-   substitution of an assertion node, and two proofs that agree on what is visible above
-   now have the same key although they differ below. Keeping one of them is right when
-   either can stand for the other in every proof above: when they also have the same
-   open conditions on bound variables. So the open conditions are part of the key
-   (question 5).
+   0.38 s.
+
+   Which proofs are kept does not change by this (decided 2026-10-05: all variants are
+   needed, as in Russell). `ruAddProof` keeps one proof of an assertion node per
+   substitution (`ruProofSubKey`), and in Russell that is the whole substitution, so two
+   proofs are one only if they bind every variable of the subtree alike. The key here
+   is the same: the whole substitution, put together from the proof when the key is
+   needed (`allBindings`, `proofKey`), which is when a node gets a second proof — in a
+   replay, never. The first version took the restricted substitution as the key; then
+   two proofs of a premise that give the same instance of it led to one proof of the
+   node above. One thing is added to Russell's key: the open conditions on bound
+   variables, because two proofs with the same substitution and other conditions cannot
+   stand for each other.
 6. **Proof extraction in one pass** (`makeProofTree`). Russell instantiates a step by
    its own substitution and then applies the substitution of every step above it to the
    whole subtree. After change 5 the substitution of a step no longer contains those
@@ -731,7 +750,8 @@ Each of these is also noted in the file it concerns.
    arity; here from the left with a stack of open applications, a node having no arity.
 10. **The root and the premises.** `ruInitProver` expands the root but does not match
     it with the premises, so a goal that is one of the premises (set.mm has `idi`)
-    would not be proved. `search` checks this case first.
+    would not be proved. `search` checks this case first, by unification: a goal with
+    metavariables is proved by a premise that it unifies with.
 11. **Restrictions instead of replaceable functions.** Russell's oracle replaces
     `fns.unifyAssertion` and `fns.unifyPremise` of the environment. Here a strategy
     passes, with each node to expand, what its premises may use (`Only`).
@@ -740,9 +760,17 @@ Each of these is also noted in the file it concerns.
     a lemma, and each use of it gets its own copy of them, as each use of an assertion
     does. In `ruApplyForward` the variables of a fact are the same in every use, so one
     fact cannot fill two hypotheses of an assertion in two different instances:
-    `ruUnifySubs` then has to make the instances equal.
+    `ruUnifySubs` then has to make the instances equal. The substitution of a
+    `RuProverProofForward` is in Russell the whole unifier of the fact with the subgoal,
+    with the bindings of the fact's variables. Here the proof has the bindings of the
+    subgoal's variables as its substitution, and the whole unifier beside it, for the
+    key of change 5: with a copy of the variables per use, the whole unifiers in the
+    substitutions gave `ruUnifySubsProd` a column per copy, and a forward application
+    took seconds.
 13. **Facts are told apart up to the names of their variables.** Russell's `seen` has the
     nodes as they are, so a fact derived twice with other fresh variables is two facts.
+    A fact has one derivation, the first, here and in Russell (`ruApplyForward`: "One
+    proof per matched fact suffices"): the forward front does not keep all variants.
 14. **No `ruJoinAcyclic`.** Facts are derived from the premises and from assertions
     without hypotheses, never from a subgoal, so a join cannot make a proof depend on
     itself. The source says the same of its own check.
@@ -799,7 +827,7 @@ all substitutions by unification.
 | steps | 3,508,182, the same as in the file |
 | tuples that did not unify, proofs rejected by the verifier | 0, 0 |
 | proof bodies | 32.4 MB in the file, 32.7 MB reconstructed |
-| time | 79 s |
+| time | 70 s |
 
 `out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
 
@@ -817,23 +845,32 @@ before the term `wal` (theorems 0 to 1532), predicate calculus what comes before
 | | propositional | predicate |
 | - | - | - |
 | theorems | 1,520 | 1,262 |
-| proved | 805 (53.0%) | 374 (29.6%) |
-| stopped at the limit | 715 | 888 |
+| proved | 825 (54.3%) | 383 (30.3%) |
+| stopped at the limit | 695 | 879 |
 | proofs rejected by the verifier | 0 | 0 |
 | steps of a proof found: median, largest | 2, 4 | 1, 3 |
-| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 501, 268, 8 | 3, 300, 57, 14, 0 |
-| shorter than in the file / the same / longer | 15 / 594 / 196 | 233 / 134 / 7 |
-| time of a successful search: median, 90% | 272 ms, 699 ms | 3 ms, 611 ms |
+| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 512, 276, 9 | 3, 300, 64, 16, 0 |
+| shorter than in the file / the same / longer | 15 / 610 / 200 | 233 / 141 / 9 |
+| time of a successful search: median, 90% | 251 ms, 699 ms | 3 ms, 717 ms |
+| proofs of assertion nodes made by `addProof`; not kept as duplicates | 52,341; 132 | 525; 1 |
 
 The files with the proofs found in the place of the original ones are accepted by our
 verifier against `setmm.mm0` and by `mm0-rs`.
+
+These are the numbers of 2026-10-05, with one proof kept per whole substitution (change
+5). With one per restricted substitution the run of 2026-10-01 had 805 and 374 proved.
+Whether the difference comes from the change is not known: the limit is time, so two
+runs differ, and on the sample below the same change gave 132 proved where it was 134.
+What can be said is that keeping all variants costs nothing that shows at this depth.
+The last row says how little the key does here: of the proofs that `addProof` made, 133
+had the whole substitution of another and were not kept.
 
 What the numbers say:
 
 - In one second the tree reaches about 500,000 assertion nodes, which is depth 3 to 4.
   A proof found has at most four steps; whatever needs five is out of reach of an
   unguided search at this budget. This is the baseline that ranking has to beat.
-- A proof found can be longer than the one in the file (196 in propositional calculus):
+- A proof found can be longer than the one in the file (200 in propositional calculus):
   within a round the first proof that reaches the root is taken, not the shortest.
 - In predicate calculus 300 theorems are proved in one step, 233 of them by a shorter
   proof than the file has: they are instances of an assertion that precedes them.
@@ -845,7 +882,8 @@ What the numbers say:
 
 More time helps, slowly. A sample of every tenth theorem of the two sections, with a
 limit of 10 s or 3,000,000 assertion nodes (the node limit was reached first in 80 of
-the 97 searches that were stopped):
+the 97 searches that were stopped; measured before the change of 2026-10-05 in which
+proofs are kept, change 5, and not repeated):
 
 | | propositional | predicate |
 | - | - | - |
@@ -863,11 +901,11 @@ facts, Russell's `forward-search-size`):
 
 | | propositional (154) | predicate (127) |
 | - | - | - |
-| backward, breadth first | 91 (59%) | 43 (34%) |
+| backward, breadth first | 91 (59%) | 41 (32%) |
 | forward alone | 28 (18%) | 10 (8%) |
-| both in turn | 108 (70%) | 49 (39%) |
+| both in turn | 108 (70%) | 48 (38%) |
 | proved by both in turn and not by backward alone | 25 | 8 |
-| proved by backward alone and not by both in turn | 8 | 2 |
+| proved by backward alone and not by both in turn | 8 | 1 |
 
 Both directions in turn prove more in the same time, and find proofs of five steps,
 where backward alone stops at four. Forward alone ends early: its front reaches 512
@@ -881,7 +919,7 @@ of `ordered`, the limits inside the forward work and `ruUnifySubsProd` are there
 Carrying the conditions on bound variables matters here. The first version, which only
 discarded what was violated for certain, proved 357 theorems of predicate calculus under
 the same limit and sent 361 proofs to the verifier to be rejected; with the conditions
-carried, 374 are proved and none is rejected.
+carried, 374 were proved in the run that followed, and none is rejected.
 
 Speed: a search makes about 500,000 assertion nodes per second, with 300 to 2,800
 assertions to choose from. A profile of a search (callgrind), taken when it made
@@ -925,7 +963,42 @@ family is infinite, and a goal that is a variable, or has one, unifies with infi
 many of its members (the variable can become any path). The engine cannot expand them
 all, so the proposal offers a step only at the places that the goal has. A proof that
 unfolds inside something that is still a variable in the tree is then not found by this
-step. Question 3 is how you want that handled.
+step.
+
+An example of what is not found. Let `def wb (ph ps: wff): wff = $ ~((ph -> ps) -> ~(ps -> ph)) $;`
+(written `<->`), and let the theorem be: from `h1: ph <-> ps` and
+`h2: ~((ph -> ps) -> ~(ps -> ph)) -> ch` prove `ch`. In MM0 this is one step of `ax_mp`
+and a conversion, because the statement of `h2` is convertible to `(ph <-> ps) -> ch`. In
+the tree:
+
+    RuProverRoot   ch
+      RuProverProp   ax_mp, with the fresh variable ?A
+        RuProverExp    ?A          premise h1 matches:  ?A := (ph <-> ps)
+        RuProverExp    ?A -> ch    premise h2 matches:  ?A := ~((ph -> ps) -> ~(ps -> ph))
+
+`ruAddProof` on the `ax_mp` node has one pair of proofs, and `ruUnifySubs` refuses it:
+the two expressions for `?A` are different expressions. An unfolding step on the second
+`RuProverExp`, at the place of its antecedent, would give it a proof with
+`?A := (?x <-> ?y)`, and the pair would unify. But the step is offered where the
+statement of the node has an application of `wb`, and this statement has the variable
+`?A` there. It stays so: the statement of a `RuProverExp` is fixed when the node is
+made, and what `?A` becomes is known only to the proofs.
+
+Three ways to go on (question 3):
+
+- (a) leave it: the first version does not find such proofs. A library usually has
+  theorems that state the definition (`(ph <-> ps) -> ~((ph -> ps) -> ~(ps -> ph))` and
+  the converse), and with them the theorem above is found as a proof of three steps.
+- (b) offer the step also at a variable of the statement, once for every definition
+  whose sort fits: `?A := f(fresh variables)`, the child having the body in its place.
+  This covers the example. It adds one `RuProverProp` per definition and variable
+  place, and still not an unfolding deeper inside what the variable becomes.
+- (c) let `ruUnifyExps` and `ruUnifySubs` unify up to unfolding: where two expressions
+  differ and one has a defined term there, unfold it and go on, and keep the conversion
+  with the unifier. Then the pair above unifies as it is, without any step in the tree.
+  This is what `mm0-rs` does in `refine` (`unify1`/`unfold` in `src/elab/refine.rs`). It
+  changes the substitution model itself: a unifier is then most general only up to
+  conversion, which the paper's theorems would have to be stated for.
 
 ### Questions
 
@@ -933,42 +1006,49 @@ Answered on 2026-10-01: forward expansion was to be ported next (done, above);
 unfolding is to be an inference step (proposal above); the three places in the source
 (question 6) need your investigation and stay as they are documented.
 
-1. **When may a disjoint-variable condition be dropped?** A `RuDisj(x, ph)` of an applied
-   assertion, under the substitution of a proof, says: the setvar given for `x` does not
-   occur in what is given for `ph`. When the setvar is a fresh variable `x_17` (made by
-   `fresher` in `ruExpandHyp`) and is still unbound, the condition is kept with the
-   `RuProverProofProp` and checked again in the `ruAddProof` of every ancestor. I drop it
-   when `x_17` does not occur in the statement of the parent `RuProverExp` under the
-   proof's substitution: then no ancestor can bind it, it stays free up to the root, and
-   it becomes a dummy variable of the final proof, different from everything. Is that
-   right, or can a variable that is absent from the parent's statement still be bound
-   later?
-3. **Unfolding inside a variable.** With unfolding as a step at a place of the goal
-   (proposal above), a proof that unfolds inside what the tree still has as a variable
-   is not found. Is that acceptable for a first version, or do you have a way in mind?
-4. **A way to ask for an answer substitution.** The brief wants variables in the goal
-   that the prover has to find values for (a `RuProverTask` whose goal has variables that
-   `ruConstProverTask` leaves alone). The engine does it: asked for `?q -> ps` from `ph`
-   and `ph -> ps`, it answers `?q := ps`. There is no command for it: the commands take
-   the theorems of a file. And such a proof is not emitted or verified, because there is
-   no theorem in the file that states it. Do you want a command for it in this phase,
-   and how should its proof be checked?
-5. **Fewer proofs kept per node than in Russell.** `ruAddProof` keeps one
-   `RuProverProofProp` per substitution (`ruProofSubKey`). In Russell the substitution
-   has every binding of the subtree, so two proofs are the same only if they agree in
-   every detail. Here a proof goes up with the bindings of the variables of its node's
-   statement only (change 5), so two different subproofs of a premise that give the same
-   instance of it lead to one proof of the parent, not two. What can be proved is the
-   same; which proof is found can differ. Keep it, or keep all as Russell does?
+Answered on 2026-10-05:
+
+- A disjoint-variable condition on a fresh name may be dropped once the name does not
+  occur in the statement of the parent `RuProverExp` under the substitution of the
+  proof (was question 1): yes. Nothing changed.
+- A variable of a goal is marked as a free variable or as a metavariable (was question
+  4); the marking is a stub, because MM0 has no syntax for it. Built: `Db.task` takes
+  the numbers of the binders that are metavariables, `prove search --meta` gives them,
+  and the values found are reported (`Result.values`). Only a regular binder can be
+  marked (`Db.metasFault`). A proof for a task with metavariables proves an instance of
+  the theorem; it is not written or checked. The root is now matched with the premises
+  by unification, so that `?A` is proved from a premise.
+- All variants of a proof are needed: one proof per restricted substitution loses
+  completeness (was question 5). Built: the key of `ruAddProof` is the whole
+  substitution, as in Russell (change 5), and a `RuProverProofForward` has its whole
+  unifier (change 12).
+- `>` in the type of a `def`: as `mm0-rs` does (was question 7). It accepts it, and so
+  does this parser ("What the parser accepts").
+
+Open:
+
+3. **Unfolding inside a variable.** With unfolding as a step at a place of the goal, a
+   proof that unfolds inside what the tree still has as a variable is not found; the
+   example and three ways to go on, (a), (b), (c), are at the end of the proposal above.
+   Which one?
 6. **Three places in the source that look unintended**: `ruCheckDisjs` in `ruAddProof`
    (change 3), the variable set of `ruMakeFresherSubst` (change 4), the order of the
    arguments of `ruSuperRule` in `unify_var` (change 2). For the second, the source
    itself has a note: `ruApplyForward` builds its fresh substitution with `ruAdd2Subst`
    "NOT ruMakeFresherSubst: the latter stores each entry's var-set as the ORIGINAL var
    id, so ruApplySubstVars ... won't chase the fresh placeholder into its binding".
-7. **`>` in the type of a `def`.** In `.mm0`, `>` separates the argument types from the
-   result type: `term im: wff > wff > wff;` is `term im (_ _: wff): wff;` (`arrow-type`
-   in `mm0.md`; not `->`, which is only a notation a file may define). The grammar of
-   `mm0.md` allows this for `term`, not for `def`; `examples/hol.mm0` writes five defs
-   that way, and `mm0-rs` and mm0-c accept them. Our parser accepts them too. Keep
-   that, or follow `mm0.md` and reject `hol.mm0`?
+8. **"All variants", and what the source keeps.** Two places of the source keep one
+   proof where there are several, and say why:
+   - `ruAddProof` keeps one `RuProverProofProp` per whole substitution: "Distinct child
+     proof-subtree selections that compose to the SAME theta are interchangeable for
+     everything upstream ... so keeping more than one per theta only multiplies
+     combinatorially up the proof tree without adding provability." Two proofs have the
+     same whole substitution when the steps in which they differ bind no fresh variable
+     (every `RuProverProp` has fresh variables of its own): two assertions with the same
+     conclusion and no premises, or a premise of the theorem against an assertion that
+     states the same.
+   - `ruApplyForward` takes one proof of a fact: "One proof per matched fact suffices".
+
+   The port does the same in both places. If "all variants" is to mean every proof,
+   also these, both are to be changed here and are worth changing in the source; the
+   first is one test in `addProof`.

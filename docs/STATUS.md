@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-05.
 
 ## Phase
 
@@ -118,7 +118,7 @@ finds the substitutions again.
 | steps | 3,508,182, as in the file |
 | tuples of proofs that did not unify; proofs rejected by the verifier | 0; 0 |
 | proof bodies | 32.4 MB in the file, 32.7 MB reconstructed |
-| time | 80 to 90 s |
+| time | 70 to 90 s |
 
 `out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
 
@@ -132,10 +132,10 @@ nothing else, breadth first, 1 s per theorem.
 | | propositional calculus | predicate calculus |
 | - | - | - |
 | theorems | 1,520 | 1,262 |
-| proved | 805 (53.0%) | 374 (29.6%) |
+| proved | 825 (54.3%) | 383 (30.3%) |
 | steps of a proof found: median, largest | 2, 4 | 1, 3 |
-| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 501, 268, 8 | 3, 300, 57, 14, 0 |
-| shorter than in the file / the same / longer | 15 / 594 / 196 | 233 / 134 / 7 |
+| proofs of 0, 1, 2, 3, 4 steps | 2, 26, 512, 276, 9 | 3, 300, 64, 16, 0 |
+| shorter than in the file / the same / longer | 15 / 610 / 200 | 233 / 141 / 9 |
 | proofs rejected by the verifier | 0 | 0 |
 
 The files with the proofs found are accepted by our verifier against `setmm.mm0` and by
@@ -146,6 +146,13 @@ set.mm, 3 are proved. With 10 s or 3,000,000 nodes, on a sample of every tenth t
 sample at 1 s), still by proofs of at most four steps. More in `DESIGN.md`, "The search
 test".
 
+Both tests were run again on 2026-10-05, after the change in which proofs are kept (one
+per whole substitution, as in Russell); the tables above are of that run. The run of
+2026-10-01 had 805 and 374 proved. The limit is time, so two runs differ, and whether
+this difference comes from the change is not known; keeping all variants costs nothing
+that shows here. The two samples of the paragraph above (the rest of set.mm, and 10 s)
+are of the earlier run.
+
 What is not done of the engine model of the brief: definitions are not unfolded
 (set.mm has none; a proposal is in `DESIGN.md`).
 
@@ -154,9 +161,9 @@ every tenth theorem of the two sections, 1 s per theorem:
 
 | | propositional (154) | predicate (127) |
 | - | - | - |
-| backward, breadth first | 91 | 43 |
+| backward, breadth first | 91 | 41 |
 | forward alone | 28 | 10 |
-| both in turn | 108 | 49 |
+| both in turn | 108 | 48 |
 
 All proofs found are accepted by the verifier.
 
@@ -176,10 +183,23 @@ All proofs found are accepted by the verifier.
 `CLAUDE.md` states this order of authority; `MMB-NOTES.md` section 9 applies it to each
 point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` grammar.
 
+## Decisions (2026-10-05)
+
+1. A disjoint-variable condition on a fresh name is dropped once the name does not
+   occur in the statement of the parent `RuProverExp` under the proof's substitution.
+   This is what the code did.
+2. All variants of a proof are needed: keeping one proof per restricted substitution
+   breaks completeness. `addProof` keeps one per whole substitution, as `ruAddProof`.
+3. A variable of a goal is a free variable or a metavariable, by a mark. How the mark is
+   written is a stub, MM0 having no syntax for it: `prove search --meta`.
+4. `>` in the type of a `def` (`def all: type > term;`, five statements in
+   `examples/hol.mm0`; neither `mm0.md` nor the formal specification has it): as `mm0-rs`
+   does, which accepts it. So did the parser already.
+
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-817 checks, 0 failures, in 13 seconds:
+828 checks, 0 failures, in 13 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -198,8 +218,9 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 - Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.
 - Prover, hand-written and random: expressions and substitutions; unification and the
   index, also compared with a reference unifier on 27,000 random inputs; the engine on
-  the logic fixture (database, replay of its 16 proofs, breadth-first search, conditions
-  on bound variables, answers for a goal with a variable).
+  the logic fixture (database, replay of its 16 proofs, breadth-first search, the
+  forward direction, conditions on bound variables, two proofs that differ only below a
+  node both kept, variables marked as metavariables and the values found for them).
 - Prover, corpus: the first 6,000 statements of set.mm replayed, the resulting file
   verified.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
@@ -253,31 +274,31 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 
 ## Open points
 
-1. **Arrows in `def`** (`def all: type > term;`, five statements in `examples/hol.mm0`)
-   are accepted although neither `mm0.md` nor the formal specification has them
-   (`DESIGN.md`). Asked on 2026-10-01; details given, no decision yet.
-2. **Checking a `.mmb` against its `.mm0`** has no counterpart in `mm0-rs`. That step
+1. **Checking a `.mmb` against its `.mm0`** has no counterpart in `mm0-rs`. That step
    follows the formal specification and is tested on hand-written cases and on the
    corpus pairs.
-3. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
+2. **The index of the set.mm translation** is in an old layout that `mm0-rs` rejects; the
    corpus script removes it. Our reader reads the current layout only, so `setmm.mmb`
    dumps with generated names (`T5198`); the real names are in `setmm.mm0`.
-4. **Phase 3** (`DESIGN.md`, "The prover", "Questions"; answered on 2026-10-01: forward
+3. **Phase 3** (`DESIGN.md`, "The prover", "Questions"). Answered on 2026-10-01: forward
    expansion is ported; unfolding is to be an inference step that looks like an
-   assertion to the layer above):
-   1. when a disjoint-variable condition on a fresh setvar may be dropped;
-   3. what to do about an unfolding inside a variable of the goal;
-   4. whether answer substitutions need a command, and how their proofs are checked;
-   5. whether keeping one proof per visible substitution, where Russell keeps one per
-      whole substitution, is acceptable;
+   assertion to the layer above. Answered on 2026-10-05: the decisions above, all
+   built. Still open:
+   3. what to do about an unfolding inside a variable of the goal: an example and three
+      ways to go on are in `DESIGN.md`;
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
-      `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`.
+      `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
+   8. whether "all variants" also means the two places where the Russell source itself
+      keeps one proof of several: `ruProofSubKey` in `ruAddProof`, and one proof per
+      fact in `ruApplyForward`.
 
 ## Next steps
 
 1. The answers to the questions above.
 2. Unfolding as an inference step, once the proposal in `DESIGN.md` is agreed.
-3. The cost of joins in a search in both directions (see the forward report above):
+3. For tasks with metavariables: a way to write the marking, and a check of the proof
+   found (it proves an instance of the theorem, which no file states).
+4. The cost of joins in a search in both directions (see the forward report above):
    which joins a strategy admits is the lever that Russell's tactic layer has.
-4. Phase 4 is designed only after the search baseline is accepted.
+5. Phase 4 is designed only after the search baseline is accepted.

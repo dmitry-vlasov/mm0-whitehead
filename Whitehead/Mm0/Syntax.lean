@@ -104,7 +104,8 @@ inductive StmtKind where
       (hyps : Array BinderType) (concl : MathString)
   /-- `def name binders: a1 > ... > an > ret = $ value $;`; the value may be omitted.
   The arrows are not in the grammar of `mm0.md`, which has a single `type` here, but
-  `examples/hol.mm0` uses them and `mm0-c` accepts them (see `docs/DESIGN.md`). -/
+  `examples/hol.mm0` uses them, and `mm0-rs` reads the type of a `def` as it reads that
+  of a `term`. This parser does as `mm0-rs` does (see `docs/DESIGN.md`). -/
   | defn (name : Ident) (binders : Array Binder) (args : Array DepType) (ret : DepType)
       (value : Option MathString)
   /-- `delimiter $ both $;` or `delimiter $ left $ $ right $;` -/

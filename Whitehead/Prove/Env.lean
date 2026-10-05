@@ -1,8 +1,8 @@
 /-
 The state of a proof search: a port of `RuProverEnv`
 (`russell-flow/src/ru/prover/core/env.flow`), without the parts of the layers that are
-not ported yet (fragments, the forward front) and without the replaceable functions
-`RuProverFuncs`: what a strategy may restrict is passed to the functions that expand.
+not ported (fragments) and without the replaceable functions `RuProverFuncs`: what a
+strategy may restrict is passed to the functions that expand.
 -/
 import Whitehead.Prove.Tree
 
