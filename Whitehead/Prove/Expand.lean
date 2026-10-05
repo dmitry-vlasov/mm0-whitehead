@@ -74,8 +74,7 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
     | none => modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
     | some conds =>
       modify fun env => { env with props := env.props.modify p fun prop =>
-        { prop with proofs := prop.proofs.push (.prop p prop.sub #[] conds),
-                    keys := prop.keys.insert (prop.sub.key ++ condsKey conds) } }
+        { prop with proofs := prop.proofs.push (.prop p prop.sub #[] conds) } }
   else
     for i in [0:a.hyps.size] do
       let ex := prop.outer.apply (prop.sub.apply a.hyps[i]!)

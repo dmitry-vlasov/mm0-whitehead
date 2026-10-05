@@ -13,13 +13,15 @@ What differs from Russell:
   substitution of the subtree to the root; it grows with the subtree, and a proof of
   thousands of steps is then composed again at every level. The restricted one has the
   same bindings for everything that the nodes above can see, so the same tuples unify,
-  with the same result on those variables. Two things follow. `ruMakeProofTree` cannot
-  rely on the substitution of a node to contain those of its subtree (see
-  `makeProofTree`). And proofs of one assertion node have the same key (`ruProofSubKey`)
-  when they agree on what is visible above, also if they differ below. Keeping one of
-  them is right when either can stand for the other in every proof above: when they
-  also have the same open conditions on bound variables. So the open conditions are
-  part of the key.
+  with the same result on those variables. `ruMakeProofTree` cannot rely on the
+  substitution of a node to contain those of its subtree (see `makeProofTree`).
+- The proofs that are kept are those that Russell keeps: one for each *whole*
+  substitution (`ruProofSubKey` of Russell's `theta`), and not one for each restricted
+  one, which would drop a proof that differs from another only below the node. The
+  whole substitution is not carried, so it is put together from the proof when it is
+  needed as a key (`allBindings`, `proofKey`), and it is needed only on a node that has
+  more than one proof. The open conditions on bound variables are part of the key: two
+  proofs with the same substitution and other conditions cannot stand for each other.
 - Conditions on bound variables. `ruCheckDisjs` is given the substitution `theta` of
   the new proof, which binds variables of the tree, and looks up in it the variables of
   the assertion's disjoint pairs, which `theta` does not bind (they are in `outer`); so
@@ -112,6 +114,35 @@ def condsKey (conds : Array Cond) : Array Nat :=
       return a.size < b.size
     (rows.qsort less).foldl (init := #[conds.size]) (· ++ ·)
 
+/-- The bindings of all substitutions in a proof, as one substitution. The proof is
+walked from the root down, and a binding of a node is taken if no node above it binds
+the variable; its image is brought under the bindings from above first.
+
+A variable can be bound below and free above: when two variables are identified, a node
+below may bind the first to the second and a node above the second to the first. The
+binding from below then says nothing new — under the bindings from above its image is
+the variable itself — and is left out. -/
+partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
+  let add (acc : Subst) (s : Subst) : Subst :=
+    s.map.fold (init := acc) fun acc v x =>
+      if acc.map.contains v then acc
+      else
+        let image := acc.apply x.exp
+        if image.isTheVar x.var then acc
+        else { map := acc.map.insert v (SubExp.mk' x.var image) }
+  match proof with
+  | .top _ _ _ sub => add acc sub
+  | .stmt _ _ _ child => allBindings child acc
+  | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
+  | .forward _ _ _ _ _ whole => add acc whole
+
+/-- The key by which `addProof` keeps one proof of an assertion node for each
+(`ruProofSubKey`): the whole substitution of the proof, which is Russell's `theta` — every
+binding made in the proof, not only those that the nodes above can see — and its open
+conditions on bound variables. -/
+def proofKey (proof : Proof) : Array Nat :=
+  (allBindings proof).key ++ condsKey proof.conds
+
 /-- No limit on the number of tuples. -/
 def noLimit : Nat := 0xFFFFFFFF
 
@@ -168,13 +199,19 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM
         if !consistent env prop theta row then
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
-          -- one proof for each substitution with its open conditions
-          let key := theta.key ++ condsKey conds
-          if keys.contains key then
-            counters := { counters with duplicate := counters.duplicate + 1 }
+          -- one proof for each whole substitution with its open conditions. The keys
+          -- are made when the node gets its second proof: a node with one proof, as
+          -- every node of a replay, needs none.
+          let proof := Proof.prop p theta row conds
+          if proofs.isEmpty then proofs := proofs.push proof
           else
-            keys := keys.insert key
-            proofs := proofs.push (.prop p theta row conds)
+            if keys.isEmpty then keys := keys.insert (proofKey proofs[0]!)
+            let key := proofKey proof
+            if keys.contains key then
+              counters := { counters with duplicate := counters.duplicate + 1 }
+            else
+              keys := keys.insert key
+              proofs := proofs.push proof
   modify fun env =>
     { env with counters, props := env.props.modify p fun prop => { prop with proofs, keys } }
 
@@ -223,28 +260,6 @@ partial def buildExpProofs (h : Nat) (proofs : Array Proof) : ProverM Unit := do
 
 end
 
-/-- The bindings of all substitutions in a proof, as one substitution. The proof is
-walked from the root down, and a binding of a node is taken if no node above it binds
-the variable; its image is brought under the bindings from above first.
-
-A variable can be bound below and free above: when two variables are identified, a node
-below may bind the first to the second and a node above the second to the first. The
-binding from below then says nothing new — under the bindings from above its image is
-the variable itself — and is left out. -/
-partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
-  let add (acc : Subst) (s : Subst) : Subst :=
-    s.map.fold (init := acc) fun acc v x =>
-      if acc.map.contains v then acc
-      else
-        let image := acc.apply x.exp
-        if image.isTheVar x.var then acc
-        else { map := acc.map.insert v (SubExp.mk' x.var image) }
-  match proof with
-  | .top _ _ _ sub => add acc sub
-  | .stmt _ _ _ child => allBindings child acc
-  | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
-  | .forward _ _ sub _ _ => add acc sub
-
 /-- `ruMakeProofTree`: the proof that a substitution proof tree stands for.
 
 Russell instantiates the expressions of a step by the substitution of that step, and
@@ -262,7 +277,7 @@ where
   go (all : Subst) : Proof → ProofTree
     | .top _ _ premise _ => .hyp premise
     | .stmt _ _ _ child => go all child
-    | .forward _ _ _ tree _ => tree.subst all
+    | .forward _ _ _ tree _ _ => tree.subst all
     | .prop p _ children _ =>
       let prop := env.props[p]!
       let a := env.db.asserts[prop.assertion]!

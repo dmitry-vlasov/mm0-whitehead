@@ -139,6 +139,22 @@ def engineTests : TestM Unit := do
   checkEq "answer: another answer when less may be used"
     ((earlier.answer.map (db.showExp · #["ph", "ps"])).getD "none", (earlier.proof.map (proofText db)).getD "none")
     ("(wi (wi (wn ps) (wn ph)) ps)", "(mpd (a1i h0) ax_3)")
+  -- all variants: D from A, B, A -> C, B -> C and C -> D by modus ponens twice. C has
+  -- two proofs, which give the node above the same instance and differ below it; both
+  -- must reach the root (`ruProofSubKey` is of the whole substitution). Every proof is
+  -- refused here, so that the search goes on and the root collects them.
+  let variantsTask : Task :=
+    { limit := id "a1i", sorts := 1, terms := 2,
+      consts := (Array.range 4).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[c 0, c 1, wi (c 0) (c 2), wi (c 1) (c 2), wi (c 2) (c 3)], goal := c 3 }
+  let variants ← searchWith (fun _ _ _ => .error "every proof is asked for") (Env.init db index variantsTask)
+    breadthFirst { maxProps := 60 }
+  let rootProofs := variants.env.hyps[0]!.proofs.map fun p => proofText db (makeProofTree variants.env p)
+  check "variants: two proofs that differ only below a node are both kept"
+    (rootProofs.contains "(ax_mp (ax_mp h0 h2) h4)" && rootProofs.contains "(ax_mp (ax_mp h1 h3) h4)")
+    s!"{rootProofs}"
+  check "variants: and each is there once" (rootProofs.all fun t => (rootProofs.filter (· == t)).size == 1)
+    s!"{rootProofs}"
   -- the forward direction: from the premises and the assertions without hypotheses
   let hypIndexes := db.hypIndexes
   let forwardEnv (name : String) : Env := Env.init db index (db.task (id name)) hypIndexes

@@ -87,7 +87,12 @@ def freshCopy (f : Nat) : ProverM (Exp × ProofTree × Array Cond) := do
 
 /-- `RuProverProofForward`: fact `f` as a proof of expression node `h`, whose expression
 is `pattern` under `pre`. `none` if the fact does not unify with it. Returns the proof,
-and `pre` followed by the unifier. -/
+and `pre` followed by the unifier. In Russell that is the substitution of the proof,
+with the bindings of the variables of the fact, so that two facts that give the same
+instance of the node are two proofs. Here it is kept beside the substitution
+(`Proof.forward`), which has the bindings of the variables of the node only: every
+copy of a fact has variables of its own, and with them in the substitutions
+`unifySubsProd` gets a column for each. -/
 def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Proof × Subst)) := do
   let (e, tree, conds) ← freshCopy f
   let target := pre.apply pattern
@@ -95,7 +100,8 @@ def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Pro
   | none => return none
   | some s =>
     let full := pre.unsafeCompose s
-    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)), full)
+    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)) full,
+                 full)
 
 /-- `ruFwdRegister`: a new fact with the expression `expr`, and the proof that `proof`
 makes for the number of its node. `none` if the fact is known. -/
@@ -132,7 +138,7 @@ def joinRoot (f : Nat) : ProverM (Array Nat) := do
     if violated then
       modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
     else
-      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds
+      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds {}
       modify fun env =>
         { env with rootProofs := env.rootProofs.push proof,
                    counters := { env.counters with joins := env.counters.joins + 1 } }
