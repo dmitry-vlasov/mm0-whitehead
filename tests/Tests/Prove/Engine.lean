@@ -187,6 +187,21 @@ def engineTests : TestM Unit := do
     s!"{rootProofs}"
   check "variants: and each is there once" (rootProofs.all fun t => (rootProofs.filter (· == t)).size == 1)
     s!"{rootProofs}"
+  -- and two proofs with the same substitution: B -> (A -> A) by a1i from A -> A, which
+  -- `id` proves and `dummy` proves, neither binding a variable of the tree. Nothing
+  -- shows that one can stand for the other, so both are kept.
+  let sameTask : Task :=
+    { limit := db.asserts.size, sorts := 2, terms := 3,
+      consts := (Array.range 2).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[], goal := wi (c 1) (wi (c 0) (c 0)) }
+  let same ← searchWith (fun _ _ _ => .error "every proof is asked for") (Env.init db index sameTask)
+    breadthFirst { maxProps := 5000 }
+  let sameProofs := same.env.hyps[0]!.proofs.map fun p => proofText db (makeProofTree same.env p)
+  check "variants: two proofs with the same substitution are both kept"
+    (sameProofs.contains "(a1i id)" && sameProofs.contains "(a1i dummy)") s!"{sameProofs.extract 0 12}"
+  check "variants: and no proof is there twice"
+    (sameProofs.size == (sameProofs.foldl (init := ({} : Std.HashSet String)) (·.insert ·)).size)
+    s!"{sameProofs.size} proofs"
   -- the forward direction: from the premises and the assertions without hypotheses
   let hypIndexes := db.hypIndexes
   let forwardEnv (name : String) : Env := Env.init db index (db.task (id name)) hypIndexes
@@ -212,13 +227,29 @@ def engineTests : TestM Unit := do
     match Whitehead.Verify.checkProofs f2 with
     | .ok () => check "both directions: the file with the proofs found is valid" true
     | .error e => check "both directions: the file with the proofs found is valid" false (e.format f2 "both")
-  -- a fact is known up to the names of its variables, and each use has its own
-  let v (k : Nat) : Exp := Exp.ofVar (Node.var (freshBase + k) (Ty.mk 0 false))
-  let imp (a b : Exp) : Exp := Exp.mkApp 0 (Ty.mk 0 false) #[a, b]
-  check "forward: two facts that differ in the names of variables are one"
-    (factKey (imp (v 3) (imp (v 9) (v 3))) == factKey (imp (v 5) (imp (v 2) (v 5))))
-  check "forward: but not if the variables are placed differently"
-    (factKey (imp (v 3) (imp (v 9) (v 3))) != factKey (imp (v 3) (imp (v 9) (v 9))))
+  -- all variants in the forward front: B from A and A -> B, and from C and C -> B, is two
+  -- facts, and D follows from each
+  let fwdTask : Task :=
+    { limit := id "a1i", sorts := 1, terms := 2,
+      consts := (Array.range 4).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[c 0, wi (c 0) (c 1), c 2, wi (c 2) (c 1), wi (c 1) (c 3)], goal := c 3 }
+  let fwdVariants ← searchWith (fun _ _ _ => .error "every proof is asked for")
+    (Env.init db index fwdTask hypIndexes) forwardOnly { maxProps := 5000, maxFacts := 64 }
+  let factsOf (env : Env) (e : Exp) : Array String :=
+    env.hyps.filterMap fun h => if h.expr == e then h.factProof.map (proofText db) else none
+  checkEq "forward: a statement derived in two ways is two facts"
+    (factsOf fwdVariants.env (c 1)) #["(ax_mp h0 h1)", "(ax_mp h2 h3)"]
+  let ds := factsOf fwdVariants.env (c 3)
+  check "forward: and what follows from it follows from each"
+    (ds.contains "(ax_mp (ax_mp h0 h1) h4)" && ds.contains "(ax_mp (ax_mp h2 h3) h4)") s!"{ds}"
+  -- but one application of an assertion to the same facts is made once: no two facts
+  -- have the same proof
+  let factProofs (env : Env) : Array String := env.hyps.filterMap fun h => h.factProof.map (proofText db)
+  let distinct (texts : Array String) : Bool :=
+    texts.size == (texts.foldl (init := ({} : Std.HashSet String)) (·.insert ·)).size
+  check "forward: no proof is made twice" (distinct (factProofs con1Forward.env) && distinct (factProofs fwdVariants.env))
+    s!"{(factProofs con1Forward.env).size} and {(factProofs fwdVariants.env).size} facts"
+  -- each use of a fact has its own variables
   let seeded := ((seedForward 100).run (forwardEnv "id")).2
   let schematic := (seeded.forward.map (·.front)).getD #[] |>.filter fun f => seeded.hyps[f]!.expr.hasVars
   check "forward: the axioms without hypotheses are seeded as facts with variables" (schematic.size ≥ 3)
@@ -226,7 +257,6 @@ def engineTests : TestM Unit := do
   let ((copy2, _, _), _) := (freshCopy schematic[0]!).run afterOne
   check "forward: two uses of a fact share no variable"
     (copy1.vars.all fun x => !copy2.vars.contains x)
-  check "forward: and are the same fact" (factKey copy1 == factKey copy2)
   -- the condition on bound variables, on an application of ax_5 in the task of alimi,
   -- whose constants are x, ph and ps, the last two depending on x
   let env := Env.init db index task

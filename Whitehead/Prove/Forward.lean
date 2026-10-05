@@ -28,8 +28,19 @@ What differs from Russell:
   Russell the variables of a fact are the same in every use, so one fact cannot fill two
   hypotheses of an assertion in two different instances: `ruUnifySubs` then has to make
   the two instances equal.
-- **Facts are told apart up to the names of their variables** (`factKey`); Russell's
-  `seen` has the nodes as they are, so the same fact derived twice is two facts.
+- **Every derivation is a fact.** Russell keeps a set `seen` of the statements of the
+  facts, and a statement that is derived again is dropped (`ruFwdRegister`; and a fact
+  is used with one proof: "One proof per matched fact suffices"). That dropping is not
+  proved safe, and it is not: two derivations of one statement can leave different
+  conditions on bound variables open, and only those of the first would be used. So
+  there is no `seen` here (decided 2026-10-05): a statement derived in two ways is two
+  facts, each with its one proof, and each is used wherever the statement is.
+- **An application is made once.** Without `seen`, Russell's wave would make the same
+  application twice: once for each of its facts that is the trigger while the others
+  are in the front. That is the same proof twice, not two variants. Here an application
+  is made when the newest of its facts in a trigger position is the trigger, at the
+  first such position that this fact stands in (`applyForward`). Nothing is lost by it:
+  every fact is expanded once, after all older facts are in the front.
 - **No acyclicity check.** `ruJoinAcyclic` guards against a fact whose derivation depends
   on the subgoal it is joined with. Facts here are derived from the premises and from
   assertions without hypotheses only, never from a subgoal, so there is nothing to
@@ -45,21 +56,6 @@ What differs from Russell:
 import Whitehead.Prove.Proofs
 
 namespace Whitehead.Prove
-
-/-- The expression with its variables numbered in the order of their first occurrence:
-the same for two expressions that differ only in the names of their variables. -/
-def factKey (e : Exp) : Exp := Id.run do
-  let mut seen : Array Nat := #[]
-  let mut out : Array Nat := Array.mkEmpty e.size
-  for n in e.nodes do
-    if Node.isVar n then
-      match seen.findIdx? (· == n) with
-      | some k => out := out.push (Node.var k (Node.ty n))
-      | none =>
-        out := out.push (Node.var seen.size (Node.ty n))
-        seen := seen.push n
-    else out := out.push n
-  return ⟨out⟩
 
 /-- A condition under a substitution. -/
 def Cond.subst (s : Subst) (c : Cond) : Cond :=
@@ -87,12 +83,7 @@ def freshCopy (f : Nat) : ProverM (Exp × ProofTree × Array Cond) := do
 
 /-- `RuProverProofForward`: fact `f` as a proof of expression node `h`, whose expression
 is `pattern` under `pre`. `none` if the fact does not unify with it. Returns the proof,
-and `pre` followed by the unifier. In Russell that is the substitution of the proof,
-with the bindings of the variables of the fact, so that two facts that give the same
-instance of the node are two proofs. Here it is kept beside the substitution
-(`Proof.forward`), which has the bindings of the variables of the node only: every
-copy of a fact has variables of its own, and with them in the substitutions
-`unifySubsProd` gets a column for each. -/
+and `pre` followed by the unifier. -/
 def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Proof × Subst)) := do
   let (e, tree, conds) ← freshCopy f
   let target := pre.apply pattern
@@ -100,22 +91,19 @@ def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Pro
   | none => return none
   | some s =>
     let full := pre.unsafeCompose s
-    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)) full,
-                 full)
+    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)), full)
 
 /-- `ruFwdRegister`: a new fact with the expression `expr`, and the proof that `proof`
-makes for the number of its node. `none` if the fact is known. -/
+makes for the number of its node. Every derivation is registered: there is no set of
+the statements that are known already. -/
 def addFact (expr : Exp) (proof : Nat → Proof) (children : Array Nat) : ProverM (Option Nat) := do
   let env ← get
   let some fwd := env.forward | return none
-  let key := factKey expr
-  if fwd.seen.contains key then return none
   let f := env.hyps.size
   let tree := makeProofTree env (proof f)
   set { env with
     hyps := env.hyps.push { ind := 0, expr, parent := none, children, proofs := #[proof f], factProof := some tree },
-    forward := some { index := fwd.index.insert expr f, front := fwd.front.push f, seen := fwd.seen.insert key,
-                      count := fwd.count + 1 },
+    forward := some { index := fwd.index.insert expr f, front := fwd.front.push f, count := fwd.count + 1 },
     counters := { env.counters with facts := env.counters.facts + 1 } }
   return some f
 
@@ -138,7 +126,7 @@ def joinRoot (f : Nat) : ProverM (Array Nat) := do
     if violated then
       modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
     else
-      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds {}
+      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds
       modify fun env =>
         { env with rootProofs := env.rootProofs.push proof,
                    counters := { env.counters with joins := env.counters.joins + 1 } }
@@ -192,6 +180,15 @@ every fact that unifies with it under what the trigger has fixed. `addProof` joi
 as it does in the backward tree, and every proof it makes is a new fact. Returns the
 new facts; they are joined with the backward tree by the caller.
 
+An application — the assertion with a fact for each hypothesis — must be made once,
+although every one of its facts that fits a trigger position is a trigger in its turn.
+So it is made when the newest of those facts is the trigger, at the first trigger
+position that this fact stands in: for another trigger position, before `trig` only
+older facts are taken, and after it none that is newer. (Facts are numbered in the order
+they are made. A trigger position is a hypothesis that is not a bare variable,
+`Db.hypIndexes`; a bare variable takes any fact of the front, as before.) Every fact is
+a trigger once, when all older facts are in the front, so no application is lost.
+
 The front has room for `maxFacts` facts. An application cannot make more facts than
 there is room for, so it takes no more candidates for a hypothesis, and no more of the
 tuples that unify. This is a limit on work, like the limit on the front itself: without
@@ -218,7 +215,8 @@ def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : Pr
   for j in [0:hyps.size] do
     if j != trig then
       let some fwd := (← get).forward | return #[]
-      let found := ((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).extract 0 room
+      let once (g : Nat) : Bool := a.hyps[j]!.isVar || (if j < trig then g < fact else g ≤ fact)
+      let found := (((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).filter once).extract 0 room
       for g in found do
         if let some (proof, _) ← graft g (first + j) hyps[j]! sigma then
           modify fun env =>

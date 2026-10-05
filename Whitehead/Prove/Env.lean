@@ -26,9 +26,6 @@ structure Counters where
   notUnified : Nat := 0
   disjoint : Nat := 0
   inconsistent : Nat := 0
-  duplicate : Nat := 0
-  /-- Proofs of assertion nodes that passed every check, kept or duplicate. -/
-  made : Nat := 0
   /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
   root. -/
   facts : Nat := 0
@@ -41,8 +38,6 @@ structure Forward where
   index : Index Nat := {}
   /-- The facts that have not been expanded forward yet. -/
   front : Array Nat := #[]
-  /-- The expressions of the facts, up to the names of their variables. -/
-  seen : Std.HashSet Exp := {}
   /-- The number of facts. -/
   count : Nat := 0
   deriving Inhabited

@@ -77,11 +77,8 @@ inductive Proof where
   | prop (node : Nat) (sub : Subst) (children : Array Proof) (conds : Array Cond)
   /-- `RuProverProofForward`: the expression node `node` is an instance of a fact of the
   forward front; `tree` is the proof of the fact, already under `sub`, and `conds` are
-  the conditions that it left open. `sub` has the bindings of the variables of the node,
-  which is what the proofs of the siblings are unified with; `whole` is the whole
-  unifier, with the bindings of the variables of the fact, which is `sub` in Russell and
-  here tells this proof from another (`proofKey`). -/
-  | forward (node : Nat) (expr : Exp) (sub : Subst) (tree : ProofTree) (conds : Array Cond) (whole : Subst)
+  the conditions that it left open. -/
+  | forward (node : Nat) (expr : Exp) (sub : Subst) (tree : ProofTree) (conds : Array Cond)
   deriving Inhabited
 
 namespace Proof
@@ -90,27 +87,27 @@ def sub : Proof → Subst
   | .top _ _ _ s => s
   | .stmt _ _ s _ => s
   | .prop _ s _ _ => s
-  | .forward _ _ s _ _ _ => s
+  | .forward _ _ s _ _ => s
 
 def node : Proof → Nat
   | .top n _ _ _ => n
   | .stmt n _ _ _ => n
   | .prop n _ _ _ => n
-  | .forward n _ _ _ _ _ => n
+  | .forward n _ _ _ _ => n
 
 /-- The expression that a proof on an expression node proves. -/
 def expr : Proof → Exp
   | .top _ e _ _ => e
   | .stmt _ e _ _ => e
   | .prop _ _ _ _ => default
-  | .forward _ e _ _ _ _ => e
+  | .forward _ e _ _ _ => e
 
 /-- The conditions on bound variables that are still open in a proof. -/
 def conds : Proof → Array Cond
   | .top _ _ _ _ => #[]
   | .stmt _ _ _ child => child.conds
   | .prop _ _ _ c => c
-  | .forward _ _ _ _ c _ => c
+  | .forward _ _ _ _ c => c
 
 end Proof
 
@@ -124,10 +121,9 @@ structure PropNode where
   outer : Subst
   parent : Nat
   children : Array Nat := #[]
+  /-- Every proof that `addProof` has made for the node. Russell keeps one for each
+  substitution (`ruProofSubKey`); here none is left out (`Proofs.lean`). -/
   proofs : Array Proof := #[]
-  /-- The keys of `proofs`, to keep one proof for each whole substitution
-  (`ruProofSubKey`, `proofKey`). Empty as long as there is at most one proof. -/
-  keys : Std.HashSet (Array Nat) := {}
   expanded : Bool := false
   deriving Inhabited
 
@@ -140,16 +136,10 @@ structure HypNode where
   parent : Option Nat
   children : Array Nat := #[]
   proofs : Array Proof := #[]
-  /-- For a fact of the forward front: its proof, read off once
-  (`ruMakeProofTree` of its first proof, which Russell builds at every use). -/
+  /-- For a fact of the forward front: its proof, read off once (`ruMakeProofTree`,
+  which Russell calls at every use). A fact has one proof: another derivation of the
+  same statement is another fact. -/
   factProof : Option ProofTree := none
   deriving Inhabited
-
-/-- The canonical form of a substitution, as a key (`ruProofSubKey`). -/
-def Subst.key (s : Subst) : Array Nat :=
-  let ids := (s.map.fold (init := #[]) fun acc v _ => acc.push v).qsort (· < ·)
-  ids.foldl (init := #[]) fun acc v =>
-    let e := s.map[v]!.exp
-    (acc.push v).push e.size ++ e.nodes
 
 end Whitehead.Prove

@@ -15,13 +15,13 @@ What differs from Russell:
   same bindings for everything that the nodes above can see, so the same tuples unify,
   with the same result on those variables. `ruMakeProofTree` cannot rely on the
   substitution of a node to contain those of its subtree (see `makeProofTree`).
-- The proofs that are kept are those that Russell keeps: one for each *whole*
-  substitution (`ruProofSubKey` of Russell's `theta`), and not one for each restricted
-  one, which would drop a proof that differs from another only below the node. The
-  whole substitution is not carried, so it is put together from the proof when it is
-  needed as a key (`allBindings`, `proofKey`), and it is needed only on a node that has
-  more than one proof. The open conditions on bound variables are part of the key: two
-  proofs with the same substitution and other conditions cannot stand for each other.
+- Every proof is kept. `ruAddProof` keeps one proof of an assertion node for each
+  substitution (`ruProofSubKey`): of the tuples of child proofs that compose to the same
+  `theta`, the first. That those are interchangeable for everything above is a comment
+  in the source, not a theorem of the paper, whose generality theorem gives *every*
+  valid proof a tree of its own shape. So nothing is left out here (decided
+  2026-10-05), until it is proved that something may be. No proof is made twice either:
+  a tuple is joined when the last of its members arrives, and at no other time.
 - Conditions on bound variables. `ruCheckDisjs` is given the substitution `theta` of
   the new proof, which binds variables of the tree, and looks up in it the variables of
   the assertion's disjoint pairs, which `theta` does not bind (they are in `outer`); so
@@ -102,18 +102,6 @@ def openConds (env : Env) (prop : PropNode) (theta : Subst) (visible : Std.HashS
       | .pending c => if !out.contains c then out := out.push c
   return some out
 
-/-- The open conditions as a part of the key of a proof: in an order that does not
-depend on how they were found. -/
-def condsKey (conds : Array Cond) : Array Nat :=
-  if conds.isEmpty then #[]
-  else
-    let rows := conds.map fun c => (#[c.name, c.expr.size] ++ c.expr.nodes)
-    let less (a b : Array Nat) : Bool := Id.run do
-      for i in [0:min a.size b.size] do
-        if a[i]! != b[i]! then return a[i]! < b[i]!
-      return a.size < b.size
-    (rows.qsort less).foldl (init := #[conds.size]) (· ++ ·)
-
 /-- The bindings of all substitutions in a proof, as one substitution. The proof is
 walked from the root down, and a binding of a node is taken if no node above it binds
 the variable; its image is brought under the bindings from above first.
@@ -134,14 +122,7 @@ partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
   | .top _ _ _ sub => add acc sub
   | .stmt _ _ _ child => allBindings child acc
   | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
-  | .forward _ _ _ _ _ whole => add acc whole
-
-/-- The key by which `addProof` keeps one proof of an assertion node for each
-(`ruProofSubKey`): the whole substitution of the proof, which is Russell's `theta` — every
-binding made in the proof, not only those that the nodes above can see — and its open
-conditions on bound variables. -/
-def proofKey (proof : Proof) : Array Nat :=
-  (allBindings proof).key ++ condsKey proof.conds
+  | .forward _ _ sub _ _ => add acc sub
 
 /-- No limit on the number of tuples. -/
 def noLimit : Nat := 0xFFFFFFFF
@@ -158,9 +139,9 @@ def consistent (env : Env) (prop : PropNode) (theta : Subst) (children : Array P
         (matchExp (theta.apply children[i]!.expr) a.hyps[i]!).bind fun sigma => s.merge sigma).isSome
 
 /-- `ruAddProof`: the proofs of assertion node `p` that use the new proof `hypProof` of
-one of its children. They are added to the node. At most `maxTuples` of the tuples
-that unify are taken; the backward tree gives no limit, the forward front one that keeps
-it within its number of facts. -/
+one of its children. They are added to the node, all of them. At most `maxTuples` of
+the tuples that unify are taken; the backward tree gives no limit, the forward front
+one that keeps it within its number of facts. -/
 def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM Unit := do
   let env ← get
   let prop := env.props[p]!
@@ -188,7 +169,6 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM
       (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   let mut proofs := prop.proofs
-  let mut keys := prop.keys
   for (s, row) in unified.extract 0 maxTuples do
     match prop.sub.compose s with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
@@ -199,22 +179,11 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM
         if !consistent env prop theta row then
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
-          -- one proof for each whole substitution with its open conditions. The keys
-          -- are made when the node gets its second proof: a node with one proof, as
-          -- every node of a replay, needs none.
-          let proof := Proof.prop p theta row conds
-          counters := { counters with made := counters.made + 1 }
-          if proofs.isEmpty then proofs := proofs.push proof
-          else
-            if keys.isEmpty then keys := keys.insert (proofKey proofs[0]!)
-            let key := proofKey proof
-            if keys.contains key then
-              counters := { counters with duplicate := counters.duplicate + 1 }
-            else
-              keys := keys.insert key
-              proofs := proofs.push proof
+          -- every tuple that passes is a proof: none is left out for having the
+          -- substitution of another (`ruProofSubKey` in Russell)
+          proofs := proofs.push (.prop p theta row conds)
   modify fun env =>
-    { env with counters, props := env.props.modify p fun prop => { prop with proofs, keys } }
+    { env with counters, props := env.props.modify p fun prop => { prop with proofs } }
 
 /-- The bindings of `theta` for the variables of `e`. A proof of an expression node goes
 up the tree with these only: the other variables that its substitution binds were made
@@ -278,7 +247,7 @@ where
   go (all : Subst) : Proof → ProofTree
     | .top _ _ premise _ => .hyp premise
     | .stmt _ _ _ child => go all child
-    | .forward _ _ _ tree _ _ => tree.subst all
+    | .forward _ _ _ tree _ => tree.subst all
     | .prop p _ children _ =>
       let prop := env.props[p]!
       let a := env.db.asserts[prop.assertion]!
