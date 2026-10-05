@@ -36,11 +36,11 @@ What differs from Russell:
   there is no `seen` here (decided 2026-10-05): a statement derived in two ways is two
   facts, each with its one proof, and each is used wherever the statement is.
 - **An application is made once.** Without `seen`, Russell's wave would make the same
-  application twice: once for each of its facts that is the trigger while the others
-  are in the front. That is the same proof twice, not two variants. Here an application
-  is made when the newest of its facts in a trigger position is the trigger, at the
-  first such position that this fact stands in (`applyForward`). Nothing is lost by it:
-  every fact is expanded once, after all older facts are in the front.
+  application — the assertion with the same fact for each hypothesis — again for each
+  of its facts that is the trigger while the others are in the front. That is the same
+  proof twice, not two variants. So the applications that have been made are kept
+  (`Forward.applied`), and one of them is not made again. This drops nothing: what is
+  passed over is, fact for fact, a proof that is there.
 - **No acyclicity check.** `ruJoinAcyclic` guards against a fact whose derivation depends
   on the subgoal it is joined with. Facts here are derived from the premises and from
   assertions without hypotheses only, never from a subgoal, so there is nothing to
@@ -91,7 +91,7 @@ def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Pro
   | none => return none
   | some s =>
     let full := pre.unsafeCompose s
-    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)), full)
+    return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)) f, full)
 
 /-- `ruFwdRegister`: a new fact with the expression `expr`, and the proof that `proof`
 makes for the number of its node. Every derivation is registered: there is no set of
@@ -103,7 +103,7 @@ def addFact (expr : Exp) (proof : Nat → Proof) (children : Array Nat) : Prover
   let tree := makeProofTree env (proof f)
   set { env with
     hyps := env.hyps.push { ind := 0, expr, parent := none, children, proofs := #[proof f], factProof := some tree },
-    forward := some { index := fwd.index.insert expr f, front := fwd.front.push f, count := fwd.count + 1 },
+    forward := some { fwd with index := fwd.index.insert expr f, front := fwd.front.push f, count := fwd.count + 1 },
     counters := { env.counters with facts := env.counters.facts + 1 } }
   return some f
 
@@ -126,7 +126,7 @@ def joinRoot (f : Nat) : ProverM (Array Nat) := do
     if violated then
       modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
     else
-      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds
+      let proof := Proof.forward 0 env.task.goal {} (tree.subst s) conds f
       modify fun env =>
         { env with rootProofs := env.rootProofs.push proof,
                    counters := { env.counters with joins := env.counters.joins + 1 } }
@@ -180,14 +180,10 @@ every fact that unifies with it under what the trigger has fixed. `addProof` joi
 as it does in the backward tree, and every proof it makes is a new fact. Returns the
 new facts; they are joined with the backward tree by the caller.
 
-An application — the assertion with a fact for each hypothesis — must be made once,
-although every one of its facts that fits a trigger position is a trigger in its turn.
-So it is made when the newest of those facts is the trigger, at the first trigger
-position that this fact stands in: for another trigger position, before `trig` only
-older facts are taken, and after it none that is newer. (Facts are numbered in the order
-they are made. A trigger position is a hypothesis that is not a bare variable,
-`Db.hypIndexes`; a bare variable takes any fact of the front, as before.) Every fact is
-a trigger once, when all older facts are in the front, so no application is lost.
+An application — the assertion with a fact for each hypothesis — comes up once for
+each of its facts that is the trigger while the others are in the front. It is made the
+first time: the applications made are kept (`Forward.applied`), and `addProof` passes
+over a tuple that is among them.
 
 The front has room for `maxFacts` facts. An application cannot make more facts than
 there is room for, so it takes no more candidates for a hypothesis, and no more of the
@@ -215,18 +211,26 @@ def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : Pr
   for j in [0:hyps.size] do
     if j != trig then
       let some fwd := (← get).forward | return #[]
-      let once (g : Nat) : Bool := a.hyps[j]!.isVar || (if j < trig then g < fact else g ≤ fact)
-      let found := (((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).filter once).extract 0 room
+      let found := ((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).extract 0 room
       for g in found do
         if let some (proof, _) ← graft g (first + j) hyps[j]! sigma then
           modify fun env =>
             { env with hyps := env.hyps.modify (first + j) fun hyp => { hyp with proofs := hyp.proofs.push proof } }
   modify fun env =>
     { env with hyps := env.hyps.modify (first + trig) fun hyp => { hyp with proofs := hyp.proofs.push trigProof } }
-  addProof p trigProof room
+  -- the application as a key: the assertion, and the fact for each hypothesis
+  let key (row : Array Proof) : Array Nat :=
+    row.foldl (init := #[a.id]) fun k proof =>
+      match proof with
+      | .forward _ _ _ _ _ g => k.push g
+      | _ => k
+  let applied := ((← get).forward.map (·.applied)).getD {}
+  addProof p trigProof room (some fun row => applied.contains (key row))
   let mut made := #[]
   for pp in (← get).props[p]!.proofs do
     if (((← get).forward.map (·.count)).getD 0) ≥ maxFacts then break
+    if let .prop _ _ row _ := pp then
+      modify fun env => { env with forward := env.forward.map fun fwd => { fwd with applied := fwd.applied.insert (key row) } }
     let conc := pp.sub.apply concTmpl
     if let some f ← addFact conc (fun f => .stmt f conc (restrict pp.sub concTmpl) pp) #[p] then
       made := made.push f

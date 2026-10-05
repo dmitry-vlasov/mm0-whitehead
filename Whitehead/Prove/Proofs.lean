@@ -122,7 +122,7 @@ partial def allBindings (proof : Proof) (acc : Subst := {}) : Subst :=
   | .top _ _ _ sub => add acc sub
   | .stmt _ _ _ child => allBindings child acc
   | .prop _ sub children _ => children.foldl (init := add acc sub) fun acc ch => allBindings ch acc
-  | .forward _ _ sub _ _ => add acc sub
+  | .forward _ _ sub _ _ _ => add acc sub
 
 /-- No limit on the number of tuples. -/
 def noLimit : Nat := 0xFFFFFFFF
@@ -141,8 +141,11 @@ def consistent (env : Env) (prop : PropNode) (theta : Subst) (children : Array P
 /-- `ruAddProof`: the proofs of assertion node `p` that use the new proof `hypProof` of
 one of its children. They are added to the node, all of them. At most `maxTuples` of
 the tuples that unify are taken; the backward tree gives no limit, the forward front
-one that keeps it within its number of facts. -/
-def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM Unit := do
+one that keeps it within its number of facts. A tuple that `made` says has been joined
+before is passed over: the forward front asks this, where the same tuple can come up
+again; in the backward tree it cannot. -/
+def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
+    (made : Option (Array Proof → Bool) := none) : ProverM Unit := do
   let env ← get
   let prop := env.props[p]!
   let arity := env.db.asserts[prop.assertion]!.hyps.size
@@ -168,6 +171,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit) : ProverM
     unified := (unifySubsProd (sets.map (·.map (·.sub)))).map fun (s, picks) =>
       (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
+  if let some made := made then unified := unified.filter fun (_, row) => !made row
   let mut proofs := prop.proofs
   for (s, row) in unified.extract 0 maxTuples do
     match prop.sub.compose s with
@@ -247,7 +251,7 @@ where
   go (all : Subst) : Proof → ProofTree
     | .top _ _ premise _ => .hyp premise
     | .stmt _ _ _ child => go all child
-    | .forward _ _ _ tree _ => tree.subst all
+    | .forward _ _ _ tree _ _ => tree.subst all
     | .prop p _ children _ =>
       let prop := env.props[p]!
       let a := env.db.asserts[prop.assertion]!

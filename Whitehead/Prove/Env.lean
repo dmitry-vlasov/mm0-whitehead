@@ -40,6 +40,9 @@ structure Forward where
   front : Array Nat := #[]
   /-- The number of facts. -/
   count : Nat := 0
+  /-- The applications that have been made: the assertion, and the fact for each of its
+  hypotheses. The same application is not made again (`applyForward`). -/
+  applied : Std.HashSet (Array Nat) := {}
   deriving Inhabited
 
 structure Env where
