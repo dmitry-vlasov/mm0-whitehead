@@ -1007,37 +1007,86 @@ statement of the node has an application of `wb`, and this statement has the var
 made, and what `?A` becomes is known only to the proofs.
 
 Unfolding is a proof step of its own (confirmed 2026-10-05): in MM0, where a proof body
-has the commands `Conv` and `Unfold` for it beside `Thm`, and in the tree, where it is a
-`RuProverProp` with one child. With the step the proof above has the tree
+has the commands `Conv` and `Unfold` for it beside `Thm`, and in the tree. And an
+expansion is granular (2026-10-06): expanding a `RuProverExp` lists all variants of
+*one* step that concludes its statement, and nothing else; a proof is found by
+expanding one node at a time. Two formulations of the step were written down; the
+first is complete, the second is not.
+
+**U1. The conversion judgment of MM0 as rules of its own.** MM0 has, beside `⊢ e`, the
+judgment `e1 ≡ e2` with its own rules (`Refl`, `Cong`, `Unfold`, `Sym`), and the step
+`Conv`: from `⊢ e2` and `e1 ≡ e2` infer `⊢ e1`. Take these as assertions over an
+extended language: a pseudo-sort `conv s` for every sort `s`, a term `≡` of that sort,
+and the assertions
+
+    conv_s   (a b: s): $ b $ > $ a ≡ b $ > $ a $            for every provable sort s
+    refl_s   (a: s): $ a ≡ a $                               for every sort s
+    cong_t   {xs} (as bs): $ a1 ≡ b1 $ > ... > $ t(xs, as) ≡ t(xs, bs) $
+                                                             for every term t; its bound
+                                                             arguments are the same on both sides
+    unfold_f {ys} (xs) (b: s ys): $ B ≡ b $ > $ f(xs) ≡ b $  for every def f (xs) {.ys} = B
+    fold_f   {ys} (xs) (a: s ys): $ a ≡ B $ > $ a ≡ f(xs) $
+
+Then nothing in the engine changes: `ruExpandHyp` finds these by unification as it finds
+any assertion, the bound binders `ys` of `unfold_f` get fresh names and the disjoint
+pairs `(y, x)` and `(y, y')` of `D(A)` — which is exactly what `UDummy` checks in the
+verifier — and the three theorems of the paper hold, because this is a set of
+assertions. Every MM0 proof has its tree: `Conv` is `conv_s`, and a conversion proof is
+`refl`, `cong`, `unfold` and `fold` (`Sym` is pushed to the leaves, where it is `fold`;
+`ConvCut` and `ConvRef` are sharing). The example above becomes
 
     RuProverRoot   ch
       RuProverProp   ax_mp, with the fresh variable ?A
-        RuProverExp    ?A                                       premise h1
+        RuProverExp    ?A                                  premise h1: ?A := (ph <-> ps)
         RuProverExp    ?A -> ch
-          RuProverProp   unfold wb in the antecedent; sub: ?A := (?x <-> ?y)
-            RuProverExp    ~((?x -> ?y) -> ~(?y -> ?x)) -> ch   premise h2
+          RuProverProp   conv_wff: a := (?A -> ch), b := ?G
+            RuProverExp    ?G                              premise h2: ?G := (~(..) -> ch)
+            RuProverExp    (?A -> ch) ≡ ?G
+              RuProverProp   cong_wi: ?G := (?B -> ?C)
+                RuProverExp    ?A ≡ ?B
+                  RuProverProp   unfold_wb: ?A := (?x <-> ?y)
+                    RuProverExp    ~((?x -> ?y) -> ~(?y -> ?x)) ≡ ?B    refl: ?B := ~(..)
+                RuProverExp    ch ≡ ?C                      refl: ?C := ch
 
-and what is open is only whether `ruExpandHyp` makes the unfolding node on `?A -> ch`,
-whose statement has a variable where `wb` will be. Three ways were considered
-(question 3):
+and `ruAddProof` joins it: `h2` makes `?x := ph, ?y := ps`, and `?A := (ph <-> ps)` on
+both sides. Every expansion here is finite: `?A -> ch` gets one `conv_wff`; `(?A -> ch) ≡ ?G`
+gets `refl`, `cong_wi`, and a `fold_g` for every def `g` (whose child dies at once unless
+the heads fit); `?A ≡ ?B` gets `refl`, one `cong` per term and one `unfold` per def of
+the sort. The unfolding inside a variable is reached one constructor at a time, by
+`cong`, and nothing is instantiated other than by unification.
 
-- (a) not at a variable: the step is made only where the statement has the defined
-  term. Then the tree above is not built. A library usually has theorems that state the
-  definition (`(ph <-> ps) -> ~((ph -> ps) -> ~(ps -> ph))` and the converse), and with
-  them the theorem is found as a proof of three steps.
-- (b) also at a variable, once for every definition whose sort fits, with
-  `sub: ?A := f(fresh variables)`. This is what unification does for an assertion: the
-  step "unfold `f` in the antecedent of an implication" is the assertion
-  `B -> q ⊢ f(xs) -> q` (`B` the body), and its conclusion unifies with `?A -> ch`. It
-  builds the tree above. It adds one `RuProverProp` per definition for every variable
-  in a statement, and it does not reach an unfolding deeper inside what the variable
-  becomes (`?A := (?x <-> ?y) /\ ?z`): those places are infinitely many.
-- (c) no step: `ruUnifyExps` and `ruUnifySubs` unify up to unfolding, as `mm0-rs` does
-  in `refine` (`unify1`/`unfold` in `src/elab/refine.rs`). Not taken: unfolding is to be
-  a step, and unification stays as the paper has it.
+What it costs: every `RuProverExp` of a provable sort gets one more `RuProverProp`,
+`conv_s`, whose first child `?b` is a bare variable — the situation of the minor premise
+of `ax_mp`, at every node: it unifies with every assertion. In a file without `def`s no
+conversion exists, and these rules are not added; set.mm is such a file. One thing is
+kept out by construction: a `conv_s` whose conversion is `refl` alone proves a goal from
+itself, so the premise `a ≡ b` of `conv_s` is of a variant of the judgment that contains
+at least one `unfold` or `fold` (two pseudo-sorts instead of one; the rules above are
+written for the plain one).
 
-Proposed: (b), because it is the reading in which the step is "like other inference
-steps": it is found by unifying the statement with what the step concludes.
+Emission: `conv_s` is `Conv`, and its conversion subtree is written as the conversion
+proof, `cong` as `Cong`, `unfold` as `Unfold`, `fold` as `Sym` and `Unfold`, `refl` as
+`Refl`; the verifier checks it as it checks everything.
+
+**U2. Unfold and fold at the places of the statement.** On a `RuProverExp` with statement
+`G`, one `RuProverProp` for every place where `G` has an application of a def `f`:
+*unfold `f` there*, the child being `G` with the body in that place, with fresh names
+for `ys`; and one for every place where the subterm of `G` unifies with the body of a
+def `g`: *fold `g` there*. Its `outer` maps `xs` to the arguments and `ys` to fresh names,
+its `sub` is the unifier of the fold. The conditions on `ys` are the pairs of `D(A)`.
+In the proof body it is `Conv` with `Cong` down to the place and `Unfold` there.
+
+This is finite and granular, but it is not complete. The example is not found: the
+conversion is needed where `?A -> ch` has the variable `?A`, which has no place to unfold
+at, and the statement of a `RuProverExp` is fixed when the node is made. In the terms
+of the paper, "unfold `f` under the context `C`" is an assertion for every context `C`;
+U2 lists those whose context the statement already has, and a variable of the statement
+unifies with infinitely many more. (A middle way, the context of depth zero at a
+variable, `?A := f(fresh variables)`, was proposed on 2026-10-05 and is withdrawn: it
+is one finite cut of that infinite list, with no reason to stop there.) Nor is
+unification up to unfolding taken, as `mm0-rs` does it in `refine`: unfolding is a step.
+
+Proposed: U1.
 
 ### Questions
 
@@ -1076,10 +1125,11 @@ Answered later on 2026-10-05:
 
 Open:
 
-3. **Unfolding at a variable.** The step is made where the statement of a `RuProverExp`
-   has the defined term. Is it also made where the statement has a variable, with
-   `?A := f(fresh variables)` — (b) of the proposal above, which is proposed — or not,
-   (a)?
+3. **Which formulation of the unfolding step**: U1, the conversion judgment of MM0 as
+   rules of its own (complete; every `RuProverExp` gets a `conv_s` variant with a
+   bare-variable child), or U2, unfold and fold at the places the statement has
+   (finite, but a conversion inside a variable of the statement is not found)? U1 is
+   proposed.
 6. **Three places in the source that look unintended**: `ruCheckDisjs` in `ruAddProof`
    (change 3), the variable set of `ruMakeFresherSubst` (change 4), the order of the
    arguments of `ruSuperRule` in `unify_var` (change 2). For the second, the source

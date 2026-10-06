@@ -200,7 +200,8 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 4. `>` in the type of a `def` (`def all: type > term;`, five statements in
    `examples/hol.mm0`; neither `mm0.md` nor the formal specification has it): as `mm0-rs`
    does, which accepts it. So did the parser already.
-5. Unfolding a definition is a proof step of its own, not a part of unification.
+5. Unfolding a definition is a proof step of its own, not a part of unification; and an
+   expansion is granular: one node at a time, all variants of one step.
 
 ## What passes
 
@@ -291,8 +292,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
    built. Still open:
-   3. whether the unfolding step is also made where a statement has a variable, with
-      `?A := f(fresh variables)`: (b) of the proposal in `DESIGN.md`, which is proposed;
+   3. which formulation of the unfolding step (`DESIGN.md`, "Unfolding as an inference
+      step"): U1, MM0's conversion judgment as rules of its own, which is complete and
+      proposed, or U2, unfold and fold at the places a statement has, which is not;
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
       `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
