@@ -22,12 +22,16 @@ partial def skeletonText (db : Db) : Skeleton → String
   | .step t children =>
     if children.isEmpty then db.asserts[t]!.name
     else s!"({db.asserts[t]!.name} {" ".intercalate (children.map (skeletonText db)).toList})"
+  | .conv t path unfold child =>
+    s!"({if unfold then "unfold" else "fold"} {db.terms[t]!.name}@{path} {skeletonText db child})"
 
 partial def proofText (db : Db) : ProofTree → String
   | .hyp i => s!"h{i}"
   | .step t _ children =>
     if children.isEmpty then db.asserts[t]!.name
     else s!"({db.asserts[t]!.name} {" ".intercalate (children.map (proofText db)).toList})"
+  | .conv t path unfold _ _ child =>
+    s!"({if unfold then "unfold" else "fold"} {db.terms[t]!.name}@{path} {proofText db child})"
 
 def engineTests : TestM Unit := do
   let bytes ← IO.FS.readBinFile logicPath
@@ -64,7 +68,7 @@ def engineTests : TestM Unit := do
     | some s =>
       match db.skeleton s with
       | .ok (some sk) => skeletonText db sk
-      | .ok none => "conversion"
+      | .ok none => "shared conversion"
       | .error msg => msg
     | none => "no such theorem"
   checkEq "skeleton: id" (skeletonOf "id") "(mpd ax_1 ax_1)"
@@ -266,7 +270,7 @@ def engineTests : TestM Unit := do
   let mvar : Exp := Exp.ofVar (Node.var freshBase (Ty.mk 0 false))
   let name' : Exp := Exp.ofVar (Node.var (freshBase + 1) (Ty.mk 1 true))
   let applied (x ph : Exp) : PropNode :=
-    { assertion := ax5.id, parent := 0, sub := {},
+    { step := .assertion ax5.id, rule := ax5, parent := 0, sub := {},
       outer := { map := (({} : Std.HashMap Nat SubExp).insert 0 (SubExp.mk' ax5.vars[0]! x)).insert 1
                   (SubExp.mk' ax5.vars[1]! ph) } }
   -- the outcome as text: violated, or the number of conditions left open

@@ -224,7 +224,7 @@ def proveDb (path : String) : IO UInt32 := do
         for k in [0:4] do
           if n > #[100, 1000, 10000, 100000][k]! then over := over.modify k (· + 1)
   let t3 ← IO.monoNanosNow
-  IO.println s!"proofs: {proofs} without conversions, {withConv} with; as trees {steps} steps, the largest {biggest}; \
+  IO.println s!"proofs: {proofs} as trees of {steps} steps, the largest {biggest}, {withConv} with a shared conversion left out; \
     more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
   return 0
 
@@ -266,8 +266,9 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let start ← IO.monoMsNow
   let (stats, bodies) ← Prove.replay db opts logLine
   let ms := (← IO.monoMsNow) - start
-  IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed, \
-    {stats.conversions} with conversions and {stats.tooLarge} too large left out, in {ms} ms"
+  IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed\
+    {if stats.convInVariable == 0 then "" else s!" ({stats.convInVariable} with an unfolding where the tree has a variable)"}, \
+    {stats.conversions} with a shared conversion and {stats.tooLarge} too large left out, in {ms} ms"
   IO.println s!"  steps of the known proofs {stats.stepsIn}, of the reconstructed ones {stats.stepsOut}; \
     proof bodies {stats.bytesIn} bytes before, {stats.bytesOut} after"
   let c := stats.counters

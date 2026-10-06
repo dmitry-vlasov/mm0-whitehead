@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Compiles logic.mm1 into logic.mmb, with mm0-rs (scripts/build-oracles.sh).
+# Compiles logic.mm1 into logic.mmb and defs.mm1 into defs.mmb, with mm0-rs
+# (scripts/build-oracles.sh).
 #
 #   tests/fixtures/prove/gen.sh
 set -eu
 cd "$(dirname "$0")"
-../../../.tools/bin/mm0-rs compile logic.mm1 logic.mmb
-../../../.tools/bin/mm0-rs compile -q logic.mmb
-echo "wrote logic.mmb ($(stat -c %s logic.mmb) bytes)"
+for name in logic defs; do
+  ../../../.tools/bin/mm0-rs compile $name.mm1 $name.mmb
+  ../../../.tools/bin/mm0-rs compile -q $name.mmb
+  echo "wrote $name.mmb ($(stat -c %s $name.mmb) bytes)"
+done

@@ -14,18 +14,92 @@ import Whitehead.Prove.Forward
 
 namespace Whitehead.Prove
 
-/-- The assertions that may prove expression node `h`, each with the unifier of its
-conclusion and the expression: all that the index finds among those declared before the
-task's theorem, or the one that `only` names. -/
-def candidates (env : Env) (h : Nat) (only : Option Only) : Array (Index.Unified Nat) :=
+/-- A way to expand expression node `h`: the step, its rule, and the unifier of the
+rule's conclusion with the expression of the node. -/
+structure Candidate where
+  step : Step
+  rule : Assertion
+  sub : Subst
+
+/-- The rule for unfolding (or folding) def `t` at node `pos` of `e`, as an assertion
+over variables of its own: the def's arguments `0 .. n-1`, its dummies `n .. n+m-1`, and
+the variables of the rest of `e`. To unfold, the conclusion is `e` with `f(xs)` at `pos`
+and the premise the same with the value there; to fold, the converse. Unifying the
+conclusion with `e` gives the arguments, and for a fold the dummies too; for an unfolding
+the dummies stay free and become fresh names, under the condition that each is apart
+from the arguments and from the other dummies — what the verifier checks at `Unfold`. -/
+def convRule (db : Db) (e : Exp) (t pos : Nat) (unfold : Bool) : Option Assertion := do
+  let info := db.terms[t]!
+  let v ← info.value
+  let n := info.args.size
+  let m := v.dummies.size
+  let xs := (Array.range n).map fun k => Node.var k info.args[k]!
+  let app := Exp.mkApp t info.ty (xs.map Exp.ofVar)
+  -- the rest of `e`, its variables renamed from `n + m` on
+  let hole : Exp := Exp.ofVar (Node.var 0 (Node.ty e.nodes[pos]!))
+  let rest := e.replace pos hole
+  let restVars := rest.vars.filter (· != hole.nodes[0]!)
+  let renamed := (Array.range restVars.size).foldl (init := ({} : Std.HashMap Nat SubExp)) fun s k =>
+    let w := restVars[k]!
+    s.insert (Node.varId w) (SubExp.mk' w (Exp.ofVar (Node.var (n + m + k) (Node.ty w))))
+  let rename : Subst := { map := renamed }
+  let withDef := (rename.apply e).replace pos app
+  let withValue := (rename.apply e).replace pos v.expr
+  let mut disjs : Array (Nat × Nat) := #[]
+  for j in [0:m] do
+    for i in [0:n] do disjs := disjs.push (n + j, i)
+    for j' in [j + 1:m] do disjs := disjs.push (n + j, n + j')
+  return { id := t, name := s!"{if unfold then "unfold" else "fold"} {info.name}", binders := #[],
+           vars := xs ++ v.dummies ++ (Array.range restVars.size).map (fun k => Node.var (n + m + k) (Node.ty restVars[k]!)),
+           hyps := #[if unfold then withValue else withDef], concl := if unfold then withDef else withValue, disjs }
+
+/-- The unfoldings and foldings that expression `e` has: for every application of a def
+in `e`, the unfolding of it; for every application whose term is the head of a def's
+value, the folding into that def, if the value unifies there. Only defs declared before
+the theorem. With `only`, that one, if it is there. -/
+def convCandidates (env : Env) (e : Exp) (only : Option (Nat × Nat × Bool) := none) : Array Candidate := Id.run do
+  let db := env.db
+  let try_ (t pos : Nat) (unfold : Bool) : Option Candidate := do
+    let rule ← convRule db e t pos unfold
+    -- the conclusion first: of two variables the later is kept, so the rule's are bound
+    let sub ← unifyExps #[rule.concl, e] {}
+    return { step := .conv t pos unfold, rule, sub }
+  match only with
+  | some (t, pos, unfold) => return (try_ t pos unfold).toArray
+  | none =>
+    let mut out := #[]
+    for pos in [0:e.size] do
+      let node := e.nodes[pos]!
+      if Node.isVar node || Node.isConst node then continue
+      let head := Node.appId node
+      if head < env.task.terms && (db.terms[head]!.value).isSome then
+        if let some c := try_ head pos true then out := out.push c
+      for t in db.defs do
+        if t < env.task.terms then
+          if let some v := db.terms[t]!.value then
+            let root := v.expr.nodes[0]!
+            if !Node.isVar root && Node.appId root == head then
+              if let some c := try_ t pos false then out := out.push c
+    return out
+
+/-- The ways to expand expression node `h`: the assertions whose conclusion unifies with
+its expression — all that the index finds among those declared before the task's
+theorem, or the one that `only` names — and the unfoldings. -/
+def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
   let e := env.hyps[h]!.expr
   match only with
-  | none => env.assertions.unify e {} env.task.limit
+  | none =>
+    (env.assertions.unify e {} env.task.limit).map (fun u => { step := .assertion u.data, rule := env.db.asserts[u.data]!, sub := u.sub })
+      ++ convCandidates env e
   | some (.assertion id) =>
     match unifyExps #[e, env.db.asserts[id]!.concl] {} with
-    | some s => #[⟨s, id, s.apply e⟩]
+    | some s => #[{ step := .assertion id, rule := env.db.asserts[id]!, sub := s }]
     | none => #[]
   | some (.premise _) => #[]
+  | some (.conv t path unfold) =>
+    match e.nodeAt path with
+    | some pos => convCandidates env e (some (t, pos, unfold))
+    | none => #[]
 
 /-- `ruExpandHyp` -/
 def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
@@ -33,8 +107,8 @@ def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
   -- the candidates that bind more come first; among equals, the order of the index
   let unified := (candidates env h only).toList.mergeSort (fun a b => a.sub.size ≥ b.sub.size)
   for unif in unified do
-    let a := (← get).db.asserts[unif.data]!
-    -- the variables of the assertion that the unifier leaves free get fresh names
+    let a := unif.rule
+    -- the variables of the rule that the unifier leaves free get fresh names
     let free := a.vars.filter fun v => !unif.sub.maps (Node.varId v)
     let base := (← get).fresh
     let fresher : Subst :=
@@ -44,7 +118,7 @@ def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
     let sAll := unif.sub.unsafeCompose fresher
     let isOfAssertion : Nat → Exp → Bool := fun v _ => Node.varId v < freshBase
     let prop : PropNode :=
-      { assertion := a.id, parent := h,
+      { step := unif.step, rule := a, parent := h,
         sub := sAll.filter fun v e => !isOfAssertion v e,
         outer := sAll.filter isOfAssertion }
     modify fun env =>
@@ -65,7 +139,7 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
                counters := { env.counters with expanded := env.counters.expanded + 1 } }
   let env ← get
   let prop := env.props[p]!
-  let a := env.db.asserts[prop.assertion]!
+  let a := prop.rule
   if a.hyps.isEmpty then
     -- an assertion without premises is a proof at once, if its conditions on bound
     -- variables allow it
@@ -89,7 +163,7 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
         match restriction with
         | none => env.premises.unify ex
         | some (.premise k) => (env.premises.unify ex).filter (·.data == k)
-        | some (.assertion _) => #[]
+        | some (.assertion _) | some (.conv ..) => #[]
       for unif in unified do
         let proof := Proof.top h unif.expr unif.data unif.sub
         modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof } }

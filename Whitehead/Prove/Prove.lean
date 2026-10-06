@@ -84,34 +84,35 @@ structure OracleState where
 the assertion that the known proof uses there is expanded, and a premise only where the
 known proof uses that premise. The expressions of the known proof are not used. -/
 def oracle (skel : Skeleton) : Strategy OracleState where
-  root := match skel with
-    | .step t _ => some (.assertion t)
-    | .hyp k => some (.premise k)
+  root := some skel.only
   init := {}
   step env st :=
     -- the assertion nodes that the last round made for the steps of the known proof
     let matching (h : Nat) (s : Skeleton) : Array (Nat × Skeleton) :=
-      match s with
-      | .step t _ => env.hyps[h]!.children.filterMap fun p =>
-          if env.props[p]!.assertion == t && !env.props[p]!.expanded then some (p, s) else none
+      let wanted : Option Step := match s with
+        | .step t _ => some (.assertion t)
+        | .hyp _ => none
+        | .conv t path unfold _ => (env.hyps[h]!.expr.nodeAt path).map fun pos => .conv t pos unfold
+      match wanted with
+      | some step => env.hyps[h]!.children.filterMap fun p =>
+          if env.props[p]!.step == step && !env.props[p]!.expanded then some (p, s) else none
+      | none => #[]
+    let children (s : Skeleton) : Array Skeleton := match s with
+      | .step _ cs => cs
+      | .conv _ _ _ c => #[c]
       | .hyp _ => #[]
     let next : Array (Nat × Skeleton) :=
       if !st.started then matching 0 skel
       else st.expanded.foldl (init := #[]) fun acc (p, s) =>
-        match s with
-        | .step _ children =>
-          let hyps := env.props[p]!.children
-          (Array.range hyps.size).foldl (init := acc) fun acc i => acc ++ matching hyps[i]! children[i]!
-        | .hyp _ => acc
+        let hyps := env.props[p]!.children
+        let cs := children s
+        (Array.range (min hyps.size cs.size)).foldl (init := acc) fun acc i => acc ++ matching hyps[i]! cs[i]!
     if next.isEmpty then (.done, { st with started := true })
     else
       let items := next.map fun (p, s) =>
         match s with
-        | .step _ children => (p, some (children.map fun c =>
-            match c with
-            | .step t _ => Only.assertion t
-            | .hyp k => Only.premise k))
         | .hyp _ => (p, none)
+        | _ => (p, some ((children s).map (·.only)))
       (.expand items, { started := true, expanded := next })
 
 /-! ### Closing and accepting a proof -/
@@ -141,13 +142,23 @@ partial def nameConflicts (db : Db) (t : ProofTree) (acc : Array (Nat × Nat) :=
   match t with
   | .hyp _ => acc
   | .step a args children =>
-    let acc := db.asserts[a]!.disjs.foldl (init := acc) fun acc (x, v) =>
-      let ex := args[x]!
-      if ex.isVar then
-        args[v]!.nodes.foldl (init := acc) fun acc n =>
-          if Node.isVar n && n != ex.nodes[0]! then acc.push (ex.nodes[0]!, n) else acc
-      else acc
+    let acc := db.asserts[a]!.disjs.foldl (init := acc) fun acc (x, v) => apart acc args[x]! args[v]!
     children.foldl (init := acc) fun acc c => nameConflicts db c acc
+  | .conv _ _ _ args dummies child =>
+    -- a dummy of the def must differ from the other dummies and from the names in
+    -- the arguments
+    let acc := (Array.range dummies.size).foldl (init := acc) fun acc j =>
+      let acc := args.foldl (init := acc) fun acc a => apart acc dummies[j]! a
+      (Array.range dummies.size).foldl (init := acc) fun acc j' =>
+        if j' != j then apart acc dummies[j]! dummies[j']! else acc
+    nameConflicts db child acc
+where
+  /-- The name `ex`, if it is a variable, must differ from the variables of `e`. -/
+  apart (acc : Array (Nat × Nat)) (ex e : Exp) : Array (Nat × Nat) :=
+    if ex.isVar then
+      e.nodes.foldl (init := acc) fun acc n =>
+        if Node.isVar n && n != ex.nodes[0]! then acc.push (ex.nodes[0]!, n) else acc
+    else acc
 
 /-- The proof with as few leftover names as its steps allow: every name is replaced by
 the first earlier one of its type that it need not differ from. MM0 allows 55 bound
@@ -322,7 +333,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
   let direct := (env.premises.unify env.task.goal).filter fun u =>
     match strategy.root with
     | some (.premise j) => j == u.data
-    | some (.assertion _) => false
+    | some (.assertion _) | some (.conv ..) => false
     | none => true
   for u in direct.qsort (·.data < ·.data) do
     if let .ok body := accept env (.hyp u.data) #[] then

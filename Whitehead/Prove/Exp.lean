@@ -125,6 +125,50 @@ def mkApp (id ty : Nat) (args : Array Exp) : Exp := Id.run do
     nodes := nodes ++ a.nodes
   return ⟨nodes⟩
 
+/-- The nodes where the arguments of the application at `i` start, in order. -/
+def argStarts (e : Exp) (i : Nat) : Array Nat := Id.run do
+  let stop := i + 1 + Node.len e.nodes[i]!
+  let mut out := #[]
+  let mut j := i + 1
+  while j < stop do
+    out := out.push j
+    j := j + 1 + Node.len e.nodes[j]!
+  return out
+
+/-- The node that a path leads to from the root: a path is the numbers of the arguments
+taken at each step. `none` if the path leaves the expression. Paths, unlike node
+numbers, mean the same in an expression and in its instances. -/
+def nodeAt (e : Exp) (path : Array Nat) : Option Nat :=
+  path.foldlM (init := 0) fun i k => (e.argStarts i)[k]?
+
+/-- The path from the root to node `i`. -/
+def pathTo (e : Exp) (i : Nat) : Array Nat := Id.run do
+  let mut path := #[]
+  let mut j := 0
+  while j != i do
+    let starts := e.argStarts j
+    -- the argument that holds `i`: the last one that starts at or before it
+    let mut k := 0
+    for a in [1:starts.size] do
+      if starts[a]! ≤ i then k := a
+    path := path.push k
+    j := starts[k]!
+  return path
+
+/-- `e` with the subexpression at node `i` replaced by `r`. -/
+def replace (e : Exp) (i : Nat) (r : Exp) : Exp := Id.run do
+  let old := 1 + Node.len e.nodes[i]!
+  -- the applications that contain node `i` get the new length
+  let mut nodes := Array.mkEmpty (e.size + r.size - old)
+  for j in [0:i] do
+    let n := e.nodes[j]!
+    if !Node.isVar n && j + 1 + Node.len n > i then nodes := nodes.push (Node.setLen n (Node.len n + r.size - old))
+    else nodes := nodes.push n
+  nodes := nodes ++ r.nodes
+  for j in [i + old:e.size] do
+    nodes := nodes.push e.nodes[j]!
+  return ⟨nodes⟩
+
 /-- The variable nodes of `e`, each once, in the order of their first occurrence
 (`ruExp2Vars`). -/
 def vars (e : Exp) : Array Nat := Id.run do

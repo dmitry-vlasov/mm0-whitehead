@@ -21,10 +21,15 @@ structure Cond where
 
 /-- `RuProofTree`: a proof read off the tree. Where Russell keeps the statement of each
 step, this keeps what the proof format of MM0 needs: the expression for every binder of
-the assertion. -/
+the assertion; for an unfolding, the def, where in the statement it is unfolded, and
+the expressions for its arguments and dummies. -/
 inductive ProofTree where
   | hyp (ind : Nat)
   | step (assertion : Nat) (args : Array Exp) (children : Array ProofTree)
+  /-- The statement is `child`'s statement with, at `path`, the def `term` applied to
+  `args` where the child has its value (`unfold`), or the value where the child has the
+  def (fold). `dummies` are the names given to the dummies of the def. -/
+  | conv (term : Nat) (path : Array Nat) (unfold : Bool) (args dummies : Array Exp) (child : ProofTree)
   deriving Inhabited
 
 namespace ProofTree
@@ -33,11 +38,14 @@ namespace ProofTree
 partial def subst (s : Subst) : ProofTree → ProofTree
   | .hyp i => .hyp i
   | .step a args children => .step a (args.map s.apply) (children.map (subst s))
+  | .conv t path unfold args dummies child =>
+    .conv t path unfold (args.map s.apply) (dummies.map s.apply) (subst s child)
 
-/-- The number of steps. -/
+/-- The number of steps; an unfolding is one. -/
 partial def size : ProofTree → Nat
   | .hyp _ => 0
   | .step _ _ children => children.foldl (init := 1) (· + ·.size)
+  | .conv _ _ _ _ _ child => 1 + child.size
 
 /-- The proof as text, a step per line, for traces. -/
 partial def render (db : Db) (t : ProofTree) (indent : String := "") : String :=
@@ -46,6 +54,10 @@ partial def render (db : Db) (t : ProofTree) (indent : String := "") : String :=
   | .step a args children =>
     let head := s!"{indent}{db.asserts[a]!.name} [{", ".intercalate (args.map (db.showExp ·)).toList}]\n"
     children.foldl (init := head) fun acc c => acc ++ c.render db (indent ++ "  ")
+  | .conv t path unfold args dummies child =>
+    let head := s!"{indent}{if unfold then "unfold" else "fold"} {db.terms[t]!.name} at {path} \
+      [{", ".intercalate ((args ++ dummies).map (db.showExp ·)).toList}]\n"
+    head ++ child.render db (indent ++ "  ")
 
 /-- The variables that are left in the proof, each once, in the order of their first
 occurrence, after those of `acc`. -/
@@ -55,11 +67,12 @@ where
   go (t : ProofTree) (acc : Array Nat × Std.HashSet Nat) : Array Nat × Std.HashSet Nat :=
     match t with
     | .hyp _ => acc
-    | .step _ args children =>
-      let acc := args.foldl (init := acc) fun acc e =>
-        e.nodes.foldl (init := acc) fun (list, seen) n =>
-          if Node.isVar n && !seen.contains n then (list.push n, seen.insert n) else (list, seen)
-      children.foldl (init := acc) fun acc c => go c acc
+    | .step _ args children => children.foldl (init := exps args acc) fun acc c => go c acc
+    | .conv _ _ _ args dummies child => go child (exps (args ++ dummies) acc)
+  exps (es : Array Exp) (acc : Array Nat × Std.HashSet Nat) : Array Nat × Std.HashSet Nat :=
+    es.foldl (init := acc) fun acc e =>
+      e.nodes.foldl (init := acc) fun (list, seen) n =>
+        if Node.isVar n && !seen.contains n then (list.push n, seen.insert n) else (list, seen)
 
 end ProofTree
 
@@ -111,9 +124,20 @@ def conds : Proof → Array Cond
 
 end Proof
 
+/-- What an assertion node applies: an assertion of the file, or an unfolding — the
+def `term` unfolded (`unfold`) or folded at node `pos` of the parent's expression. -/
+inductive Step where
+  | assertion (id : Nat)
+  | conv (term : Nat) (pos : Nat) (unfold : Bool)
+  deriving BEq, Inhabited
+
 /-- `RuProverProp`: an assertion applied to the expression node `parent`. -/
 structure PropNode where
-  assertion : Nat
+  step : Step
+  /-- The rule applied: the assertion of the file, or for an unfolding the rule made for
+  it (`convRule` in `Expand.lean`): "the parent's expression with the def here" from
+  "the same with the value here", or the converse, over fresh variables. -/
+  rule : Assertion
   /-- The part of the unifier on the variables of the goal. -/
   sub : Subst
   /-- The part of the unifier on the variables of the assertion: every one of them, the

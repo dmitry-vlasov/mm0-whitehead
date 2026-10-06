@@ -25,8 +25,11 @@ structure ReplayStats where
   theorems : Nat := 0
   replayed : Nat := 0
   failed : Nat := 0
-  /-- Left out: the proof uses a conversion, or is larger than `maxSteps`. -/
+  /-- Left out: the proof shares a conversion (`ConvCut`), or is larger than `maxSteps`. -/
   conversions : Nat := 0
+  /-- Among those not replayed: the known proof unfolds a def at a place that the tree
+  has as a variable, where the expansion offers no unfolding. -/
+  convInVariable : Nat := 0
   tooLarge : Nat := 0
   /-- Steps of the known proofs that were replayed, and of the reconstructed ones. -/
   stepsIn : Nat := 0
@@ -37,6 +40,29 @@ structure ReplayStats where
   /-- Proofs that reached the root and that the verifier did not accept. -/
   rejected : Nat := 0
   counters : Counters := {}
+
+/-- For a replay that found no proof: does a step of the known proof unfold a def at a
+place that the tree has as a variable? The tree is walked along the known proof, as the
+oracle expanded it. -/
+partial def convInVariable (env : Env) (h : Nat) (s : Skeleton) : Bool :=
+  let hyp := env.hyps[h]!
+  let under (p : Nat) (children : Array Skeleton) : Bool :=
+    let hyps := env.props[p]!.children
+    (Array.range (min children.size hyps.size)).any fun i => convInVariable env hyps[i]! children[i]!
+  match s with
+  | .hyp _ => false
+  | .conv t path unfold child =>
+    match hyp.expr.nodeAt path with
+    | none => true
+    | some pos =>
+      if Node.isVar hyp.expr.nodes[pos]! then true
+      else match hyp.children.find? fun p => env.props[p]!.step == .conv t pos unfold with
+        | some p => under p #[child]
+        | none => false
+  | .step t children =>
+    match hyp.children.find? fun p => env.props[p]!.step == .assertion t with
+    | some p => under p children
+    | none => false
 
 /-- Replays the proofs of `db.file`. Returns the statistics and, for every statement of
 the file, the new proof body if its proof was reconstructed. -/
@@ -79,11 +105,13 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
                               stepsOut := stats.stepsOut + tree.size,
                               bytesIn := stats.bytesIn + (s.stop - s.bodyStart), bytesOut := stats.bytesOut + body.size }
       | _, _ =>
-        stats := { stats with failed := stats.failed + 1 }
+        let atVar := convInVariable result.env 0 skel
+        stats := { stats with failed := stats.failed + 1,
+                              convInVariable := stats.convInVariable + (if atVar then 1 else 0) }
         if opts.verbose then
           let why := match result.ending with
             | .proved => "proved"
-            | .exhausted => "the tree has no proof"
+            | .exhausted => if atVar then "an unfolding where the tree has a variable" else "the tree has no proof"
             | .limit => "limit reached"
           log s!"not replayed: theorem {s.index} {name} ({steps} steps): {why}; \
             {c.props} assertion nodes, {c.tuples} tuples, {c.notUnified} not unified, {c.disjoint} disjointness, \

@@ -86,7 +86,7 @@ is violated; otherwise those that are still open. `visible` are the variables th
 remain in the expression of the node above. -/
 def openConds (env : Env) (prop : PropNode) (theta : Subst) (visible : Std.HashSet Nat)
     (row : Array Proof) : Option (Array Cond) := Id.run do
-  let a := env.db.asserts[prop.assertion]!
+  let a := prop.rule
   let mut out : Array Cond := #[]
   for (x, v) in a.disjs do
     match judge env.task visible (theta.apply (prop.outer.lookupD a.vars[x]!))
@@ -130,8 +130,8 @@ def noLimit : Nat := 0xFFFFFFFF
 /-- `check_consistent` of `ruAddProof`: each child's expression under `theta` must be an
 instance of the premise of the assertion it stands for, by one substitution for all
 premises. It guards against a `theta` that is not applied through. -/
-def consistent (env : Env) (prop : PropNode) (theta : Subst) (children : Array Proof) : Bool :=
-  let a := env.db.asserts[prop.assertion]!
+def consistent (prop : PropNode) (theta : Subst) (children : Array Proof) : Bool :=
+  let a := prop.rule
   if a.hyps.size != children.size then true
   else
     ((Array.range a.hyps.size).foldl (init := some ({} : Subst)) fun acc i =>
@@ -148,7 +148,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     (made : Option (Array Proof → Bool) := none) : ProverM Unit := do
   let env ← get
   let prop := env.props[p]!
-  let arity := env.db.asserts[prop.assertion]!.hyps.size
+  let arity := prop.rule.hyps.size
   if prop.children.size != arity then return
   -- for each child its proofs, the new one alone for its own node
   let sets : Array (Array Proof) := prop.children.map fun c =>
@@ -180,7 +180,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
       match openConds env prop theta (theta.apply hypExpr).varIds row with
       | none => counters := { counters with disjoint := counters.disjoint + 1 }
       | some conds =>
-        if !consistent env prop theta row then
+        if !consistent prop theta row then
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
           -- every tuple that passes is a proof: none is left out for having the
@@ -254,7 +254,15 @@ where
     | .forward _ _ _ tree _ _ => tree.subst all
     | .prop p _ children _ =>
       let prop := env.props[p]!
-      let a := env.db.asserts[prop.assertion]!
-      .step a.id (a.vars.map fun v => resolve all (prop.outer.lookupD v)) (children.map (go all))
+      let args := prop.rule.vars.map fun v => resolve all (prop.outer.lookupD v)
+      match prop.step with
+      | .assertion id => .step id args (children.map (go all))
+      | .conv t pos unfold =>
+        -- the rule's variables are the def's arguments, then its dummies, then the
+        -- variables of the rest of the parent's expression
+        let n := env.db.terms[t]!.args.size
+        let m := ((env.db.terms[t]!.value.map (·.dummies.size)).getD 0)
+        .conv t (env.hyps[prop.parent]!.expr.pathTo pos) unfold (args.extract 0 n) (args.extract n (n + m))
+          (go all children[0]!)
 
 end Whitehead.Prove

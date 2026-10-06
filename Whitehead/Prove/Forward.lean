@@ -165,7 +165,7 @@ def applyNoHyps (a : Assertion) : ProverM (Option Nat) := do
   let env ← get
   let cnode := env.hyps.size
   let p := env.props.size
-  let prop : PropNode := { assertion := a.id, sub := {}, outer := fresh, parent := cnode, expanded := true }
+  let prop : PropNode := { step := .assertion a.id, rule := a, sub := {}, outer := fresh, parent := cnode, expanded := true }
   match openConds env prop {} conc.varIds #[] with
   | none => return none
   | some conds =>
@@ -204,7 +204,7 @@ def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : Pr
   let hypNodes : Array HypNode := (Array.range hyps.size).map fun j => { ind := j, expr := hyps[j]!, parent := some p }
   set { env with
     hyps := (env.hyps.push { ind := 0, expr := concTmpl, parent := none, children := #[p] }) ++ hypNodes,
-    props := env.props.push { assertion := a.id, sub := {}, outer := fresh, parent := cnode,
+    props := env.props.push { step := .assertion a.id, rule := a, sub := {}, outer := fresh, parent := cnode,
                               children := (Array.range hyps.size).map (first + ·), expanded := true },
     counters := { env.counters with props := env.counters.props + 1 } }
   let some (trigProof, sigma) ← graft fact (first + trig) hyps[trig]! | return #[]

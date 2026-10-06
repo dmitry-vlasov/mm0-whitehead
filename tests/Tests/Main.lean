@@ -14,6 +14,7 @@ import Tests.Prove.Unify
 import Tests.Prove.Index
 import Tests.Prove.Prod
 import Tests.Prove.Engine
+import Tests.Prove.Defs
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -29,10 +30,12 @@ def main : IO UInt32 := do
     Tests.Prove.indexTests
     Tests.Prove.prodTests
     Tests.Prove.engineTests
+    Tests.Prove.defsTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
     Tests.Verify.corpusTests
     Tests.Mm0.pairTests
-    Tests.Prove.replayCorpusTests : Tests.TestM Unit).run {}
+    Tests.Prove.replayCorpusTests
+    Tests.Prove.replayDefsCorpusTests : Tests.TestM Unit).run {}
   IO.println s!"{stats.passed} passed, {stats.failed} failed, {stats.skipped} skipped"
   return if stats.failed == 0 then 0 else 1

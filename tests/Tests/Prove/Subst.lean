@@ -17,6 +17,16 @@ def substTests : TestM Unit := do
   checkEq "exp: a subexpression is a slice" (g.showExp (e.sub 3)) "(wal x (wi a b))"
   checkEq "exp: round trip" (g.showExp e) "(wi (wn a) (wal x (wi a b)))"
   checkEq "exp: variables, each once" (e.vars.map (g.varName ∘ Node.varId)) #["a", "x", "b"]
+  -- e = (wi (wn a) (wal x (wi a b))): nodes 0 wi, 1 wn, 2 a, 3 wal, 4 x, 5 wi, 6 a, 7 b
+  checkEq "exp: where the arguments start" (e.argStarts 0, e.argStarts 3) (#[1, 3], #[4, 5])
+  checkEq "exp: a path leads to a node" (e.nodeAt #[1, 1, 0], e.nodeAt #[1, 1], e.nodeAt #[0, 0, 0]) (some 6, some 5, none)
+  checkEq "exp: the path to a node" (e.pathTo 6, e.pathTo 0, e.pathTo 1) (#[1, 1, 0], #[], #[0])
+  checkEq "exp: a subexpression replaced by a larger one"
+    (g.showExp (e.replace 2 (g.exp "(wi c d)"))) "(wi (wn (wi c d)) (wal x (wi a b)))"
+  checkEq "exp: by a smaller one" (g.showExp (e.replace 5 (g.exp "c"))) "(wi (wn a) (wal x c))"
+  check "exp: the replaced expression is well formed and its lengths are right"
+    ((e.replace 5 (g.exp "c")).wellFormed && (e.replace 2 (g.exp "(wi c d)")).wellFormed &&
+      (e.replace 2 (g.exp "(wi c d)")).nodeAt #[1, 1, 0] == some 8)
   check "exp: well formed" e.wellFormed
   check "exp: a wrong length is not well formed" (!(Exp.mk (e.nodes.set! 0 (Node.setLen e.nodes[0]! 5))).wellFormed)
   checkEq "exp: a constant" (g.showExp (g.exp "(wi ph X)")) "(wi ph X)"
