@@ -31,9 +31,9 @@ Lean.
 `verify` exits with 0 if the file is accepted; otherwise it prints the first error with
 its file offset and statement.
 
-`prove replay` forgets every expression of a proof, keeps only which assertions it uses
-and how they nest, and lets the engine find the rest by unification; `prove search` is
-given no proof at all. Both take `--from A --to B` (numbers of theorems) and `--verbose`,
+`prove replay` forgets every expression of a proof, keeps only which assertions it uses,
+where it unfolds a definition, and how they nest, and lets the engine find the rest by
+unification; `prove search` is given no proof at all. Both take `--from A --to B` (numbers of theorems) and `--verbose`,
 check every proof they find with the verifier, and with `-o` write the file with the new
 proofs. The engine is a port of the Russell prover; see [docs/DESIGN.md](docs/DESIGN.md),
 "The prover".

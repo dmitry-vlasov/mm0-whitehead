@@ -512,19 +512,19 @@ tests. The questions that need an answer are at the end and in `STATUS.md`.
 
 | Lean module | Flow9 source | Contents |
 | ----------- | ------------ | -------- |
-| `Prove/Exp.lean` | `ru/src.flow` (`RuExp`), `ru/util/exp.flow` | expressions as flat arrays of nodes in prefix order, each application with the length of its arguments |
+| `Prove/Exp.lean` | `ru/src.flow` (`RuExp`), `ru/util/exp.flow` | expressions as flat arrays of nodes in prefix order, each application with the length of its arguments; paths, replacement of a subexpression |
 | `Prove/Subst.lean` | `ru/subst.flow` | `RuSubst`: `ruApplySubst`, `ruAdd2Subst`, `ruCompose`, `ruUnsafeCompose`, `ruMatchExp`, `ruMergeSubst`, `ruSplitSubs` |
 | `Prove/Unify.lean` | `ru/unify/exps.flow` | `ruUnifyExps`, `ruUnifySubs` |
 | `Prove/Index.lean` | `ru/index.flow`, `ru/unify/index.flow` | `RuIndex`, `ruSetIndex`, `ruIndexSubexpr`, `ruUnifyIndex` |
-| `Prove/Db.lean` | `ru/prover/core/util.flow` | the assertions of a proof file as expressions, the task with its constants (`ruConstProverTask`), proofs of the file as trees of assertions |
+| `Prove/Db.lean` | `ru/prover/core/util.flow` | the assertions and the values of the defs of a proof file as expressions, the task with its constants (`ruConstProverTask`), proofs of the file as trees of assertions and unfoldings |
 | `Prove/Prod.lean` | `ru/unify/prod.flow`, `ru/unify/indexes.flow` | `ruUnifySubsProd`, `ruUnifyIndexes`: the tuples of substitutions that unify, without trying each |
 | `Prove/Tree.lean` | `core/tree.flow` | the nodes of the tree, the proofs on them, `RuProofTree` |
 | `Prove/Env.lean` | `core/env.flow` | `RuProverEnv` |
 | `Prove/Proofs.lean` | `core/proofs.flow`, `core/tree.flow` | `ruAddProof`, `ruBuildPropProofs`, `ruBuildExpProofs`, `ruMakeProofTree` |
 | `Prove/Forward.lean` | `core/forward.flow` | the forward front: `ruSeedForwardFront`, `ruApplyForward`, `ruExpandForwardProved`, `ruReverseJoin` |
-| `Prove/Expand.lean` | `core/expand.flow` | `ruExpandHyp`, `ruExpandProp` with its join with the forward front; `ruProveProp` of `prove.flow` |
+| `Prove/Expand.lean` | `core/expand.flow` | `ruExpandHyp` with the unfolding steps (`convRule`, `convCandidates`), `ruExpandProp` with its join with the forward front; `ruProveProp` of `prove.flow` |
 | `Prove/Prove.lean` | `core/prove.flow`, `core/controls.flow`, `tactics/breadth_first.flow`, `tactics/oracle.flow`, `ruRunForwardWave` | the loop, the strategy interface, the strategies (breadth first, forward, both in turn, replay of a known proof); closing and accepting a proof |
-| `Prove/Emit.lean` | — | a proof tree as the proof body of a `.mmb` file |
+| `Prove/Emit.lean` | — | a proof tree as the proof body of a `.mmb` file, an unfolding as `Conv` |
 | `Prove/Replay.lean` | — | the two acceptance tests as commands: `prove replay`, `prove search` |
 | `Mmb/Write.lean` | — | a proof file with other proof bodies |
 
@@ -595,9 +595,12 @@ by an expression over the goal's variables or by a fresh variable.
   How the mark is written is a stub (`prove search --meta`, by the number of the
   binder): MM0 has no syntax for it. Only regular binders can be marked, and the proof
   found, which proves an instance of the theorem, is not written or checked.
-- **Definitions** are, in the set.mm translation, axioms (`df_an`): its 1,436 terms
-  include no `def`, and its 15.6 million proof commands include no conversion. Both
-  acceptance tests of this phase therefore run without `Unfold`. See question 3.
+- **Definitions.** A `def` is unfolded by a step of its own, given by the def and the
+  place in the statement ("Unfolding as an inference step" below). In the set.mm
+  translation the definitions are axioms (`df_an`): its 1,436 terms include no `def`
+  and its 15.6 million proof commands no conversion, so its two acceptance tests do not
+  touch this; the files compiled from the examples of the MM0 repository (`peano`,
+  `hol`, `mm0`, `x86`) do.
 
 ### Where MM0 differs: bound variables
 
@@ -949,144 +952,102 @@ assertions to choose from. A profile of a search (callgrind), taken when it made
 filtered on every expansion; that list is now cleaned once per round. `addProof` is
 small as long as the tree is shallow, which is why `ruUnifySubsProd` could wait.
 
-### Unfolding as an inference step (proposal, nothing built)
+### Unfolding as an inference step
 
-Decided (2026-10-01): unfolding a definition is an inference step of its own kind. Its
-substitution model is not that of an assertion, but to the layer above it looks like
-the application of an assertion.
+Decided (2026-10-01, 2026-10-05, 2026-10-06): unfolding a definition is an inference
+step of its own, to the layer above the application of an assertion; and an expansion
+is granular — expanding a `RuProverExp` lists all variants of *one* step that concludes
+its statement, one node at a time. An unfolding step is given by two things, the def and
+the occurrence it is applied at; the conversion proof of MM0 (`Conv`, `Cong`, `Refl`,
+`Unfold`, `Sym`) is not in the tree, which is a search space, but is written at emission
+from the place.
 
 MM0: `def f (xs) {.ys}: s = B`. An expression with `f(args)` and the same expression with
 `B[xs := args, ys := some bound variables]` in its place are *convertible*, and a proof
-of one is a proof of the other (the proof commands `Conv`, `Unfold`, `Cong`, `Refl`).
-The bound variables given for `ys` must differ from each other and not occur in `args`.
+of one is a proof of the other. The bound variables given for `ys` must differ from each
+other and not occur in `args` (`UDummy` in the verifier).
 
-The proposal, in the terms of the tree:
+**What is built** (`Expand.lean`, `convRule`, `convCandidates`). On a `RuProverExp` with
+statement `G`, beside the `RuProverProp`s of the assertions there is one for
 
-- On a `RuProverExp` with goal `G`, beside the `RuProverProp`s of the assertions, there
-  is one for every place `π` where `G` has an application of a defined term: *unfold `f`
-  at `π`*. It has one child, `G` with `f(args)` at `π` replaced by the body. Its `outer`
-  maps `xs` to `args` and `ys` to fresh names; its `sub` is empty.
-- And the converse, *fold `f` at `π`*, where the subexpression of `G` at `π` unifies with
-  the body of `f`: the child is `G` with `f(xs)` there, under the unifier, which is the
-  `sub` of the node.
-- The condition on `ys` is a set of disjoint pairs like `RuDisj`, and goes through the
-  same check as those of an assertion.
-- "Another substitution model": the unifier comes from going to a place and unifying
-  there, not from unifying a conclusion with the whole goal.
-- For a strategy it is a leaf like any other: it is expanded, gets proofs from its
-  child, and passes them down. In the proof body it becomes `Conv` with a conversion
-  that is written mechanically (`Cong` down to `π`, `Unfold` there, `Refl` elsewhere).
+- every occurrence in `G` of an application of a def `f`: *unfold `f` there*, whose one
+  child is `G` with the value in that place;
+- every occurrence in `G` of an application whose term heads the value of a def `g`, if
+  the value unifies there: *fold `g` there*, whose child is `G` with `g(xs)` in that
+  place, under the unifier.
 
-How it relates to the paper. For a fixed path `π` through term constructors, "unfold `f`
-under `π`" is an ordinary assertion: its conclusion is the path with variables for
-everything beside it. So the deductive system is the assertions plus this family, and
-the three theorems hold for it as for any set of assertions. The difficulty is that the
-family is infinite, and a goal that is a variable, or has one, unifies with infinitely
-many of its members (the variable can become any path). The engine cannot expand them
-all, so the proposal offers a step only at the places that the goal has. A proof that
-unfolds inside something that is still a variable in the tree is then not found by this
-step.
+Only defs declared before the theorem; not at a variable of `G`. The step is made as an
+assertion over variables of its own — the def's arguments, its dummies, and the
+variables of the rest of `G` — whose conclusion is `G` with `f(xs)` (or the value) at
+the place and whose premise is `G` with the value (or `f(xs)`) there. So `ruExpandHyp`
+finds it by unifying the conclusion with `G`, like any assertion; the arguments are
+bound by that, the rest of `G` is renamed back, and for an unfolding the dummies stay
+free and become fresh names, under the conditions of `D(A)` that a dummy is apart from
+every argument and from the other dummies — the pairs `(y, x)` and `(y, y')` of the
+rule, which go through `judge` like every other condition, and which `mergeNames`
+respects (`nameConflicts`). A `PropNode` carries the step (`Step.conv`) and the rule;
+`ruAddProof`, `ruBuildPropProofs` and the strategies see an assertion node like any
+other. `makeProofTree` makes a `ProofTree.conv` with the path of the place, which means
+the same in the instantiated statement.
 
-An example of what is not found. Let `def wb (ph ps: wff): wff = $ ~((ph -> ps) -> ~(ps -> ph)) $;`
-(written `<->`), and let the theorem be: from `h1: ph <-> ps` and
-`h2: ~((ph -> ps) -> ~(ps -> ph)) -> ch` prove `ch`. In MM0 this is one step of `ax_mp`
-and a conversion, because the statement of `h2` is convertible to `(ph <-> ps) -> ch`. In
-the tree:
+How it relates to the paper: for a fixed context `C` (the path through the term
+constructors), "unfold `f` under `C`" is an assertion `C[B] ⊢ C[f(xs)]`, and the
+deductive system is the assertions plus this family; the three theorems hold for it.
+The family is infinite, and this expansion takes of it, at each node, the members whose
+context the statement already has. A member whose context goes through a *variable* of
+the statement — the variable can become any context — is not offered: there are
+infinitely many of them at every variable.
 
-    RuProverRoot   ch
-      RuProverProp   ax_mp, with the fresh variable ?A
-        RuProverExp    ?A          premise h1 matches:  ?A := (ph <-> ps)
-        RuProverExp    ?A -> ch    premise h2 matches:  ?A := ~((ph -> ps) -> ~(ps -> ph))
+**Emission** (`Emit.lean`): `Conv` with `Cong` at each application on the path, `Refl`
+for the arguments beside it, and at the end `Unfold` with the value pushed first (after
+`Sym` for a fold), then `Refl`. `Refl` and `Unfold` need the same node on both sides;
+the sharing of expressions gives it, as everything beside the path is asked for by both
+statements.
 
-`ruAddProof` on the `ax_mp` node has one pair of proofs, and `ruUnifySubs` refuses it:
-the two expressions for `?A` are different expressions. An unfolding step on the second
-`RuProverExp`, at the place of its antecedent, would give it a proof with
-`?A := (?x <-> ?y)`, and the pair would unify. But the step is offered where the
-statement of the node has an application of `wb`, and this statement has the variable
-`?A` there. It stays so: the statement of a `RuProverExp` is fixed when the node is
-made, and what `?A` becomes is known only to the proofs.
+**Replay** (`Db.skeletonWithConvs`): a proof body with conversions is read with its
+expressions, and each `Unfold` is one step with the path of its obligation, on the
+goal's side if the obligation has the goal on the left, else on the proved statement's;
+the steps of one `Conv` are chained in the order they apply to the goal (the unfoldings
+as found, then the foldings in reverse). The oracle expands exactly those steps
+(`Only.conv`). A body that shares a conversion (`ConvCut`, `ConvSave`) is not read.
 
-Unfolding is a proof step of its own (confirmed 2026-10-05): in MM0, where a proof body
-has the commands `Conv` and `Unfold` for it beside `Thm`, and in the tree. And an
-expansion is granular (2026-10-06): expanding a `RuProverExp` lists all variants of
-*one* step that concludes its statement, and nothing else; a proof is found by
-expanding one node at a time. Two formulations of the step were written down; the
-first is complete, the second is not.
+**Results** (2026-10-06). The fixture `tests/fixtures/prove/defs.mmb`, a copy of
+`examples/set.mm1` (CC0) whose `df_*` theorems are proved from the definitions: 24 of
+its 26 theorems are proved from scratch (3 s each; `bi1` as
+`(ax_mp (syl ax_3 ax_1) (unfold wb@[1,0] con1))`), and all 26 are replayed; both files
+are accepted by our verifier and by `mm0-rs`. The corpus files with defs, replayed:
 
-**U1. The conversion judgment of MM0 as rules of its own.** MM0 has, beside `⊢ e`, the
-judgment `e1 ≡ e2` with its own rules (`Refl`, `Cong`, `Unfold`, `Sym`), and the step
-`Conv`: from `⊢ e2` and `e1 ≡ e2` infer `⊢ e1`. Take these as assertions over an
-extended language: a pseudo-sort `conv s` for every sort `s`, a term `≡` of that sort,
-and the assertions
+| file | theorems | replayed | with an unfolding where the tree has a variable | with a shared conversion, not read |
+| - | - | - | - | - |
+| `set` | 26 | 26 | 0 | 0 |
+| `hol` | 99 | 78 | 1 | 20 |
+| `peano` | 2,700 | 2,444 | 206 | 50 |
+| `mm0` | 4,895 | 4,450 | 350 | 95 |
+| `x86` | 7,671 | 7,058 | 460 | 153 |
 
-    conv_s   (a b: s): $ b $ > $ a ≡ b $ > $ a $            for every provable sort s
-    refl_s   (a: s): $ a ≡ a $                               for every sort s
-    cong_t   {xs} (as bs): $ a1 ≡ b1 $ > ... > $ t(xs, as) ≡ t(xs, bs) $
-                                                             for every term t; its bound
-                                                             arguments are the same on both sides
-    unfold_f {ys} (xs) (b: s ys): $ B ≡ b $ > $ f(xs) ≡ b $  for every def f (xs) {.ys} = B
-    fold_f   {ys} (xs) (a: s ys): $ a ≡ B $ > $ a ≡ f(xs) $
+Every output is accepted by our verifier against its specification and by `mm0-rs`.
+Searched from scratch, breadth first, 1 s per theorem, a sample of every tenth theorem
+of `peano` (270 theorems) has 98 proved (36%), with proofs of up to 7 steps, all
+accepted by the verifier and by `mm0-rs`.
 
-Then nothing in the engine changes: `ruExpandHyp` finds these by unification as it finds
-any assertion, the bound binders `ys` of `unfold_f` get fresh names and the disjoint
-pairs `(y, x)` and `(y, y')` of `D(A)` — which is exactly what `UDummy` checks in the
-verifier — and the three theorems of the paper hold, because this is a set of
-assertions. Every MM0 proof has its tree: `Conv` is `conv_s`, and a conversion proof is
-`refl`, `cong`, `unfold` and `fold` (`Sym` is pushed to the leaves, where it is `fold`;
-`ConvCut` and `ConvRef` are sharing). The example above becomes
+Every proof not replayed, without exception, unfolds a def at a place that the tree has
+as a variable (`convInVariable` in `Replay.lean` checks this). The typical case is
+`notan2` of peano: `~(a /\ b) <-> a -> ~b` by `ax_mp` from `bicom` and `notnot`, where
+the conversion is on the minor premise of `ax_mp`, whose statement in the tree is the
+variable `?X`. That is the gap of this expansion, and it is 7 to 8% of the proofs of
+these files.
 
-    RuProverRoot   ch
-      RuProverProp   ax_mp, with the fresh variable ?A
-        RuProverExp    ?A                                  premise h1: ?A := (ph <-> ps)
-        RuProverExp    ?A -> ch
-          RuProverProp   conv_wff: a := (?A -> ch), b := ?G
-            RuProverExp    ?G                              premise h2: ?G := (~(..) -> ch)
-            RuProverExp    (?A -> ch) ≡ ?G
-              RuProverProp   cong_wi: ?G := (?B -> ?C)
-                RuProverExp    ?A ≡ ?B
-                  RuProverProp   unfold_wb: ?A := (?x <-> ?y)
-                    RuProverExp    ~((?x -> ?y) -> ~(?y -> ?x)) ≡ ?B    refl: ?B := ~(..)
-                RuProverExp    ch ≡ ?C                      refl: ?C := ch
-
-and `ruAddProof` joins it: `h2` makes `?x := ph, ?y := ps`, and `?A := (ph <-> ps)` on
-both sides. Every expansion here is finite: `?A -> ch` gets one `conv_wff`; `(?A -> ch) ≡ ?G`
-gets `refl`, `cong_wi`, and a `fold_g` for every def `g` (whose child dies at once unless
-the heads fit); `?A ≡ ?B` gets `refl`, one `cong` per term and one `unfold` per def of
-the sort. The unfolding inside a variable is reached one constructor at a time, by
-`cong`, and nothing is instantiated other than by unification.
-
-What it costs: every `RuProverExp` of a provable sort gets one more `RuProverProp`,
-`conv_s`, whose first child `?b` is a bare variable — the situation of the minor premise
-of `ax_mp`, at every node: it unifies with every assertion. In a file without `def`s no
-conversion exists, and these rules are not added; set.mm is such a file. One thing is
-kept out by construction: a `conv_s` whose conversion is `refl` alone proves a goal from
-itself, so the premise `a ≡ b` of `conv_s` is of a variant of the judgment that contains
-at least one `unfold` or `fold` (two pseudo-sorts instead of one; the rules above are
-written for the plain one).
-
-Emission: `conv_s` is `Conv`, and its conversion subtree is written as the conversion
-proof, `cong` as `Cong`, `unfold` as `Unfold`, `fold` as `Sym` and `Unfold`, `refl` as
-`Refl`; the verifier checks it as it checks everything.
-
-**U2. Unfold and fold at the places of the statement.** On a `RuProverExp` with statement
-`G`, one `RuProverProp` for every place where `G` has an application of a def `f`:
-*unfold `f` there*, the child being `G` with the body in that place, with fresh names
-for `ys`; and one for every place where the subterm of `G` unifies with the body of a
-def `g`: *fold `g` there*. Its `outer` maps `xs` to the arguments and `ys` to fresh names,
-its `sub` is the unifier of the fold. The conditions on `ys` are the pairs of `D(A)`.
-In the proof body it is `Conv` with `Cong` down to the place and `Unfold` there.
-
-This is finite and granular, but it is not complete. The example is not found: the
-conversion is needed where `?A -> ch` has the variable `?A`, which has no place to unfold
-at, and the statement of a `RuProverExp` is fixed when the node is made. In the terms
-of the paper, "unfold `f` under the context `C`" is an assertion for every context `C`;
-U2 lists those whose context the statement already has, and a variable of the statement
-unifies with infinitely many more. (A middle way, the context of depth zero at a
-variable, `?A := f(fresh variables)`, was proposed on 2026-10-05 and is withdrawn: it
-is one finite cut of that infinite list, with no reason to stop there.) Nor is
-unification up to unfolding taken, as `mm0-rs` does it in `refine`: unfolding is a step.
-
-Proposed: U1.
+**The gap, and a way to close it.** A conversion inside a variable of the statement
+cannot be a (def, occurrence) step of that node. MM0's own rules for the judgment
+`e1 ≡ e2` can be taken as assertions over a pseudo-sort — `conv_s: b, a ≡ b ⊢ a`,
+`refl`, one `cong` per term, `unfold_f: B ≡ b ⊢ f(xs) ≡ b` and `fold_f` per def — and
+then `?X` is expanded by `conv_wff` with the children `?G` and `?X ≡ ?G`, the latter by
+`cong` one constructor at a time until the def is reached. Every expansion is finite,
+the paper's theorems apply as to any assertions, and the tree is still the search
+space; the cost is one more variant on every node of a provable sort, whose first child
+is a bare variable, as the minor premise of `ax_mp` is. This is written up as an
+alternative (U1 in the record of 2026-10-06) and not built; the (def, occurrence) steps
+above remain the direct route where the occurrence is there.
 
 ### Questions
 
@@ -1123,13 +1084,19 @@ Answered later on 2026-10-05:
   `addProof` keeps every proof (change 5); every derivation of a statement is a fact of
   the forward front, and an application is made once (change 13).
 
+Answered on 2026-10-06:
+
+- An expansion is granular: all variants of one step at one node, and an unfolding
+  step is a def and an occurrence; the conversion proof of MM0 is emission. Built:
+  "Unfolding as an inference step".
+
 Open:
 
-3. **Which formulation of the unfolding step**: U1, the conversion judgment of MM0 as
-   rules of its own (complete; every `RuProverExp` gets a `conv_s` variant with a
-   bare-variable child), or U2, unfold and fold at the places the statement has
-   (finite, but a conversion inside a variable of the statement is not found)? U1 is
-   proposed.
+3. **The unfoldings inside a variable.** The (def, occurrence) step is built; 7 to 8% of
+   the proofs with conversions in the corpus files unfold at a place that the tree has
+   as a variable, and are not reached by it ("Unfolding as an inference step",
+   results). Do you want the conversion rules (U1) added for those, or is the gap
+   accepted?
 6. **Three places in the source that look unintended**: `ruCheckDisjs` in `ruAddProof`
    (change 3), the variable set of `ruMakeFresherSubst` (change 4), the order of the
    arguments of `ruSuperRule` in `unify_var` (change 2). For the second, the source

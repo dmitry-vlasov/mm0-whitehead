@@ -6,8 +6,9 @@ Last updated: 2026-10-06.
 
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
 **Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
-**Phase 3 — prover**: the engine is ported, in both directions; both acceptance tests
-are run (report below). Open: definitions, and the questions of `DESIGN.md`.
+**Phase 3 — prover**: the engine is ported, in both directions, with unfolding of
+definitions as a step; both acceptance tests are run (report below). Open: the
+questions of `DESIGN.md`.
 
 ### Phase 1 acceptance
 
@@ -153,8 +154,16 @@ one per whole substitution. The limit is time, so two runs differ; keeping every
 costs nothing that shows here. The two samples of the paragraph above (the rest of
 set.mm, and 10 s) are of the first run.
 
-What is not done of the engine model of the brief: definitions are not unfolded
-(set.mm has none; a proposal is in `DESIGN.md`).
+Definitions (set.mm has none: its `df_*` are axioms there) are unfolded by a step
+given by the def and the occurrence in the goal (`DESIGN.md`, "Unfolding as an
+inference step"). On the files with defs compiled from the examples of the MM0
+repository, replay reconstructs 2,444 of 2,700 proofs of `peano`, 4,450 of 4,895 of
+`mm0`, 7,058 of 7,671 of `x86`, 26 of 26 of `set`, every output accepted by our verifier
+and `mm0-rs`; every proof not reconstructed unfolds a def at a place that the tree has
+as a variable, which this step does not reach (7 to 8%), or shares a conversion
+(`ConvCut`), which the reader does not read yet. Searched from scratch at 1 s per
+theorem, a sample of every tenth theorem of `peano` has 98 of 270 proved, with proofs of
+up to 7 steps; on the fixture with definitions, 24 of 26 theorems are proved.
 
 The forward direction (`forward.flow`) was ported after the baseline. On a sample of
 every tenth theorem of the two sections, 1 s per theorem:
@@ -201,12 +210,14 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
    `examples/hol.mm0`; neither `mm0.md` nor the formal specification has it): as `mm0-rs`
    does, which accepts it. So did the parser already.
 5. Unfolding a definition is a proof step of its own, not a part of unification; and an
-   expansion is granular: one node at a time, all variants of one step.
+   expansion is granular: one node at a time, all variants of one step (2026-10-06). An
+   unfolding step is a def and an occurrence in the goal; MM0's conversion proof is
+   written at emission. Built.
 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-830 checks, 0 failures, in 13 seconds:
+864 checks, 0 failures, in 15 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -229,8 +240,12 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
   forward direction, conditions on bound variables, every variant of a proof kept in
   the tree and in the forward front and none made twice, variables marked as
   metavariables and the values found for them).
-- Prover, corpus: the first 6,000 statements of set.mm replayed, the resulting file
-  verified.
+- Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
+  `examples/set.mm1`), the rule made for an unfolding, the expansion of a goal by its
+  unfoldings and foldings, 24 of its 26 theorems proved from scratch and all 26
+  replayed, the files verified.
+- Prover, corpus: the first 6,000 statements of set.mm replayed, and all of `peano.mmb`
+  with its conversions, the resulting files verified.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
   repository, 10 of the built corpus). 21 agree on every statement, 55,165 in all; one is
   the expected mismatch.
@@ -292,9 +307,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
    built. Still open:
-   3. which formulation of the unfolding step (`DESIGN.md`, "Unfolding as an inference
-      step"): U1, MM0's conversion judgment as rules of its own, which is complete and
-      proposed, or U2, unfold and fold at the places a statement has, which is not;
+   3. the unfoldings at a place that the tree has as a variable (7 to 8% of the proofs
+      with conversions in the corpus files): whether to add MM0's conversion rules as
+      assertions for them (U1 in `DESIGN.md`), or to accept the gap;
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
       `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
@@ -304,7 +319,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 ## Next steps
 
 1. The answers to the questions above.
-2. Unfolding as an inference step, once the proposal in `DESIGN.md` is agreed.
+2. Shared conversions (`ConvCut`, `ConvSave`) in the replay reader: 20 of the 99 proofs
+   of `hol` use them.
 3. For tasks with metavariables: a way to write the marking, and a check of the proof
    found (it proves an instance of the theorem, which no file states).
 4. The cost of joins in a search in both directions (see the forward report above):
