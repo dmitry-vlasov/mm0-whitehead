@@ -896,6 +896,32 @@ but proofs with different visible substitutions — in `propeqop`, each of the 6
 hypotheses `X e. _V` matches each subgoal `?A e. _V`, and the choices multiply along
 the proof. Without a budget that theorem took more than 27 GB.
 
+### Concurrency, memory, speed (2026-10-11)
+
+`prove replay` and `prove search` run one theorem per processor by default (`runJobs`
+in `Replay.lean`; `--jobs N`): a worker takes the next theorem when it has finished one,
+every theorem has a search state of its own, the database and the index are only read,
+and the results come in the order of the file, so the output does not depend on the
+number of jobs. Memory is limited to 32 GB by default (`--max-mem`): a watcher reads the
+resident size every 250 ms; above 80% the largest running search gives up as at a limit,
+above 90% every running one does, above the limit the process stops (exit code 3).
+
+What made the full replay faster, measured on theorems 1380–6000 of set.mm (one job,
+2 s per theorem) and on the first 6,000 (one job per processor):
+
+| change | 1380–6000 | first 6,000, others 2 |
+| - | - | - |
+| before | 103 s | 15 min and more, without limits |
+| Russell's lazy candidates (`ba2dd6a7`) | 64 s | |
+| Russell's fast `ruCompose` (`7657286c`) | 59 s | 70 s |
+| image variables in an array, lazy instances, a bucket sort of candidates | 49 s | |
+| proofs appended to a node in place (they were copied at every join: `nfpo` 88 s → 2.8 s) | | 13 s |
+
+Where the time goes now (callgrind): with no other variants, the lookup in the index of
+conclusions (building a substitution for each of the millions of candidates); with other
+variants, the joins (`unifySubsProd`, which builds an index of the proofs of the
+siblings for every new proof).
+
 ### The search test
 
     scripts/search-baseline.sh          # mm0-whitehead prove search, per section
