@@ -67,9 +67,14 @@ def defsTests : TestM Unit := do
   checkEq "defs: the goal is expanded by its unfoldings and its folding (<-> is a def here too)"
     convs #[("wb", 0, true), ("wa", 1, true), ("wa", 4, false)]
   -- the unfolding node binds the def's arguments, the folding one its dummies too
-  let unfoldNode := env.props.find? fun p => p.step == .conv (term "wa") 1 true
+  -- (a candidate keeps its raw unifier until it is expanded; `splitProp` splits it)
+  let unfoldAt := (env.props.findIdx? fun p => p.step == .conv (term "wa") 1 true).getD 0
+  let split := ((splitProp unfoldAt).run env).2
+  checkEq "defs: a candidate is split when it is expanded" (env.props[unfoldAt]!.unif.isSome, split.props[unfoldAt]!.unif.isSome)
+    (true, false)
+  let unfoldNode := split.props[unfoldAt]!
   checkEq "defs: the arguments of the def are bound by unification"
-    ((unfoldNode.map fun p => p.rule.vars.map fun v => db.showExp (p.outer.lookupD v) #["ph", "ps"]).getD #[])
+    (unfoldNode.rule.vars.map fun v => db.showExp (unfoldNode.outer.lookupD v) #["ph", "ps"])
     #["ph", "ps"]
   -- search: df_an from biid and the unfolding; the body is verified
   let limits : Limits := { maxProps := 5000, maxMs := 20000 }

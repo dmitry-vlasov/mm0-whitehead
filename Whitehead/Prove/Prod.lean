@@ -172,25 +172,41 @@ def unifyIndexes (ixs : Array (Index Nat)) (sub : Subst := {}) : Array (Subst ×
     rets.map fun ret => (ret.sub, ret.expr, (Array.range ixs.size).map fun i => ixs[i]!.nodes[ret.vect[i]!]!.data)
 
 /-- `ruUnifySubsProd`: the tuples, one substitution from each set, that unify: for each,
-the unifier and the places of its substitutions in their sets. -/
+the unifier and the places of its substitutions in their sets.
+
+As in Russell since `47c52bdf`: a column (`RuSubsMatrix`) is made only for a variable
+that substitutions of two or more sets bind. A variable bound in one set only cannot
+filter a tuple — every other set reads it as free — so its bindings are put back per
+tuple (`finish`). And the column unifiers of a group are unified in one call, not folded
+pairwise. -/
 def unifySubsProd (sets : Array (Array Subst)) : Array (Subst × Array Nat) := Id.run do
   if sets.isEmpty || sets.any (·.isEmpty) then return #[]
   if sets.size == 1 then return (Array.range sets[0]!.size).map fun k => (sets[0]![k]!, #[k])
-  -- the variables that any of the substitutions binds
-  let mut vars : Array Nat := #[]
-  let mut seen : Std.HashSet Nat := {}
+  -- in how many sets each variable is bound; the shared ones, in the order first seen
+  let mut count : Std.HashMap Nat Nat := {}
+  let mut order : Array Nat := #[]
   for set in sets do
-    for s in set do
-      for v in s.vars do
-        if !seen.contains v then
-          seen := seen.insert v
-          vars := vars.push v
+    let mut inSet : Std.HashSet Nat := {}
+    for sub in set do
+      for v in sub.vars do inSet := inSet.insert v
+    for v in inSet do
+      if !count.contains v then order := order.push v
+      count := count.insert v (count.getD v 0 + 1)
+  let shared := order.filter fun v => count.getD v 0 ≥ 2
+  -- each substitution's bindings of the variables that are not shared
+  let privates : Array (Array Subst) := sets.map fun set =>
+    set.map fun sub => sub.filter fun v _ => count.getD v 0 < 2
+  -- a tuple's unifier: that of its group with the private bindings of its substitutions
+  let finish (group : Subst) (picks : Array Nat) : Option Subst :=
+    let parts := ((Array.range sets.size).map fun i => privates[i]![picks[i]!]!).filter (·.size > 0)
+    if parts.isEmpty then some group else unifySubs (#[group] ++ parts)
   let all := tuples (sets.map fun set => Array.range set.size)
-  if vars.isEmpty then return all.map fun picks => ({}, picks)
-  -- for each variable: the ways its images unify across the sets, each with the
+  if shared.isEmpty then
+    return all.filterMap fun picks => (finish {} picks).map (·, picks)
+  -- for each shared variable: the ways its images unify across the sets, each with the
   -- substitutions of every set that have the image taken (`RuSubsMatrix`)
   let mut columns : Array (Array (Subst × Array (Array Nat))) := #[]
-  for v in vars do
+  for v in shared do
     let rows : Array (Index Nat) := sets.map fun set =>
       (Array.range set.size).foldl (init := {}) fun ix k => ix.insert (set[k]!.lookupD v) k
     let column := (unifyIndexes rows).filterMap fun (sub, expr, data) =>
@@ -221,15 +237,13 @@ def unifySubsProd (sets : Array (Array Subst)) : Array (Subst × Array Nat) := I
             let common := (Array.range data.size).map fun i => data[i]!.filter fun k => data2[i]!.contains k
             if !common.any (·.isEmpty) then next := next.push (subs.push s, common)
     inter := next
-  -- the substitutions of the variables are unified, and every tuple that is left gets
-  -- the result
+  -- the column unifiers of a group are unified at once, and every tuple that is left
+  -- gets the result with its private bindings
   let mut out := #[]
   for (subs, data) in inter do
-    let unified := subs.foldl (init := some ({} : Subst)) fun acc s2 =>
-      acc.bind fun s1 => unifySubs #[s1, s2]
-    if let some s := unified then
+    if let some group := unifySubs subs then
       for picks in tuples data do
-        out := out.push (s, picks)
+        if let some s := finish group picks then out := out.push (s, picks)
   return out
 
 end Whitehead.Prove

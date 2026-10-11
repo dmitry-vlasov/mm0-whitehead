@@ -107,25 +107,33 @@ def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
   -- the candidates that bind more come first; among equals, the order of the index
   let unified := (candidates env h only).toList.mergeSort (fun a b => a.sub.size ≥ b.sub.size)
   for unif in unified do
-    let a := unif.rule
-    -- the variables of the rule that the unifier leaves free get fresh names
-    let free := a.vars.filter fun v => !unif.sub.maps (Node.varId v)
-    let base := (← get).fresh
-    let fresher : Subst :=
-      { map := (Array.range free.size).foldl (init := {}) fun m k =>
-          let v := free[k]!
-          m.insert (Node.varId v) (SubExp.mk' v (Exp.ofVar (Node.var (base + k) (Node.ty v)))) }
-    let sAll := unif.sub.unsafeCompose fresher
-    let isOfAssertion : Nat → Exp → Bool := fun v _ => Node.varId v < freshBase
-    let prop : PropNode :=
-      { step := unif.step, rule := a, parent := h,
-        sub := sAll.filter fun v e => !isOfAssertion v e,
-        outer := sAll.filter isOfAssertion }
+    -- a candidate keeps the raw unifier; it is split when it is expanded (`splitProp`)
+    let prop : PropNode := { step := unif.step, rule := unif.rule, parent := h, unif := some unif.sub }
     modify fun env =>
       let p := env.props.size
-      { env with fresh := base + free.size, props := env.props.push prop, leafs := env.leafs.push p,
+      { env with props := env.props.push prop, leafs := env.leafs.push p,
                  hyps := env.hyps.modify h fun hyp => { hyp with children := hyp.children.push p },
                  counters := { env.counters with props := env.counters.props + 1 } }
+
+/-- The unifier of candidate `p` split into `sub` and `outer`, the variables of the rule
+that it leaves free being given fresh names. Done once, when the node is expanded. -/
+def splitProp (p : Nat) : ProverM Unit := do
+  let env ← get
+  let prop := env.props[p]!
+  let some u := prop.unif | return
+  let a := prop.rule
+  let free := a.vars.filter fun v => !u.maps (Node.varId v)
+  let base := env.fresh
+  let fresher : Subst :=
+    { map := (Array.range free.size).foldl (init := {}) fun m k =>
+        let v := free[k]!
+        m.insert (Node.varId v) (SubExp.mk' v (Exp.ofVar (Node.var (base + k) (Node.ty v)))) }
+  let sAll := u.unsafeCompose fresher
+  let isOfAssertion : Nat → Exp → Bool := fun v _ => Node.varId v < freshBase
+  set { env with fresh := base + free.size,
+                 props := env.props.modify p fun prop =>
+                   { prop with sub := sAll.filter (fun v e => !isOfAssertion v e), outer := sAll.filter isOfAssertion,
+                               unif := none } }
 
 /-- How many facts of the forward front a new subgoal is joined with (`fwd_cap` in
 `ruExpandProp`). The facts that come later find the subgoal themselves. -/
@@ -134,6 +142,7 @@ def joinCap : Nat := 4
 /-- `ruExpandProp`. `only` restricts, for each premise of the assertion, what its
 expression node may use. -/
 def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := do
+  splitProp p
   modify fun env =>
     { env with props := env.props.modify p fun prop => { prop with expanded := true },
                counters := { env.counters with expanded := env.counters.expanded + 1 } }

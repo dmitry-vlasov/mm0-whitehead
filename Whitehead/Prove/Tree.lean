@@ -139,10 +139,15 @@ structure PropNode where
   "the same with the value here", or the converse, over fresh variables. -/
   rule : Assertion
   /-- The part of the unifier on the variables of the goal. -/
-  sub : Subst
+  sub : Subst := {}
   /-- The part of the unifier on the variables of the assertion: every one of them, the
   ones that the unification left free being renamed to fresh variables. -/
-  outer : Subst
+  outer : Subst := {}
+  /-- For a candidate that is not expanded yet: the raw unifier of its conclusion with
+  the parent's expression. `sub` and `outer`, and the fresh variables, are made from it
+  when the node is expanded (`splitProp`), as in Russell since `ba2dd6a7`: a goal unifies
+  with thousands of conclusions and few of them are ever expanded. -/
+  unif : Option Subst := none
   parent : Nat
   children : Array Nat := #[]
   /-- The proofs of the node: one for each substitution of the parent's variables with
