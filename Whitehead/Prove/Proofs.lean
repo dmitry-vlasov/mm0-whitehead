@@ -210,8 +210,12 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     set { env with overBudget := true }
     return
   if let some made := made then unified := unified.filter fun (_, row) => !made row
-  let mut proofs := prop.proofs
-  let mut keys := prop.keys
+  -- the new proofs are collected apart and appended at the end: the node's own array
+  -- and key set are then updated in place, where extending them here, while `env` and
+  -- `prop` still hold them, would copy them for every call (quadratic in the proofs of
+  -- a node: `nfpo` of set.mm took 88 s)
+  let mut proofs : Array Proof := #[]
+  let mut keys : Std.HashSet (Array Nat) := {}
   for (s, row) in unified.extract 0 maxTuples do
     match prop.sub.compose s with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
@@ -223,12 +227,14 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
           let key := proofKey theta hypExpr conds
-          if keys.contains key then counters := { counters with duplicate := counters.duplicate + 1 }
+          if keys.contains key || prop.keys.contains key then
+            counters := { counters with duplicate := counters.duplicate + 1 }
           else
             keys := keys.insert key
             proofs := proofs.push (.prop p theta row conds)
   modify fun env =>
-    { env with counters, props := env.props.modify p fun prop => { prop with proofs, keys } }
+    { env with counters, props := env.props.modify p fun prop =>
+        { prop with proofs := prop.proofs ++ proofs, keys := keys.fold (init := prop.keys) (·.insert ·) } }
 
 mutual
 
@@ -238,11 +244,13 @@ partial def buildPropProofs (p : Nat) (proofs : Array Proof) : ProverM Unit := d
   if proofs.isEmpty then return
   let env ← get
   let h := env.props[p]!.parent
-  let hyp := env.hyps[h]!
+  -- only what is needed is read, so that the node's array of proofs is extended in place
+  let expr := env.hyps[h]!.expr
+  let parent := env.hyps[h]!.parent
   let added := proofs.map fun proof =>
-    Proof.stmt h (proof.sub.apply hyp.expr) (restrict proof.sub hyp.expr) proof
+    Proof.stmt h (proof.sub.apply expr) (restrict proof.sub expr) proof
   modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs ++ added } }
-  match hyp.parent with
+  match parent with
   | some _ => buildExpProofs h added
   | none =>
     -- `ruBuildRootProofs`: the driver takes them from here. (A node of the forward

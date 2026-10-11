@@ -183,6 +183,7 @@ def replayOne (db : Db) (vc : Verify.Ctx) (index : Index Nat) (opts : ReplayOpti
     let steps := skel.size (opts.maxSteps + 1)
     if steps > opts.maxSteps then return ({ stats with tooLarge := 1 }, none, #[])
     let env := Env.init db index (db.task s.index)
+    let start ← IO.monoMsNow
     let result ←
       if opts.full then
         -- every proof that reaches the root is checked by the verifier, which tests the
@@ -191,6 +192,10 @@ def replayOne (db : Db) (vc : Verify.Ctx) (index : Index Nat) (opts : ReplayOpti
         searchWith (accept vc) env (oracleAll skel opts.others) opts.limits
       else search vc env (oracle skel) opts.limits
     let c := result.env.counters
+    let ms := (← IO.monoMsNow) - start
+    if opts.verbose && ms ≥ 5000 then
+      lines := lines.push s!"slow: theorem {s.index} {name} ({steps} steps): {ms} ms, \
+        {c.props} assertion nodes, {c.expanded} expanded, {c.tuples} tuples"
     stats := { stats with
       rejected := result.rejected,
       otherProofs := (match result.proof with
