@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-06.
+Last updated: 2026-10-11.
 
 ## Phase
 
@@ -155,15 +155,14 @@ costs nothing that shows here. The two samples of the paragraph above (the rest 
 set.mm, and 10 s) are of the first run.
 
 Definitions (set.mm has none: its `df_*` are axioms there) are unfolded by a step
-given by the def and the occurrence in the goal (`DESIGN.md`, "Unfolding as an
-inference step"). On the files with defs compiled from the examples of the MM0
-repository, replay reconstructs 2,444 of 2,700 proofs of `peano`, 4,450 of 4,895 of
-`mm0`, 7,058 of 7,671 of `x86`, 26 of 26 of `set`, every output accepted by our verifier
-and `mm0-rs`; every proof not reconstructed unfolds a def at a place that the tree has
-as a variable, which this step does not reach (7 to 8%), or shares a conversion
-(`ConvCut`), which the reader does not read yet. Searched from scratch at 1 s per
-theorem, a sample of every tenth theorem of `peano` has 98 of 270 proved, with proofs of
-up to 7 steps; on the fixture with definitions, 24 of 26 theorems are proved.
+given by the def and the occurrence in the goal, and inside a variable of the tree by
+MM0's conversion rules taken as assertions (`DESIGN.md`, "Unfolding as an inference
+step"). On the files with defs compiled from the examples of the MM0 repository, replay
+reconstructs every proof that does not share a conversion: 2,650 of 2,700 of `peano`,
+4,800 of 4,895 of `mm0`, 7,518 of 7,671 of `x86`, 79 of 99 of `hol`, 26 of 26 of `set`;
+every output is accepted by our verifier and `mm0-rs`. Searched from scratch at 1 s per
+theorem, a sample of every tenth theorem of `peano` has 97 of 270 proved; on the fixture
+with definitions, 24 of 26 theorems are proved.
 
 The forward direction (`forward.flow`) was ported after the baseline. On a sample of
 every tenth theorem of the two sections, 1 s per theorem:
@@ -217,7 +216,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-864 checks, 0 failures, in 15 seconds:
+869 checks, 0 failures, in 15 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -307,9 +306,6 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
    built. Still open:
-   3. the unfoldings at a place that the tree has as a variable (7 to 8% of the proofs
-      with conversions in the corpus files): whether to add MM0's conversion rules as
-      assertions for them (U1 in `DESIGN.md`), or to accept the gap;
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
       `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;

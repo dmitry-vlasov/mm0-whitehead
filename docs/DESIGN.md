@@ -1049,17 +1049,47 @@ the conversion is on the minor premise of `ax_mp`, whose statement in the tree i
 variable `?X`. That is the gap of this expansion, and it is 7 to 8% of the proofs of
 these files.
 
-**The gap, and a way to close it.** A conversion inside a variable of the statement
-cannot be a (def, occurrence) step of that node. MM0's own rules for the judgment
-`e1 ≡ e2` can be taken as assertions over a pseudo-sort — `conv_s: b, a ≡ b ⊢ a`,
-`refl`, one `cong` per term, `unfold_f: B ≡ b ⊢ f(xs) ≡ b` and `fold_f` per def — and
-then `?X` is expanded by `conv_wff` with the children `?G` and `?X ≡ ?G`, the latter by
-`cong` one constructor at a time until the def is reached. Every expansion is finite,
-the paper's theorems apply as to any assertions, and the tree is still the search
-space; the cost is one more variant on every node of a provable sort, whose first child
-is a bare variable, as the minor premise of `ax_mp` is. This is written up as an
-alternative (U1 in the record of 2026-10-06) and not built; the (def, occurrence) steps
-above remain the direct route where the occurrence is there.
+**Unfolding inside a variable** (`Db.convRules`, decided 2026-10-11). A conversion
+inside what the tree has as a variable cannot be a (def, occurrence) step of that node.
+So, for a file with defs, MM0's own judgment `a ≡ b` is added as assertions: terms `≡`
+and `≡'` per sort (`≡'`: the same judgment with at least one unfolding in its proof), and
+
+    conv_s     b, a ≡' b ⊢ a                       Conv
+    refl_s     a ≡ a                               Refl
+    cong_t     a_i ≡ b_i ⊢ t(as) ≡ t(bs)           Cong (a bound argument is the same name)
+    cong'_t_i  the same, ≡' at argument i and in the conclusion
+    unfold_f   B ≡ b ⊢ f(xs) ≡ b,   unfold'_f      Unfold
+    fold_f     a ≡ B ⊢ a ≡ f(xs),   fold'_f        Symm, Unfold, Symm
+
+The engine does not change: `ruExpandHyp` finds these by unification like any
+assertion, every expansion is one step, and the paper's theorems hold as for any set of
+assertions. On `?A -> ch`, `conv_wff` makes the children `?b` and `(?A -> ch) ≡' ?b`;
+the latter is expanded by `cong'`, one constructor at a time, as `?A` takes shape. `≡'`
+keeps `conv` from proving a goal from itself. The dummies of `unfold_f` and `fold_f` are
+bound variables kept apart from the arguments and each other. A rule is usable from the
+first theorem after the last term it mentions (`Assertion.rank`, `rankLimit`). A file
+without defs, such as set.mm, gets no rules. Emission writes a `conv_s` step as `Conv`
+with the conversion proof its rule tree stands for; the replay reader reads a `Conv` as
+a `conv_s` step over the rule tree of its conversion.
+
+The (def, occurrence) step stays: it is the direct route where the occurrence is there,
+and a proof can be found both ways.
+
+Results with both (2026-10-11):
+
+| file | theorems | replayed | with a shared conversion, not read |
+| - | - | - | - |
+| `set` | 26 | 26 | 0 |
+| `hol` | 99 | 79 | 20 |
+| `peano` | 2,700 | 2,650 | 50 |
+| `mm0` | 4,895 | 4,800 | 95 |
+| `x86` | 7,671 | 7,518 | 153 |
+
+Every proof that does not share a conversion is reconstructed, and every output is
+accepted by our verifier and `mm0-rs`. Search: the fixture has 24 of 26 proved at 3 s,
+as before, with about 1.5 times the assertion nodes; the peano sample has 97 of 270 at
+1 s (98 without the rules). The test of `Defs.lean` proves `ch` from `ph <-> ps` and
+`~((ph -> ps) -> ~(ps -> ph)) -> ch`, which needs the conversion inside `?A`.
 
 ### Questions
 
@@ -1102,13 +1132,11 @@ Answered on 2026-10-06:
   step is a def and an occurrence; the conversion proof of MM0 is emission. Built:
   "Unfolding as an inference step".
 
+Answered on 2026-10-11: the unfoldings inside a variable are to be reached (was question
+3). Built: the conversion rules above.
+
 Open:
 
-3. **The unfoldings inside a variable.** The (def, occurrence) step is built; 7 to 8% of
-   the proofs with conversions in the corpus files unfold at a place that the tree has
-   as a variable, and are not reached by it ("Unfolding as an inference step",
-   results). Do you want the conversion rules (U1) added for those, or is the gap
-   accepted?
 6. **Three places in the source that look unintended**: `ruCheckDisjs` in `ruAddProof`
    (change 3), the variable set of `ruMakeFresherSubst` (change 4), the order of the
    arguments of `ruSuperRule` in `unify_var` (change 2). For the second, the source
