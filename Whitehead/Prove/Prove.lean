@@ -311,8 +311,10 @@ structure Limits where
   maxMs : Nat := 1000000000
   /-- The largest number of facts in the forward front (`forward-search-size`). -/
   maxFacts : Nat := 512
-  /-- The largest number of tuples of proofs joined (`Env.tupleBudget`). -/
+  /-- The largest number of tuples of proofs joined (`Env.tupleBudget`), and the largest
+  work of the joins (`Env.workBudget`). -/
   maxTuples : Nat := 0xFFFFFFFFFFFF
+  maxWork : Nat := 0xFFFFFFFFFFFF
 
 structure Result where
   ending : Ending
@@ -426,7 +428,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     if let .ok body := accept env (.hyp u.data) #[] then
       return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
                values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
-  let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples }
+  let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork }
   let mut rejected := 0
   let mut others := 0
   let mut rejection := ""

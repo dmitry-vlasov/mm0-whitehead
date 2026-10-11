@@ -36,6 +36,8 @@ structure Counters where
   inconsistent : Nat := 0
   /-- Proofs of an assertion node not kept: one with the same key is there (`proofKey`). -/
   duplicate : Nat := 0
+  /-- The proofs that joins looked at: the work of `addProof`. -/
+  work : Nat := 0
   /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
   root. -/
   facts : Nat := 0
@@ -92,6 +94,8 @@ structure Env where
   the search stops there and says so (`Ending.limit`). A resource limit, not a choice of
   variants: no variant is dropped while the search goes on. -/
   tupleBudget : Nat := 0xFFFFFFFFFFFF
+  /-- The largest work of the joins (`Counters.work`); past it, as past `tupleBudget`. -/
+  workBudget : Nat := 0xFFFFFFFFFFFF
   overBudget : Bool := false
   deriving Inhabited
 

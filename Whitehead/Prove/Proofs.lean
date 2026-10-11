@@ -190,20 +190,38 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   let hypExpr := env.hyps[prop.parent]!.expr
   let size := sets.foldl (init := 1) (· * ·.size)
   if env.overBudget then return
-  let mut counters := { env.counters with tuples := env.counters.tuples + size }
+  -- the work of a join is about the proofs it looks at; past the budget the search stops
+  let work := env.counters.work + sets.foldl (init := 0) (· + ·.size)
+  if work > env.workBudget then
+    set { env with overBudget := true }
+    return
+  let mut counters := { env.counters with tuples := env.counters.tuples + size, work }
   -- the tuples whose substitutions unify, each with the unifier: tuple by tuple for a
   -- small product, by `unifySubsProd` from 64 tuples on, as in Russell. A product with
   -- one large set only is also walked: there the other way has nothing to save.
   let mut unified : Array (Subst × Array Proof) := #[]
   if size < 64 || (sets.filter (·.size > 1)).size ≤ 1 then
-    for picks in tuples (sets.map fun set => Array.range set.size) do
+    for picks in tuplesUpTo (sets.map fun set => Array.range set.size) env.tupleBudget do
+      if unified.size > env.tupleBudget then break
       let row := (Array.range sets.size).map fun i => sets[i]![picks[i]!]!
       match unifySubs (row.map (·.sub)) with
       | some s => unified := unified.push (s, row)
       | none => pure ()
   else
-    unified := (unifySubsProd (sets.map (·.map (·.sub)))).map fun (s, picks) =>
-      (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
+    -- the proofs of the other children that agree with the new one: an indexed product
+    -- is built for every join, and for one new proof against large sets this is less
+    -- work (`nfpo`, `omopthlem2` of set.mm: sets of 1,616 and 42,016 proofs)
+    let k := (Array.range sets.size).find? (fun i => sets[i]!.size == 1) |>.getD 0
+    let one := sets[k]![0]!.sub
+    let fits := (Array.range sets.size).map fun i =>
+      if i == k then #[0]
+      else (Array.range sets[i]!.size).filter fun j => (unifySubs #[one, sets[i]![j]!.sub]).isSome
+    let narrowed := (Array.range sets.size).map fun i => fits[i]!.map fun j => sets[i]![j]!
+    -- stopped as soon as it would take the search past its budget
+    let cap := env.tupleBudget - min env.tupleBudget (env.counters.tuples - env.counters.notUnified)
+    if !narrowed.any (·.isEmpty) then
+      unified := (unifySubsProd (narrowed.map (·.map (·.sub))) cap).map fun (s, picks) =>
+        (s, (Array.range sets.size).map fun i => narrowed[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   -- the budget is on the tuples that unify: each is a proof to be made and kept
   if counters.tuples - counters.notUnified > env.tupleBudget then

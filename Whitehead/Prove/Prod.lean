@@ -41,6 +41,26 @@ structure IndexesRet where
   expr : Exp
   deriving Inhabited
 
+/-- The first `cap + 1` tuples of `sets` (all, if there are fewer), made one at a time in
+the order of `tuples`: a product can be far too large to be made whole. -/
+def tuplesUpTo {α : Type} [Inhabited α] (sets : Array (Array α)) (cap : Nat) : Array (Array α) := Id.run do
+  if sets.any (·.isEmpty) then return #[]
+  let mut picks : Array Nat := Array.replicate sets.size 0
+  let mut out : Array (Array α) := #[]
+  while out.size ≤ cap do
+    out := out.push ((Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
+    -- the next tuple: the last place moves fastest
+    let mut i := sets.size
+    let mut carry := true
+    while carry && i > 0 do
+      i := i - 1
+      if picks[i]! + 1 < sets[i]!.size then
+        picks := picks.set! i (picks[i]! + 1)
+        carry := false
+      else picks := picks.set! i 0
+    if carry then break
+  return out
+
 /-- All ways to take one element from each of the arrays. -/
 def tuples {α : Type} [Inhabited α] (sets : Array (Array α)) : Array (Array α) :=
   sets.foldl (init := #[#[]]) fun acc set =>
@@ -178,8 +198,12 @@ As in Russell since `47c52bdf`: a column (`RuSubsMatrix`) is made only for a var
 that substitutions of two or more sets bind. A variable bound in one set only cannot
 filter a tuple — every other set reads it as free — so its bindings are put back per
 tuple (`finish`). And the column unifiers of a group are unified in one call, not folded
-pairwise. -/
-def unifySubsProd (sets : Array (Array Subst)) : Array (Subst × Array Nat) := Id.run do
+pairwise.
+
+With `cap`, the work stops once more than `cap` tuples are found: the caller is over its
+budget then, and what is returned past that point is not a result (`addProof`). A
+product can be exponential in the number of its sets, and nothing else stops it. -/
+def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : Array (Subst × Array Nat) := Id.run do
   if sets.isEmpty || sets.any (·.isEmpty) then return #[]
   if sets.size == 1 then return (Array.range sets[0]!.size).map fun k => (sets[0]![k]!, #[k])
   -- in how many sets each variable is bound; the shared ones, in the order first seen
@@ -200,9 +224,12 @@ def unifySubsProd (sets : Array (Array Subst)) : Array (Subst × Array Nat) := I
   let finish (group : Subst) (picks : Array Nat) : Option Subst :=
     let parts := ((Array.range sets.size).map fun i => privates[i]![picks[i]!]!).filter (·.size > 0)
     if parts.isEmpty then some group else unifySubs (#[group] ++ parts)
-  let all := tuples (sets.map fun set => Array.range set.size)
   if shared.isEmpty then
-    return all.filterMap fun picks => (finish {} picks).map (·, picks)
+    let mut out := #[]
+    for picks in tuplesUpTo (sets.map fun set => Array.range set.size) cap do
+      if out.size > cap then break
+      if let some s := finish {} picks then out := out.push (s, picks)
+    return out
   -- for each shared variable: the ways its images unify across the sets, each with the
   -- substitutions of every set that have the image taken (`RuSubsMatrix`)
   let mut columns : Array (Array (Subst × Array (Array Nat))) := #[]
@@ -237,12 +264,16 @@ def unifySubsProd (sets : Array (Array Subst)) : Array (Subst × Array Nat) := I
             let common := (Array.range data.size).map fun i => data[i]!.filter fun k => data2[i]!.contains k
             if !common.any (·.isEmpty) then next := next.push (subs.push s, common)
     inter := next
+    -- every group has at least one tuple: past the cap, there is no use going on
+    if inter.size > cap then return inter.extract 0 (cap + 1) |>.map fun (_, data) => ({}, data.map (·[0]!))
   -- the column unifiers of a group are unified at once, and every tuple that is left
   -- gets the result with its private bindings
   let mut out := #[]
   for (subs, data) in inter do
+    if out.size > cap then break
     if let some group := unifySubs subs then
-      for picks in tuples data do
+      for picks in tuplesUpTo data (cap - min cap out.size) do
+        if out.size > cap then break
         if let some s := finish group picks then out := out.push (s, picks)
   return out
 

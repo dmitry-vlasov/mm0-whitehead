@@ -16,7 +16,8 @@ def usage : String :=
                                  --full: every node gets all its variants, the known proof's are
                                  expanded, and N (or all) others of each node on the way too
                                  (limits per theorem by default: 60 s, 2,000,000 nodes,
-                                 300,000 joined proofs)
+                                 300,000 joined proofs, 20,000,000 proofs looked at in joins
+                                 (--max-work N))
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
@@ -296,7 +297,7 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
       -- the full expansion can grow without bound: it has limits unless told otherwise
       limits := if args.contains "--full" then
           { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 60000,
-            maxTuples := numOption args "--max-tuples" 300000 }
+            maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
         else
           { maxProps := numOption args "--max-nodes" 1000000000, maxMs := numOption args "--ms" 1000000000,
             maxTuples := numOption args "--max-tuples" 0xFFFFFFFFFFFF } }

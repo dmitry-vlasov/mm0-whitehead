@@ -134,22 +134,27 @@ takes the next number when it has finished one. The results are in the order of 
 numbers, whatever the order of the work. With `progress`, a line every ten seconds; with
 `memLimit` (bytes, 0 for none), the memory is watched (`watchMemory`). -/
 def runJobs {β : Type} [Inhabited β] (jobs count : Nat) (f : Nat → IO β) (progress : Bool) (memLimit : Nat)
-    (log : String → IO Unit) : IO (Array β) := do
+    (log : String → IO Unit) (name : Nat → String := toString) : IO (Array β) := do
   let next ← IO.mkRef 0
   let done ← IO.mkRef 0
   let stop ← IO.mkRef false
+  -- what each worker is doing, and since when
+  let current ← IO.mkRef (Array.replicate (max 1 jobs) (none : Option (Nat × Nat)))
   let watcher ← if memLimit > 0 then some <$> IO.asTask (watchMemory memLimit stop log) (prio := .dedicated)
     else pure none
-  let worker : IO (Array (Nat × β)) := do
+  let worker (w : Nat) : IO (Array (Nat × β)) := do
     let mut out := #[]
     while true do
       let k ← next.modifyGet fun k => (k, k + 1)
       if k ≥ count then break
+      let t ← IO.monoMsNow
+      current.modify (·.set! w (some (k, t)))
       out := out.push (k, ← f k)
+      current.modify (·.set! w none)
       done.modify (· + 1)
     return out
   let start ← IO.monoMsNow
-  let tasks ← (Array.range (max 1 jobs)).mapM fun _ => IO.asTask worker (prio := .dedicated)
+  let tasks ← (Array.range (max 1 jobs)).mapM fun w => IO.asTask (worker w) (prio := .dedicated)
   if progress then
     let mut last := start
     while !(← tasks.allM fun t => (IO.hasFinished t : IO Bool)) do
@@ -157,7 +162,11 @@ def runJobs {β : Type} [Inhabited β] (jobs count : Nat) (f : Nat → IO β) (p
       let now ← IO.monoMsNow
       if now - last ≥ 10000 then
         last := now
-        log s!"  ... {← done.get} of {count}, {(now - start) / 1000} s"
+        -- the items that have run for more than a minute
+        let long := (← current.get).filterMap fun c => c.bind fun (k, t) =>
+          if now - t > 60000 then some s!"{name k} for {(now - t) / 1000} s" else none
+        log s!"  ... {← done.get} of {count}, {(now - start) / 1000} s\
+          {if long.isEmpty then "" else "; running long: " ++ ", ".intercalate long.toList}"
   let mut results : Array β := Array.replicate count default
   for t in tasks do
     match ← IO.wait t with
@@ -239,7 +248,7 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
     let s := f.stmts[i]!
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last
   let results ← runJobs opts.jobs todo.size (fun k => do return (todo[k]!, ← replayOne db vc index opts todo[k]!))
-    opts.progress opts.memLimit log
+    opts.progress opts.memLimit log (fun k => s!"theorem {f.stmts[todo[k]!]!.index} {f.thmName f.stmts[todo[k]!]!.index}")
   let mut stats : ReplayStats := {}
   let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
   for (i, (st, body, lines)) in results do
