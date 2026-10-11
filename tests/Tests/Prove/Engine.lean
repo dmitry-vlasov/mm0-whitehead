@@ -186,10 +186,10 @@ def engineTests : TestM Unit := do
   let variants ← searchWith (fun _ _ _ => .error "every proof is asked for") (Env.init db index variantsTask)
     breadthFirst { maxProps := 60 }
   let rootProofs := variants.env.hyps[0]!.proofs.map fun p => proofText db (makeProofTree variants.env p)
-  check "variants: two proofs that differ only below a node are both kept"
-    (rootProofs.contains "(ax_mp (ax_mp h0 h2) h4)" && rootProofs.contains "(ax_mp (ax_mp h1 h3) h4)")
-    s!"{rootProofs}"
-  check "variants: and each is there once" (rootProofs.all fun t => (rootProofs.filter (· == t)).size == 1)
+  -- the two proofs of C give the node above the same substitution and no open
+  -- conditions, so one of them is kept (`proofKey`, decided 2026-10-11)
+  check "variants: of two proofs that differ only below a node, one is kept"
+    (rootProofs.size == 1 && (rootProofs.contains "(ax_mp (ax_mp h0 h2) h4)" || rootProofs.contains "(ax_mp (ax_mp h1 h3) h4)"))
     s!"{rootProofs}"
   -- and two proofs with the same substitution: B -> (A -> A) by a1i from A -> A, which
   -- `id` proves and `dummy` proves, neither binding a variable of the tree. Nothing
@@ -201,8 +201,8 @@ def engineTests : TestM Unit := do
   let same ← searchWith (fun _ _ _ => .error "every proof is asked for") (Env.init db index sameTask)
     breadthFirst { maxProps := 5000 }
   let sameProofs := same.env.hyps[0]!.proofs.map fun p => proofText db (makeProofTree same.env p)
-  check "variants: two proofs with the same substitution are both kept"
-    (sameProofs.contains "(a1i id)" && sameProofs.contains "(a1i dummy)") s!"{sameProofs.extract 0 12}"
+  check "variants: of two proofs with the same substitution, one is kept"
+    (sameProofs.contains "(a1i id)" != sameProofs.contains "(a1i dummy)") s!"{sameProofs.extract 0 12}"
   check "variants: and no proof is there twice"
     (sameProofs.size == (sameProofs.foldl (init := ({} : Std.HashSet String)) (·.insert ·)).size)
     s!"{sameProofs.size} proofs"
@@ -241,11 +241,12 @@ def engineTests : TestM Unit := do
     (Env.init db index fwdTask hypIndexes) forwardOnly { maxProps := 5000, maxFacts := 64 }
   let factsOf (env : Env) (e : Exp) : Array String :=
     env.hyps.filterMap fun h => if h.expr == e then h.factProof.map (proofText db) else none
-  checkEq "forward: a statement derived in two ways is two facts"
-    (factsOf fwdVariants.env (c 1)) #["(ax_mp h0 h1)", "(ax_mp h2 h3)"]
+  let bs := factsOf fwdVariants.env (c 1)
+  check "forward: a statement derived by two applications is two facts"
+    (bs.contains "(ax_mp h0 h1)" && bs.contains "(ax_mp h2 h3)") s!"{bs}"
   let ds := factsOf fwdVariants.env (c 3)
-  check "forward: and what follows from it follows from each"
-    (ds.contains "(ax_mp (ax_mp h0 h1) h4)" && ds.contains "(ax_mp (ax_mp h2 h3) h4)") s!"{ds}"
+  check "forward: what follows from it is derived; of one application's proofs with the same key, one is kept"
+    (ds.contains "(ax_mp (ax_mp h0 h1) h4)" || ds.contains "(ax_mp (ax_mp h2 h3) h4)") s!"{ds}"
   -- but one application of an assertion to the same facts is made once: no two facts
   -- have the same proof
   let factProofs (env : Env) : Array String := env.hyps.filterMap fun h => h.factProof.map (proofText db)

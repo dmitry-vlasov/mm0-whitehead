@@ -48,8 +48,8 @@ structure ReplayStats where
   bytesOut : Nat := 0
   /-- Proofs that reached the root and that the verifier did not accept. -/
   rejected : Nat := 0
-  /-- With `full`: other proofs that reached the root, accepted by the verifier, and
-  theorems stopped at a limit. -/
+  /-- With `full`: proofs found that are not the known one, and theorems stopped at a
+  limit. -/
   otherProofs : Nat := 0
   limited : Nat := 0
   counters : Counters := {}
@@ -106,21 +106,22 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
       let result ←
         if opts.full then
           -- every proof that reaches the root is checked by the verifier, which tests the
-          -- joins; only the known proof counts, which tests that it is found
-          let acc := fun (env : Env) (tree : ProofTree) (conds : Array Cond) =>
-            match accept vc env tree conds with
-            | .ok body => if sameShape tree skel then .ok body else .error anotherProof
-            | .error msg => .error msg
-          searchWith acc env (oracleAll skel opts.others) opts.limits
+          -- joins. The first that passes counts: it need not be the known proof, which
+          -- may have been one of two with the same key (`proofKey`)
+          searchWith (accept vc) env (oracleAll skel opts.others) opts.limits
         else search vc env (oracle skel) opts.limits
       let c := result.env.counters
       let sum := stats.counters
       stats := { stats with
-        rejected := stats.rejected + result.rejected, otherProofs := stats.otherProofs + result.others,
+        rejected := stats.rejected + result.rejected,
+        otherProofs := stats.otherProofs + (match result.proof with
+          | some t => if sameShape t skel then 0 else 1
+          | none => 0),
         limited := stats.limited + (if result.ending == .limit then 1 else 0),
         counters := { props := sum.props + c.props, expanded := sum.expanded + c.expanded,
                       tuples := sum.tuples + c.tuples, notUnified := sum.notUnified + c.notUnified,
-                      disjoint := sum.disjoint + c.disjoint, inconsistent := sum.inconsistent + c.inconsistent } }
+                      disjoint := sum.disjoint + c.disjoint, inconsistent := sum.inconsistent + c.inconsistent,
+                      duplicate := sum.duplicate + c.duplicate } }
       match result.body, result.proof with
       | some body, some tree =>
         bodies := bodies.set! i (some body)

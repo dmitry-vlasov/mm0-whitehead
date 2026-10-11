@@ -185,18 +185,18 @@ def fullReplayTests : TestM Unit := do
       match Db.ofFile file with
       | .ok db => pure db
       | .error msg => check s!"full replay {name}: the fixture becomes a database" false msg; return
-    for others in [some 0, some 4] do
+    for others in [some 0, some 4, none] do
       let (stats, bodies) ← replay db { full := true, others } fun _ => pure ()
-      check s!"full replay {name}, {others.getD 0} other variants per node: the known proof of every theorem is found"
+      check s!"full replay {name}, {others.getD 1000} other variants per node: a proof of every theorem is found"
         (stats.replayed == stats.theorems && stats.failed == 0 && stats.limited == 0)
         s!"{stats.replayed} of {stats.theorems}"
       check s!"full replay {name}, {others.getD 0} other variants per node: no proof at the root is rejected"
         (stats.rejected == 0) s!"{stats.rejected} rejected"
-      if others == some 4 then
-        check s!"full replay {name}: other proofs reach the root, and the joins are not trivial"
-          (stats.otherProofs > 0 && stats.counters.tuples > stats.counters.notUnified + stats.replayed &&
-            stats.counters.notUnified > 0)
-          s!"{stats.otherProofs} other proofs, {stats.counters.tuples} tuples, {stats.counters.notUnified} not unified"
+      if others == none then
+        check s!"full replay {name}, all variants: the joins are not trivial, and proofs with one key are merged"
+          (stats.counters.tuples > stats.counters.notUnified + stats.replayed && stats.counters.notUnified > 0 &&
+            stats.counters.duplicate > 0)
+          s!"{stats.counters.tuples} tuples, {stats.counters.notUnified} not unified, {stats.counters.duplicate} merged"
       match MmbFile.parse (file.withBodies bodies) with
       | .error e => check s!"full replay {name}: the file is read" false e.msg
       | .ok f2 =>

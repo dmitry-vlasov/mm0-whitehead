@@ -34,6 +34,8 @@ structure Counters where
   notUnified : Nat := 0
   disjoint : Nat := 0
   inconsistent : Nat := 0
+  /-- Proofs of an assertion node not kept: one with the same key is there (`proofKey`). -/
+  duplicate : Nat := 0
   /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
   root. -/
   facts : Nat := 0

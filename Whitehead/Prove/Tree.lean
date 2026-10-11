@@ -145,9 +145,11 @@ structure PropNode where
   outer : Subst
   parent : Nat
   children : Array Nat := #[]
-  /-- Every proof that `addProof` has made for the node. Russell keeps one for each
-  substitution (`ruProofSubKey`); here none is left out (`Proofs.lean`). -/
+  /-- The proofs of the node: one for each substitution of the parent's variables with
+  its open conditions on bound variables (`proofKey` in `Proofs.lean`). -/
   proofs : Array Proof := #[]
+  /-- The keys of `proofs`. -/
+  keys : Std.HashSet (Array Nat) := {}
   expanded : Bool := false
   deriving Inhabited
 
@@ -165,5 +167,12 @@ structure HypNode where
   same statement is another fact. -/
   factProof : Option ProofTree := none
   deriving Inhabited
+
+/-- The canonical form of a substitution, as a key (`ruProofSubKey`). -/
+def Subst.key (s : Subst) : Array Nat :=
+  let ids := (s.map.fold (init := #[]) fun acc v _ => acc.push v).qsort (· < ·)
+  ids.foldl (init := #[]) fun acc v =>
+    let e := s.map[v]!.exp
+    (acc.push v).push e.size ++ e.nodes
 
 end Whitehead.Prove

@@ -281,10 +281,10 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let c := stats.counters
   IO.println s!"  assertion nodes {c.props}, expanded {c.expanded}; tuples of proofs {c.tuples}: \
     {c.notUnified} not unified, {c.disjoint} against a disjoint variable condition, \
-    {c.inconsistent} inconsistent; root proofs rejected by the verifier {stats.rejected}"
+    {c.inconsistent} inconsistent, {c.duplicate} with the key of another; root proofs rejected by the verifier {stats.rejected}"
   if opts.full then
     IO.println s!"  full expansion, {match opts.others with | none => "all" | some n => toString n} other variants \
-      expanded per node: {stats.otherProofs} other proofs reached the root; {stats.limited} theorems stopped at a limit"
+      expanded per node: {stats.otherProofs} proofs found are not the known one; {stats.limited} theorems stopped at a limit"
   if let some out := strOption args "-o" then
     IO.FS.writeBinFile out (file.withBodies bodies)
     IO.println s!"  written to {out}"
