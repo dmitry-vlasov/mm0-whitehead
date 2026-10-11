@@ -314,8 +314,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 
 ## Next steps
 
-0. Review the updates of the Russell prover since the ported version `d3afce64`
-   (`DESIGN.md`, "The Russell version ported"): bug fixes and optimized algorithms.
+0. The full replay of set.mm beyond the first 6,000 theorems, and with other variants.
+   Where the time goes now (callgrind): unification against the index of conclusions,
+   most of it building substitutions (hash maps) for millions of candidates.
 1. The answers to the questions above.
 2. Shared conversions (`ConvCut`, `ConvSave`) in the replay reader: 20 of the 99 proofs
    of `hol` use them.

@@ -511,14 +511,25 @@ tests. The questions that need an answer are at the end and in `STATUS.md`.
 ### The Russell version ported
 
 The port was read from `russell-flow` at `d3afce64` (2026-08-24); every citation of a
-Flow9 file or function in this document and in the code refers to that version. Since
-then (2026-10-07 to 2026-10-10) the Russell prover has been updated: bugs fixed in the
-engine and in unification, and its algorithms optimized — among others `ab0b99fe` (the
-argument order of the super-rule in the index, cf. change 2 and question 6),
-`b3856374` (two completeness bugs), `4f1d5f09` (`ruUnifySubs` losing bindings in the
-matrix unifier), `a733de8a`, `47c52bdf`, `678c472d` (the dedup of proof variants),
-`ba2dd6a7`, `e381104b`, `7657286c` (candidates, fresh variables, `ruCompose`). These are
-not reviewed against the port yet.
+Flow9 file or function in this document and in the code refers to that version unless
+a later commit is named. The Russell prover was updated from 2026-10-07 to 2026-10-10:
+bugs fixed in the engine and in unification, and its algorithms optimized. Reviewed on
+2026-10-11 against the port:
+
+| commit | what | here |
+| - | - | - |
+| `b3856374` | the per-step `$d` check never fired; a root proof needing more `$d` than declared stopped the search | the same bug was found in the port (change 3) and fixed; such a proof fails the verifier and the search goes on |
+| `4f1d5f09` | the matrix unifier lost bindings: `ruUnifySubs` fed triangular substitutions | not in the port: a random test with chained substitutions passes (`tests/Tests/Prove/Prod.lean`) |
+| `ab0b99fe` | super-rule arguments swapped in the index | the third source oddity of question 6 (change 2); the port binds the more general variable |
+| `47c52bdf` | matrix unifier: columns only for shared variables, one n-ary unification per group | ported |
+| `ba2dd6a7` | lazy candidate props | ported (`splitProp`): full replay of theorems 1380–6000, 103 s → 64 s |
+| `7657286c` | linear fast path for `ruCompose` | ported: 64 s → 59 s |
+| `a733de8a`, `678c472d` | cheaper dedup of proof variants | the key here is different (decided 2026-10-11) and costs one hash per proof |
+| `07af2072`, `0410851a` | quadratic merges of new props | not in the port: leaves are pushed, and cleaned once per round |
+| `49935cba` | the oracle as a pure node selector | as here (`oracle`, `oracleAll`) |
+| `e381104b` | fresh variables in a band of their own | as here (`freshBase`) |
+| `3e145b47`, `25c4be54` | budgets per theorem | here: limits of nodes, time and joined proofs (`Limits`) |
+| `f1b9317a` | statements of several expressions | not applicable: an MM0 statement is one expression |
 
 ### Modules
 
