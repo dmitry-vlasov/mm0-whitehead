@@ -23,8 +23,9 @@ def usage : String :=
                                  forward from the premises, or both in turn. --meta: the binders
                                  with these numbers are metavariables, for which values are found
                                  replay and search: [--jobs N] theorems at once (default: one per
-                                 processor), [--max-mem GB] memory limit (default 32; above 90%
-                                 running theorems give up, above it the process stops), [--quiet]
+                                 processor), [--max-mem GB] memory limit (default 32; above 80%
+                                 the largest running theorem gives up, above 90% all running ones,
+                                 above the limit the process stops), [--quiet]
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 

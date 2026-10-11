@@ -116,16 +116,16 @@ def residentBytes : IO Nat := do
     | none => return 0
   catch _ => return 0
 
-/-- Watches the memory of the process until `stop` is set. Above nine tenths of `limit`
-bytes it sets `memoryHigh`, and the searches that are running give up as at a limit,
-which frees their memory; above `limit` it ends the process. -/
+/-- Watches the memory of the process until `stop` is set. Above 80% of `limit` bytes
+the largest running search gives up as at a limit, above 90% every one does, which
+frees their memory (`memoryLevel`); above `limit` it ends the process. -/
 partial def watchMemory (limit : Nat) (stop : IO.Ref Bool) (log : String → IO Unit) : IO Unit := do
   if ← stop.get then return
   let rss ← residentBytes
   if rss > limit then
     log s!"memory: {rss / 1000000} MB in use, over the limit of {limit / 1000000} MB; stopping"
     IO.Process.exit 3
-  memoryHigh.set (rss * 10 > limit * 9)
+  memoryLevel.set (if rss * 10 > limit * 9 then 2 else if rss * 10 > limit * 8 then 1 else 0)
   IO.sleep 250
   watchMemory limit stop log
 
