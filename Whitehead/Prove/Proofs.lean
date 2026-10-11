@@ -156,6 +156,9 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   if sets.any (·.isEmpty) then return
   let hypExpr := env.hyps[prop.parent]!.expr
   let size := sets.foldl (init := 1) (· * ·.size)
+  if env.overBudget || env.counters.tuples + size > env.tupleBudget then
+    set { env with overBudget := true }
+    return
   let mut counters := { env.counters with tuples := env.counters.tuples + size }
   -- the tuples whose substitutions unify, each with the unifier: tuple by tuple for a
   -- small product, by `unifySubsProd` from 64 tuples on, as in Russell. A product with

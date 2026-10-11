@@ -19,6 +19,15 @@ structure ReplayOptions where
   maxSteps : Nat := 1000000000
   /-- Report every theorem that is not reconstructed. -/
   verbose : Bool := false
+  /-- Over the full expansion (`oracleAll`): every node gets all its variants, the
+  known proof's are clicked, and only the known proof is accepted. Otherwise each node
+  gets the known proof's variant alone (`oracle`). -/
+  full : Bool := false
+  /-- With `full`: how many other variants of each node on the path are expanded too
+  (`none`: all). -/
+  others : Option Nat := some 0
+  /-- The limits per theorem. -/
+  limits : Limits := {}
 
 structure ReplayStats where
   /-- Theorems with a proof in the range. -/
@@ -39,6 +48,10 @@ structure ReplayStats where
   bytesOut : Nat := 0
   /-- Proofs that reached the root and that the verifier did not accept. -/
   rejected : Nat := 0
+  /-- With `full`: other proofs that reached the root, accepted by the verifier, and
+  theorems stopped at a limit. -/
+  otherProofs : Nat := 0
+  limited : Nat := 0
   counters : Counters := {}
 
 /-- For a replay that found no proof: does a step of the known proof unfold a def at a
@@ -90,11 +103,21 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
         stats := { stats with tooLarge := stats.tooLarge + 1 }
         continue
       let env := Env.init db index (db.task s.index)
-      let result ← search vc env (oracle skel)
+      let result ←
+        if opts.full then
+          -- every proof that reaches the root is checked by the verifier, which tests the
+          -- joins; only the known proof counts, which tests that it is found
+          let acc := fun (env : Env) (tree : ProofTree) (conds : Array Cond) =>
+            match accept vc env tree conds with
+            | .ok body => if sameShape tree skel then .ok body else .error anotherProof
+            | .error msg => .error msg
+          searchWith acc env (oracleAll skel opts.others) opts.limits
+        else search vc env (oracle skel) opts.limits
       let c := result.env.counters
       let sum := stats.counters
       stats := { stats with
-        rejected := stats.rejected + result.rejected,
+        rejected := stats.rejected + result.rejected, otherProofs := stats.otherProofs + result.others,
+        limited := stats.limited + (if result.ending == .limit then 1 else 0),
         counters := { props := sum.props + c.props, expanded := sum.expanded + c.expanded,
                       tuples := sum.tuples + c.tuples, notUnified := sum.notUnified + c.notUnified,
                       disjoint := sum.disjoint + c.disjoint, inconsistent := sum.inconsistent + c.inconsistent } }

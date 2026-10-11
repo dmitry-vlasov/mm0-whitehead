@@ -170,6 +170,40 @@ def defsTests : TestM Unit := do
     | .ok () => check "defs: the file with the replayed bodies is valid" true
     | .error e => check "defs: the file with the replayed bodies is valid" false (e.format f2 "replayed")
 
+/-- Replay over the full expansion (`oracleAll`, Russell's oracle tactic): every node
+gets all its variants, the known proof's are clicked, and with `others` that many other
+variants of every node on the way are expanded too, so that their proofs meet the known
+one's in the joins. Every proof that reaches the root is checked by the verifier; the
+known proof must be among them. -/
+def fullReplayTests : TestM Unit := do
+  for (path, name) in [(logicPath, "logic"), (defsPath, "defs")] do
+    let file ←
+      match MmbFile.parse (← IO.FS.readBinFile path) with
+      | .ok f => pure f
+      | .error e => check s!"full replay {name}: the fixture is read" false e.msg; return
+    let db ←
+      match Db.ofFile file with
+      | .ok db => pure db
+      | .error msg => check s!"full replay {name}: the fixture becomes a database" false msg; return
+    for others in [some 0, some 4] do
+      let (stats, bodies) ← replay db { full := true, others } fun _ => pure ()
+      check s!"full replay {name}, {others.getD 0} other variants per node: the known proof of every theorem is found"
+        (stats.replayed == stats.theorems && stats.failed == 0 && stats.limited == 0)
+        s!"{stats.replayed} of {stats.theorems}"
+      check s!"full replay {name}, {others.getD 0} other variants per node: no proof at the root is rejected"
+        (stats.rejected == 0) s!"{stats.rejected} rejected"
+      if others == some 4 then
+        check s!"full replay {name}: other proofs reach the root, and the joins are not trivial"
+          (stats.otherProofs > 0 && stats.counters.tuples > stats.counters.notUnified + stats.replayed &&
+            stats.counters.notUnified > 0)
+          s!"{stats.otherProofs} other proofs, {stats.counters.tuples} tuples, {stats.counters.notUnified} not unified"
+      match MmbFile.parse (file.withBodies bodies) with
+      | .error e => check s!"full replay {name}: the file is read" false e.msg
+      | .ok f2 =>
+        match Whitehead.Verify.checkProofs f2 with
+        | .ok () => check s!"full replay {name}, {others.getD 0} others: the file with the replayed bodies is valid" true
+        | .error e => check s!"full replay {name}: the file with the replayed bodies is valid" false (e.format f2 "replayed")
+
 /-- The replay of `peano.mmb` of the corpus, whose proofs unfold definitions: what is
 replayed, and what is not and why. -/
 def replayDefsCorpusTests : TestM Unit := do
