@@ -171,6 +171,42 @@ def consistent (prop : PropNode) (theta : Subst) (children : Array Proof) : Bool
       acc.bind fun s =>
         (matchExp (theta.apply children[i]!.expr) a.hyps[i]!).bind fun sigma => s.merge sigma).isSome
 
+/-- The key of a proof in the index of the joins: what its substitution puts for the
+variables `vars`, as one expression. -/
+def joinKey (vars : Array Nat) (s : Subst) : Exp :=
+  Exp.mkApp (Node.constBase - 1) 0 (vars.map s.lookupD)
+
+/-- From how many proofs a child is indexed for the joins (`catchUp`). -/
+def joinIndexFrom : Nat := 64
+
+/-- The indexes of the joins of assertion node `p`, brought up to date with the proofs
+of its children. A proof of a child `c` is kept in the index of `c` under what it puts
+for the variables that `c` shares with the other children: a new proof of another child
+can be joined only with those whose key unifies with its own, which the index finds
+without trying the others. The proofs of a node are only ever appended, so the index
+of a child grows with them, and a join looks at the proofs that fit and no others. -/
+def catchUp (env : Env) (p : Nat) : Env :=
+  let hyps := env.hyps
+  { env with props := env.props.modify p fun pr =>
+      let pr :=
+        if pr.joinShared.size == pr.children.size then pr
+        else
+          let varsOf := pr.children.map fun c => hyps[c]!.expr.vars
+          let shared := (Array.range varsOf.size).map fun i =>
+            varsOf[i]!.filter fun v => (Array.range varsOf.size).any fun j => j != i && varsOf[j]!.contains v
+          { pr with joinShared := shared, joinIndex := shared.map fun _ => {}, joinCount := shared.map fun _ => 0 }
+      (Array.range pr.children.size).foldl (init := pr) fun pr i =>
+        let proofs := hyps[pr.children[i]!]!.proofs
+        let from_ := pr.joinCount[i]!
+        -- a child with few proofs is not indexed: trying them is cheaper
+        if from_ ≥ proofs.size || pr.joinShared[i]!.isEmpty || proofs.size < joinIndexFrom then pr
+        else
+          let vars := pr.joinShared[i]!
+          { pr with joinIndex := pr.joinIndex.modify i (fun ix =>
+                      (Array.range (proofs.size - from_)).foldl (init := ix) fun ix d =>
+                        ix.insert (joinKey vars proofs[from_ + d]!.sub) (from_ + d)),
+                    joinCount := pr.joinCount.set! i proofs.size } }
+
 /-- `ruAddProof`: the proofs of assertion node `p` that use the new proof `hypProof` of
 one of its children. They are added to the node, all of them. At most `maxTuples` of
 the tuples that unify are taken; the backward tree gives no limit, the forward front
@@ -179,17 +215,29 @@ before is passed over: the forward front asks this, where the same tuple can com
 again; in the backward tree it cannot. -/
 def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     (made : Option (Array Proof → Bool) := none) : ProverM Unit := do
+  let ready ← do
+    let env ← get
+    pure (env.props[p]!.children.size == env.props[p]!.rule.hyps.size && !env.overBudget)
+  if !ready then return
+  -- in place: the state is the only holder of the node here
+  modify fun env => catchUp env p
   let env ← get
   let prop := env.props[p]!
-  let arity := prop.rule.hyps.size
-  if prop.children.size != arity then return
-  -- for each child its proofs, the new one alone for its own node
-  let sets : Array (Array Proof) := prop.children.map fun c =>
-    if c == hypProof.node then #[hypProof] else env.hyps[c]!.proofs
+  -- for each child its proofs that can be joined with the new one, the new one alone
+  -- for its own node: those whose key in the index unifies with the new one's
+  let sets : Array (Array Proof) := (Array.range prop.children.size).map fun i =>
+    let c := prop.children[i]!
+    if c == hypProof.node then #[hypProof]
+    else
+      let proofs := env.hyps[c]!.proofs
+      let vars := prop.joinShared[i]!
+      if vars.isEmpty || proofs.size < joinIndexFrom then proofs
+      else
+        let found := (prop.joinIndex[i]!.unify (joinKey vars hypProof.sub)).map (·.data)
+        (found.qsort (· < ·)).map fun d => proofs[d]!
   if sets.any (·.isEmpty) then return
   let hypExpr := env.hyps[prop.parent]!.expr
   let size := sets.foldl (init := 1) (· * ·.size)
-  if env.overBudget then return
   -- the work of a join is about the proofs it looks at; past the budget the search stops
   let work := env.counters.work + sets.foldl (init := 0) (· + ·.size)
   if work > env.workBudget then
@@ -208,20 +256,10 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
       | some s => unified := unified.push (s, row)
       | none => pure ()
   else
-    -- the proofs of the other children that agree with the new one: an indexed product
-    -- is built for every join, and for one new proof against large sets this is less
-    -- work (`nfpo`, `omopthlem2` of set.mm: sets of 1,616 and 42,016 proofs)
-    let k := (Array.range sets.size).find? (fun i => sets[i]!.size == 1) |>.getD 0
-    let one := sets[k]![0]!.sub
-    let fits := (Array.range sets.size).map fun i =>
-      if i == k then #[0]
-      else (Array.range sets[i]!.size).filter fun j => (unifySubs #[one, sets[i]![j]!.sub]).isSome
-    let narrowed := (Array.range sets.size).map fun i => fits[i]!.map fun j => sets[i]![j]!
     -- stopped as soon as it would take the search past its budget
     let cap := env.tupleBudget - min env.tupleBudget (env.counters.tuples - env.counters.notUnified)
-    if !narrowed.any (·.isEmpty) then
-      unified := (unifySubsProd (narrowed.map (·.map (·.sub))) cap).map fun (s, picks) =>
-        (s, (Array.range sets.size).map fun i => narrowed[i]![picks[i]!]!)
+    unified := (unifySubsProd (sets.map (·.map (·.sub))) cap).map fun (s, picks) =>
+      (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   -- the budget is on the tuples that unify: each is a proof to be made and kept
   if counters.tuples - counters.notUnified > env.tupleBudget then

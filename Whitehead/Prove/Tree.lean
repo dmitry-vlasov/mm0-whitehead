@@ -156,6 +156,13 @@ structure PropNode where
   /-- The keys of `proofs`. -/
   keys : Std.HashSet (Array Nat) := {}
   expanded : Bool := false
+  /-- For the joins (`catchUp` and `addProof` in `Proofs.lean`): for each child, the
+  variables of its expression that the expression of another child has too; an index of
+  the proofs of the child by what they put for those variables; and how many of its
+  proofs are in the index. Empty until the first join. -/
+  joinShared : Array (Array Nat) := #[]
+  joinIndex : Array (Index Nat) := #[]
+  joinCount : Array Nat := #[]
   deriving Inhabited
 
 /-- `RuProverExp`, and `RuProverRoot` for node 0. A fact of the forward front is such a
