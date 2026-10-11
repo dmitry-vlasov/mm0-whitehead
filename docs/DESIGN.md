@@ -508,6 +508,18 @@ What follows: what is ported from where; how MM0 maps onto the framework of
 something else than the source, and why; emission; the results of the two acceptance
 tests. The questions that need an answer are at the end and in `STATUS.md`.
 
+### The Russell version ported
+
+The port was read from `russell-flow` at `d3afce64` (2026-08-24); every citation of a
+Flow9 file or function in this document and in the code refers to that version. Since
+then (2026-10-07 to 2026-10-10) the Russell prover has been updated: bugs fixed in the
+engine and in unification, and its algorithms optimized — among others `ab0b99fe` (the
+argument order of the super-rule in the index, cf. change 2 and question 6),
+`b3856374` (two completeness bugs), `4f1d5f09` (`ruUnifySubs` losing bindings in the
+matrix unifier), `a733de8a`, `47c52bdf`, `678c472d` (the dedup of proof variants),
+`ba2dd6a7`, `e381104b`, `7657286c` (candidates, fresh variables, `ruCompose`). These are
+not reviewed against the port yet.
+
 ### Modules
 
 | Lean module | Flow9 source | Contents |
