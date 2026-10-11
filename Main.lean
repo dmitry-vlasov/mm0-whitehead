@@ -11,10 +11,12 @@ def usage : String :=
   verify <file.mmb>              check the proofs of a proof file, without a specification
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
-               [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N]
+               [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N] [--jobs N] [--quiet]
                                  reconstruct the proofs of a file from the assertions they use;
                                  --full: every node gets all its variants, the known proof's are
                                  expanded, and N (or all) others of each node on the way too
+                                 (limits per theorem by default: 60 s, 2,000,000 nodes,
+                                 300,000 joined proofs); --jobs N: N theorems at once
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
@@ -268,8 +270,14 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
       maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose",
       full := args.contains "--full",
       others := if strOption args "--others" == some "all" then none else some (numOption args "--others" 0),
-      limits := { maxProps := numOption args "--max-nodes" 1000000000, maxMs := numOption args "--ms" 1000000000,
-                  maxTuples := numOption args "--max-tuples" 0xFFFFFFFFFFFF } }
+      jobs := max 1 (numOption args "--jobs" 1), progress := !args.contains "--quiet",
+      -- the full expansion can grow without bound: it has limits unless told otherwise
+      limits := if args.contains "--full" then
+          { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 60000,
+            maxTuples := numOption args "--max-tuples" 300000 }
+        else
+          { maxProps := numOption args "--max-nodes" 1000000000, maxMs := numOption args "--ms" 1000000000,
+            maxTuples := numOption args "--max-tuples" 0xFFFFFFFFFFFF } }
   let start ← IO.monoMsNow
   let (stats, bodies) ← Prove.replay db opts logLine
   let ms := (← IO.monoMsNow) - start

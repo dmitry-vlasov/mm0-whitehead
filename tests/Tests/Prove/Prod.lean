@@ -104,6 +104,57 @@ def prodTests : TestM Unit := do
       failures := failures + 1
       if failures ≤ 5 then check s!"prod: random sets {sets.map (·.map g.showSub)}" false why
   check s!"prod: {rounds} random products agree with trying every tuple" (failures == 0) s!"{failures} differences"
+  -- the same where an image may contain a variable that another substitution binds, so
+  -- that unifiers come out in chains (Russell 4f1d5f09: `ch => ps, ps => ph` folded
+  -- through ruUnifySubs lost a binding). Each substitution stays idempotent itself.
+  let mut chainFailures := 0
+  let mut chainFound := 0
+  for _ in [0:rounds] do
+    let (nSets, r) := rng.below 2
+    rng := r
+    let mut sets : Array (Array Subst) := #[]
+    for _ in [0:nSets + 2] do
+      let (n, r) := rng.below 5
+      rng := r
+      let mut set : Array Subst := #[]
+      for _ in [0:n + 1] do
+        let mut s : Subst := {}
+        for vname in bound do
+          let (take, r) := rng.below 3
+          rng := r
+          if take == 0 then
+            let v := g.var vname
+            let (e, r) := genExp g (Node.ty v) 2 0 g.vars.size true rng
+            rng := r
+            -- not the variable itself, and nothing that this substitution binds
+            if !e.hasVar (Node.varId v) && e.nodes.all fun n => !Node.isVar n || !s.map.contains (Node.varId n) then
+              if !s.map.toArray.any fun (_, x) => x.exp.hasVar (Node.varId v) then
+                s := { map := s.map.insert (Node.varId v) (SubExp.mk' v e) }
+        set := set.push s
+      sets := sets.push set
+    let expected := (unifyingTuples sets).qsort lessTuple
+    let results := unifySubsProd sets
+    let got := (results.map (·.2)).qsort lessTuple
+    chainFound := chainFound + expected.size
+    let mut why := ""
+    if got != expected then why := s!"tuples {got}, expected {expected}"
+    else
+      for (s, picks) in results do
+        -- resolved to a fixed point, the unifier must give every variable of every
+        -- substitution of the tuple one value
+        let resolve (e : Exp) : Exp := Id.run do
+          let mut e := e
+          for _ in [0:20] do e := s.apply e
+          return e
+        for i in [0:sets.size] do
+          for (_, x) in sets[i]![picks[i]!]!.map do
+            if resolve (Exp.ofVar x.var) != resolve x.exp then
+              why := s!"tuple {picks}: {g.showSub s} does not agree with {g.varName (Node.varId x.var)} := {g.showExp x.exp}"
+    if !why.isEmpty then
+      chainFailures := chainFailures + 1
+      if chainFailures ≤ 5 then check s!"prod chains: random sets {sets.map (·.map g.showSub)}" false why
+  check s!"prod: {rounds} random products with chained substitutions agree with trying every tuple"
+    (chainFailures == 0) s!"{chainFailures} differences, {chainFound} tuples unify"
   check "prod: the random products have tuples that unify and tuples that do not"
     (found > total / 20 && found < total * 19 / 20) s!"{found} of {total} tuples unify"
 

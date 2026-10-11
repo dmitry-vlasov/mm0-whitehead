@@ -28,6 +28,10 @@ structure ReplayOptions where
   others : Option Nat := some 0
   /-- The limits per theorem. -/
   limits : Limits := {}
+  /-- How many theorems are replayed at once. -/
+  jobs : Nat := 1
+  /-- Say every ten seconds how far the replay has got. -/
+  progress : Bool := false
 
 structure ReplayStats where
   /-- Theorems with a proof in the range. -/
@@ -77,72 +81,126 @@ partial def convInVariable (env : Env) (h : Nat) (s : Skeleton) : Bool :=
     | some p => under p children
     | none => false
 
+namespace Counters
+
+def add (a b : Counters) : Counters :=
+  { props := a.props + b.props, expanded := a.expanded + b.expanded, tuples := a.tuples + b.tuples,
+    notUnified := a.notUnified + b.notUnified, disjoint := a.disjoint + b.disjoint,
+    inconsistent := a.inconsistent + b.inconsistent, duplicate := a.duplicate + b.duplicate,
+    facts := a.facts + b.facts, joins := a.joins + b.joins }
+
+end Counters
+
+namespace ReplayStats
+
+def add (a b : ReplayStats) : ReplayStats :=
+  { theorems := a.theorems + b.theorems, replayed := a.replayed + b.replayed, failed := a.failed + b.failed,
+    conversions := a.conversions + b.conversions, convInVariable := a.convInVariable + b.convInVariable,
+    tooLarge := a.tooLarge + b.tooLarge, stepsIn := a.stepsIn + b.stepsIn, stepsOut := a.stepsOut + b.stepsOut,
+    bytesIn := a.bytesIn + b.bytesIn, bytesOut := a.bytesOut + b.bytesOut, rejected := a.rejected + b.rejected,
+    otherProofs := a.otherProofs + b.otherProofs, limited := a.limited + b.limited,
+    counters := a.counters.add b.counters }
+
+end ReplayStats
+
+/-- Replays the proof of statement `i` of the file, a theorem. Returns what it adds to
+the statistics, the new proof body, and the lines for the log. -/
+def replayOne (db : Db) (vc : Verify.Ctx) (index : Index Nat) (opts : ReplayOptions) (i : Nat) :
+    IO (ReplayStats × Option ByteArray × Array String) := do
+  let f := db.file
+  let s := f.stmts[i]!
+  let mut stats : ReplayStats := { theorems := 1 }
+  let mut lines : Array String := #[]
+  let name := f.thmName s.index
+  match db.skeleton s with
+  | .error msg => throw (IO.userError s!"theorem {name}: {msg}")
+  | .ok none => return ({ stats with conversions := 1 }, none, #[])
+  | .ok (some skel) =>
+    let steps := skel.size (opts.maxSteps + 1)
+    if steps > opts.maxSteps then return ({ stats with tooLarge := 1 }, none, #[])
+    let env := Env.init db index (db.task s.index)
+    let result ←
+      if opts.full then
+        -- every proof that reaches the root is checked by the verifier, which tests the
+        -- joins. The first that passes counts: it need not be the known proof, which
+        -- may have been one of two with the same key (`proofKey`)
+        searchWith (accept vc) env (oracleAll skel opts.others) opts.limits
+      else search vc env (oracle skel) opts.limits
+    let c := result.env.counters
+    stats := { stats with
+      rejected := result.rejected,
+      otherProofs := (match result.proof with
+        | some t => if sameShape t skel then 0 else 1
+        | none => 0),
+      limited := if result.ending == .limit then 1 else 0,
+      counters := c }
+    match result.body, result.proof with
+    | some body, some tree =>
+      return ({ stats with replayed := 1, stepsIn := steps, stepsOut := tree.size,
+                           bytesIn := s.stop - s.bodyStart, bytesOut := body.size }, some body, #[])
+    | _, _ =>
+      let atVar := convInVariable result.env 0 skel
+      stats := { stats with failed := 1, convInVariable := if atVar then 1 else 0 }
+      if opts.verbose then
+        let why := match result.ending with
+          | .proved => "proved"
+          | .exhausted => if atVar then "an unfolding where the tree has a variable" else "the tree has no proof"
+          | .limit => "limit reached"
+        lines := lines.push s!"not replayed: theorem {s.index} {name} ({steps} steps): {why}; \
+          {c.props} assertion nodes, {c.tuples} tuples, {c.notUnified} not unified, {c.disjoint} disjointness, \
+          {c.inconsistent} inconsistent, {result.rejected} rejected by the verifier\
+          {if result.rejection.isEmpty then "" else ": " ++ result.rejection}"
+        if let some tree := result.rejectedProof then
+          lines := lines.push s!"  goal: {db.showExp env.task.goal}\n  premises: {env.task.premises.map (db.showExp ·)}\n{tree.render db "  "}"
+      return (stats, none, lines)
+
 /-- Replays the proofs of `db.file`. Returns the statistics and, for every statement of
-the file, the new proof body if its proof was reconstructed. -/
+the file, the new proof body if its proof was reconstructed.
+
+With `jobs` above one, that many theorems are replayed at once, each on a thread of its
+own: every theorem has a search state of its own, and the database and the index are
+only read. A worker takes the next theorem when it has finished one. With `progress`,
+a line every ten seconds says how far it has got. -/
 def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
     IO (ReplayStats × Array (Option ByteArray)) := do
   let f := db.file
   let vc := Verify.Ctx.ofFile f
   let index := db.index
+  let todo := (Array.range f.stmts.size).filter fun i =>
+    let s := f.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last
+  let next ← IO.mkRef 0
+  let done ← IO.mkRef 0
+  let worker : IO (Array (Nat × ReplayStats × Option ByteArray × Array String)) := do
+    let mut out := #[]
+    while true do
+      let k ← next.modifyGet fun k => (k, k + 1)
+      if k ≥ todo.size then break
+      let r ← replayOne db vc index opts todo[k]!
+      out := out.push (todo[k]!, r)
+      done.modify (· + 1)
+    return out
+  let start ← IO.monoMsNow
+  let tasks ← (Array.range (max 1 opts.jobs)).mapM fun _ => IO.asTask worker (prio := .dedicated)
+  if opts.progress then
+    let mut last := start
+    while !(← tasks.allM fun t => (IO.hasFinished t : IO Bool)) do
+      IO.sleep 200
+      let now ← IO.monoMsNow
+      if now - last ≥ 10000 then
+        last := now
+        log s!"  ... {← done.get} of {todo.size} theorems, {(now - start) / 1000} s"
+  let mut results := #[]
+  for t in tasks do
+    match ← IO.wait t with
+    | .ok r => results := results ++ r
+    | .error e => throw e
   let mut stats : ReplayStats := {}
   let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
-  for i in [0:f.stmts.size] do
-    let s := f.stmts[i]!
-    let isThm := match s.kind with
-      | .thm _ => true
-      | _ => false
-    if !isThm || s.index < opts.first || s.index ≥ opts.last then continue
-    stats := { stats with theorems := stats.theorems + 1 }
-    let name := f.thmName s.index
-    match db.skeleton s with
-    | .error msg => throw (IO.userError s!"theorem {name}: {msg}")
-    | .ok none => stats := { stats with conversions := stats.conversions + 1 }
-    | .ok (some skel) =>
-      let steps := skel.size (opts.maxSteps + 1)
-      if steps > opts.maxSteps then
-        stats := { stats with tooLarge := stats.tooLarge + 1 }
-        continue
-      let env := Env.init db index (db.task s.index)
-      let result ←
-        if opts.full then
-          -- every proof that reaches the root is checked by the verifier, which tests the
-          -- joins. The first that passes counts: it need not be the known proof, which
-          -- may have been one of two with the same key (`proofKey`)
-          searchWith (accept vc) env (oracleAll skel opts.others) opts.limits
-        else search vc env (oracle skel) opts.limits
-      let c := result.env.counters
-      let sum := stats.counters
-      stats := { stats with
-        rejected := stats.rejected + result.rejected,
-        otherProofs := stats.otherProofs + (match result.proof with
-          | some t => if sameShape t skel then 0 else 1
-          | none => 0),
-        limited := stats.limited + (if result.ending == .limit then 1 else 0),
-        counters := { props := sum.props + c.props, expanded := sum.expanded + c.expanded,
-                      tuples := sum.tuples + c.tuples, notUnified := sum.notUnified + c.notUnified,
-                      disjoint := sum.disjoint + c.disjoint, inconsistent := sum.inconsistent + c.inconsistent,
-                      duplicate := sum.duplicate + c.duplicate } }
-      match result.body, result.proof with
-      | some body, some tree =>
-        bodies := bodies.set! i (some body)
-        stats := { stats with replayed := stats.replayed + 1, stepsIn := stats.stepsIn + steps,
-                              stepsOut := stats.stepsOut + tree.size,
-                              bytesIn := stats.bytesIn + (s.stop - s.bodyStart), bytesOut := stats.bytesOut + body.size }
-      | _, _ =>
-        let atVar := convInVariable result.env 0 skel
-        stats := { stats with failed := stats.failed + 1,
-                              convInVariable := stats.convInVariable + (if atVar then 1 else 0) }
-        if opts.verbose then
-          let why := match result.ending with
-            | .proved => "proved"
-            | .exhausted => if atVar then "an unfolding where the tree has a variable" else "the tree has no proof"
-            | .limit => "limit reached"
-          log s!"not replayed: theorem {s.index} {name} ({steps} steps): {why}; \
-            {c.props} assertion nodes, {c.tuples} tuples, {c.notUnified} not unified, {c.disjoint} disjointness, \
-            {c.inconsistent} inconsistent, {result.rejected} rejected by the verifier\
-            {if result.rejection.isEmpty then "" else ": " ++ result.rejection}"
-          if let some tree := result.rejectedProof then
-            log s!"  goal: {db.showExp env.task.goal}\n  premises: {env.task.premises.map (db.showExp ·)}\n{tree.render db "  "}"
+  for (i, (st, body, lines)) in results.qsort (·.1 < ·.1) do
+    stats := stats.add st
+    if let some b := body then bodies := bodies.set! i (some b)
+    for l in lines do log l
   return (stats, bodies)
 
 /-! ### The search test -/
