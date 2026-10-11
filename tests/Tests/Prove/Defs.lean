@@ -101,7 +101,7 @@ def defsTests : TestM Unit := do
       | _ => false))
     ((eqcid.proof.map (proofText db)).getD "none")
   -- every proof found is a proof: the bodies make a valid file
-  let (rows, found') ← searchAll db { limits := { maxProps := 3000, maxMs := 20000 } } fun _ => pure ()
+  let (rows, found') ← searchAll db { limits := { maxProps := 10000, maxMs := 20000 } } fun _ => pure ()
   let proved := (rows.filter (·.ending == .proved)).size
   check "defs: most of the fixture is proved from scratch" (proved ≥ 20) s!"{proved} of {rows.size}"
   check "defs: no proof is rejected by the verifier" (rows.all (·.rejected == 0))
@@ -121,11 +121,44 @@ def defsTests : TestM Unit := do
       | .ok none => "shared conversion"
       | .error msg => msg
     | none => "no such theorem"
-  checkEq "defs: the skeleton of df_an: the file instantiates biid with the def, and folds the goal's value"
-    (skeletonOf "df_an") "(fold wa@#[1] biid)"
+  checkEq "defs: the skeleton of df_an: Conv, Cong into the right side of <->, a fold there"
+    (skeletonOf "df_an") "(conv_wff biid (cong'_wb_1 refl_wff (fold'_wa refl_wff)))"
   checkEq "defs: the skeleton of bi1, an unfolding in a premise of ax_mp" (skeletonOf "bi1")
-    "(ax_mp (syl ax_3 ax_1) (unfold wb@#[1, 0] con1))"
-  checkEq "defs: the skeleton of df_eu, with a dummy" (skeletonOf "df_eu") "(fold weu@#[1] biid)"
+    "(ax_mp (syl ax_3 ax_1) (conv_wff con1 (cong'_wi_1 refl_wff (cong'_wi_0 (unfold'_wb refl_wff) refl_wff))))"
+  checkEq "defs: the skeleton of df_eu, with a dummy" (skeletonOf "df_eu")
+    "(conv_wff biid (cong'_wb_1 refl_wff (fold'_weu refl_wff)))"
+  -- the conversion rules
+  let rule (name : String) : Option Assertion := db.asserts.find? (·.name == name)
+  checkEq "defs: the rule conv_wff" ((rule "conv_wff").map fun r => (r.hyps.map (db.showExp ·), db.showExp r.concl))
+    (some (#["v1", "(≡'wff v0 v1)"], "v0"))
+  checkEq "defs: unfold_weu keeps its dummy apart from the arguments"
+    ((rule "unfold_weu").map fun r => (r.hyps.map (db.showExp ·), db.showExp r.concl, r.disjs))
+    (some (#["(≡wff (wex v2 (wal v0 (wb v1 (weq v0 v2)))) v3)"], "(≡wff (weu v0 v1) v3)", #[(2, 0), (2, 1)]))
+  checkEq "defs: a strict cong carries the unfolding in one argument"
+    ((rule "cong'_wi_0").map fun r => r.hyps.map (db.showExp ·)) (some #["(≡'wff v0 v1)", "(≡wff v2 v3)"])
+  -- a conversion inside what the tree has as a variable: from ph <-> ps and
+  -- ~((ph -> ps) -> ~(ps -> ph)) -> ch, prove ch. ax_mp's minor premise is ?A, and the
+  -- two premises meet only up to unfolding <-> inside it; the proof found folds the
+  -- value into ?A on the side of h0.
+  let wi (a b : Exp) : Exp := Exp.mkApp (term "wi") wffTy #[a, b]
+  let inVarTask : Task :=
+    { limit := id "bi1", sorts := 1, terms := term "wb" + 1,
+      consts := (Array.range 3).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[Exp.mkApp (term "wb") wffTy #[c 0, c 1], wi (db.unfolded (term "wb") #[c 0, c 1] #[]) (c 2)],
+      goal := c 2 }
+  let inVar ← searchWith acceptAny (Env.init db index inVarTask) breadthFirst { maxProps := 100000, maxMs := 20000 }
+  checkEq "defs: an unfolding inside a variable of the tree is found"
+    ((inVar.proof.map (proofText db)).getD "none")
+    "(ax_mp (conv_wff h0 (fold'_wb refl_wff)) h1)"
+  match inVar.proof with
+  | none => pure ()
+  | some tree =>
+    match emitBody db inVarTask tree with
+    | none => check "defs: that proof is emitted" false
+    | some cmds =>
+      check "defs: and emitted as Conv with its conversion proof"
+        ((cmds.filter fun c => match c with | .conv | .cong | .refl | .unfold | .symm => true | _ => false)
+          == #[.conv, .symm, .unfold, .symm, .refl])
   -- replay: every proof of the fixture, with its conversions, is reconstructed
   let (stats, bodies) ← replay db {} fun _ => pure ()
   checkEq "defs: every proof of the fixture is replayed" (stats.replayed, stats.failed, stats.conversions) (26, 0, 0)
@@ -153,8 +186,8 @@ def replayDefsCorpusTests : TestM Unit := do
     | .ok db => pure db
     | .error msg => check "replay peano: the file becomes a database" false msg; return
   let (stats, bodies) ← replay db {} fun _ => pure ()
-  check "replay peano: the proofs with conversions at places the tree has are reconstructed"
-    (stats.replayed ≥ 2400 && stats.failed == stats.convInVariable && stats.rejected == 0)
+  check "replay peano: every proof without a shared conversion is reconstructed"
+    (stats.replayed + stats.conversions == stats.theorems && stats.failed == 0 && stats.rejected == 0)
     s!"{stats.replayed} replayed, {stats.failed} not, {stats.convInVariable} at a variable, {stats.rejected} rejected"
   match MmbFile.parse (file.withBodies bodies) with
   | .error e => check "replay peano: the file with the new bodies is read" false e.msg
@@ -162,7 +195,7 @@ def replayDefsCorpusTests : TestM Unit := do
     match Whitehead.Verify.checkProofs f2 with
     | .ok () => check "replay peano: the file with the new bodies is valid" true
     | .error e => check "replay peano: the file with the new bodies is valid" false (e.format f2 "replayed")
-  IO.println s!"replay peano: {stats.replayed} of {stats.theorems} proofs reconstructed, {stats.failed} with an \
-    unfolding where the tree has a variable, {stats.conversions} with a shared conversion left out"
+  IO.println s!"replay peano: {stats.replayed} of {stats.theorems} proofs reconstructed, \
+    {stats.conversions} with a shared conversion left out"
 
 end Tests.Prove

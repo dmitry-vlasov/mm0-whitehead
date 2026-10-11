@@ -14,6 +14,10 @@ proof, each step as the proofs of its premises, the expressions for all binders 
 assertion, the conclusion, and `Thm`. A variable that is left in the proof must be a
 name, and becomes a `Dummy`.
 
+A step of the conversion rule `conv_s` (`Db.convRules`) is `Conv` with the conversion
+proof that the tree of rules under it stands for (`emitConvProof`): `refl` is `Refl`,
+`cong_t` is `Cong`, `unfold_f` is `Unfold`, `fold_f` is `Symm`, `Unfold`, `Symm`.
+
 An unfolding step (`ProofTree.conv`) is `Conv` with the conversion proof written from
 the path: `Cong` at each application on the way, `Refl` for the arguments beside the
 path, and at the end `Unfold` (after `Symm` for a fold) with the value pushed first,
@@ -130,6 +134,41 @@ partial def emitConv (e1 e2 : Exp) (path : Array Nat) (unfold : Bool) (k i1 i2 :
       if j == path[k]! then emitConv e1 e2 path unfold (k + 1) a1[j]! a2[j]!
       else push .refl
 
+/-- The conversion proof that a tree of conversion rules stands for (`Pseudo`), the
+obligation `a =?= b` being on the stack. -/
+partial def emitConvProof (t : ProofTree) : EmitM Unit := do
+  let push (c : ProofCmd) : EmitM Unit := modify fun st => { st with cmds := st.cmds.push c }
+  let db := (← get).db
+  match t with
+  | .step a args children =>
+    match db.asserts[a]!.pseudo with
+    | some .refl => push .refl
+    | some (.cong term) =>
+      -- an obligation per argument, the first on top; a bound one is the same name
+      push .cong
+      let mut j := 0
+      for ty in db.terms[term]!.args do
+        if Ty.isName ty then push .refl
+        else
+          emitConvProof children[j]!
+          j := j + 1
+    | some (.unfold f) =>
+      let n := db.terms[f]!.args.size
+      let m := (db.terms[f]!.value.map (·.dummies.size)).getD 0
+      emitExpr (db.unfolded f (args.extract 0 n) (args.extract n (n + m))) 0
+      push .unfold
+      emitConvProof children[0]!
+    | some (.fold f) =>
+      let n := db.terms[f]!.args.size
+      let m := (db.terms[f]!.value.map (·.dummies.size)).getD 0
+      push .symm
+      emitExpr (db.unfolded f (args.extract 0 n) (args.extract n (n + m))) 0
+      push .unfold
+      push .symm
+      emitConvProof children[0]!
+    | _ => modify fun st => { st with bad := true }
+  | _ => modify fun st => { st with bad := true }
+
 /-- Asks for a proof. -/
 partial def emitProof (t : ProofTree) : EmitM Unit := do
   match t with
@@ -137,7 +176,14 @@ partial def emitProof (t : ProofTree) : EmitM Unit := do
   | .step assertion args children =>
     let st ← get
     let concl := stepConcl st.db assertion args
-    proof concl (body args children concl) (fun save => some (.thm assertion save))
+    if st.db.asserts[assertion]!.pseudo == some .conv then
+      -- `b, a ≡' b ⊢ a`: `Conv`, and the conversion proof of `a =?= b`
+      proof concl (do
+        emitExpr concl 0
+        emitProof children[0]!
+        modify fun st => { st with cmds := st.cmds.push .conv }
+        emitConvProof children[1]!) (fun save => if save then some .save else none)
+    else proof concl (body args children concl) (fun save => some (.thm assertion save))
   | .conv _ path unfold _ _ child =>
     let st ← get
     let e1 := t.concl st.db st.premises

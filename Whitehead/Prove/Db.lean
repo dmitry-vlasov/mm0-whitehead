@@ -39,6 +39,22 @@ structure TermInfo where
   value : Option DefValue := none
   deriving Inhabited
 
+/-- A rule of the conversion judgment `a ≡ b` of MM0, made into an assertion (`convRules`).
+The judgment is written with the terms `≡` and `≡'` (`ConvRules.eq`); `≡'` is the same
+judgment with at least one unfolding or folding in its proof. -/
+inductive Pseudo where
+  /-- `b, a ≡' b ⊢ a`: the proof command `Conv`. -/
+  | conv
+  /-- `a ≡ a`: `Refl`. -/
+  | refl
+  /-- `a1 ≡ b1, ... ⊢ t(as) ≡ t(bs)`: `Cong`. -/
+  | cong (t : Nat)
+  /-- `B ≡ b ⊢ f(xs) ≡ b`, `B` the value of `f`: `Unfold`. -/
+  | unfold (f : Nat)
+  /-- `a ≡ B ⊢ a ≡ f(xs)`: `Symm`, `Unfold`, `Symm`. -/
+  | fold (f : Nat)
+  deriving BEq, Inhabited
+
 /-- An axiom or a theorem. -/
 structure Assertion where
   /-- Its number in the theorem table of the file. -/
@@ -56,13 +72,48 @@ structure Assertion where
   /-- How many sorts and terms are declared before it. -/
   sortsBefore : Nat := 0
   termsBefore : Nat := 0
+  /-- Its rank in the index of conclusions: theorem `k` may use what has a rank below
+  `2k + 1` (`rankLimit`). An assertion of the file has `2 id + 1`; a conversion rule
+  `2 r`, `r` being the number of assertions declared before the last term it mentions. -/
+  rank : Nat := 0
+  /-- For a conversion rule, which one; `none` for an assertion of the file. -/
+  pseudo : Option Pseudo := none
   deriving Inhabited
+
+/-- The rank limit of theorem `k` in the index of conclusions (`Assertion.rank`). -/
+def rankLimit (k : Nat) : Nat := 2 * k + 1
+
+/-- The conversion rules of a file with defs, by what they are for. -/
+structure ConvRules where
+  /-- The first term number of the judgment: `≡` of sort `s` is `base + 2 s`, `≡'` is
+  `base + 2 s + 1`. -/
+  base : Nat := 0
+  conv : Std.HashMap Nat Nat := {}
+  refl : Std.HashMap Nat Nat := {}
+  cong : Std.HashMap Nat Nat := {}
+  /-- By the term and the argument position that carries the unfolding. -/
+  congS : Std.HashMap (Nat × Nat) Nat := {}
+  unfold : Std.HashMap Nat Nat := {}
+  unfoldS : Std.HashMap Nat Nat := {}
+  fold : Std.HashMap Nat Nat := {}
+  foldS : Std.HashMap Nat Nat := {}
+  deriving Inhabited
+
+/-- The type of a judgment `a ≡ b`: a sort that no file has. -/
+def judgmentTy : Nat := Ty.mk 127 false
+
+/-- `a ≡ b` (`strict`: `a ≡' b`) in sort `s`. -/
+def ConvRules.eq (r : ConvRules) (s : Nat) (strict : Bool) (a b : Exp) : Exp :=
+  Exp.mkApp (r.base + 2 * s + (if strict then 1 else 0)) judgmentTy #[a, b]
 
 structure Db where
   file : MmbFile
   terms : Array TermInfo
   /-- The terms that are defs, in order. -/
   defs : Array Nat
+  /-- The conversion rules, if the file has defs: their assertions are in `asserts`
+  after those of the file. -/
+  conv : ConvRules := {}
   /-- By the number in the theorem table, which is the order of declaration. -/
   asserts : Array Assertion
   deriving Inhabited
@@ -145,6 +196,103 @@ def disjPairs (binders : Array Arg) : Array (Nat × Nat) := Id.run do
             out := out.push (i, j)
   return out
 
+/-- The conversion judgment of MM0 as assertions, for a file with defs
+(`docs/DESIGN.md`, "Unfolding inside a variable"). The terms `≡` and `≡'` of every sort
+are added after the terms of the file, and these rules after its assertions:
+
+    conv_s   b, a ≡' b ⊢ a                     every provable sort s
+    refl_s   ⊢ a ≡ a                           every sort s
+    cong_t   a1 ≡ b1, ... ⊢ t(as) ≡ t(bs)      every term t with a regular argument; a
+                                               bound argument is the same on both sides
+    cong'_ti the same with ≡' at position i and in the conclusion
+    unfold_f B ≡ b ⊢ f(xs) ≡ b                 every def f, B its value
+    fold_f   a ≡ B ⊢ a ≡ f(xs)
+    unfold'_f, fold'_f  the same with ≡' in the conclusion
+
+The dummies of `f` are bound variables of `unfold_f` and `fold_f`, kept apart from the
+arguments and from each other, which is what the verifier checks at `Unfold`. -/
+def convRules (f : MmbFile) (terms : Array TermInfo) (termAfter : Array Nat) (asserts : Array Assertion) :
+    Array TermInfo × Array Assertion × ConvRules := Id.run do
+  let numSorts := f.sorts.size
+  let base := terms.size
+  let mut terms := terms
+  for s in [0:numSorts] do
+    let ty := Ty.mk s false
+    terms := terms.push { name := s!"≡{f.sortName s}", ty := judgmentTy, args := #[ty, ty] }
+    terms := terms.push { name := s!"≡'{f.sortName s}", ty := judgmentTy, args := #[ty, ty] }
+  let mut r : ConvRules := { base }
+  let mut asserts := asserts
+  let v (k ty : Nat) : Exp := Exp.ofVar (Node.var k ty)
+  let add (asserts : Array Assertion) (name : String) (vars : Array Nat) (hyps : Array Exp) (concl : Exp)
+      (disjs : Array (Nat × Nat)) (pseudo : Pseudo) (rank : Nat) : Array Assertion × Nat :=
+    (asserts.push { id := asserts.size, name, binders := #[], vars, hyps, concl, disjs, rank := 2 * rank,
+                    pseudo := some pseudo }, asserts.size)
+  for s in [0:numSorts] do
+    let ty := Ty.mk s false
+    let (a, id) := add asserts s!"refl_{f.sortName s}" #[Node.var 0 ty] #[] (r.eq s false (v 0 ty) (v 0 ty)) #[] .refl 0
+    asserts := a
+    r := { r with refl := r.refl.insert s id }
+    if f.sorts[s]!.isProvable then
+      let (a, id) := add asserts s!"conv_{f.sortName s}" #[Node.var 0 ty, Node.var 1 ty] #[v 1 ty, r.eq s true (v 0 ty) (v 1 ty)]
+        (v 0 ty) #[] .conv 0
+      asserts := a
+      r := { r with conv := r.conv.insert s id }
+  for t in [0:base] do
+    let info := terms[t]!
+    let regular := (Array.range info.args.size).filter fun k => !Ty.isName info.args[k]!
+    if regular.isEmpty then continue
+    -- the variables: one per bound argument, two per regular one
+    let mut vars : Array Nat := #[]
+    let mut as : Array Exp := #[]
+    let mut bs : Array Exp := #[]
+    for k in [0:info.args.size] do
+      let ty := info.args[k]!
+      if Ty.isName ty then
+        vars := vars.push (Node.var vars.size ty)
+        as := as.push (Exp.ofVar vars.back!)
+        bs := bs.push (Exp.ofVar vars.back!)
+      else
+        vars := (vars.push (Node.var vars.size ty)).push (Node.var (vars.size + 1) ty)
+        as := as.push (Exp.ofVar vars[vars.size - 2]!)
+        bs := bs.push (Exp.ofVar vars.back!)
+    let sortOf (k : Nat) : Nat := Ty.sort info.args[k]!
+    let rs := Ty.sort info.ty
+    let lhs := Exp.mkApp t info.ty as
+    let rhs := Exp.mkApp t info.ty bs
+    let (a, id) := add asserts s!"cong_{info.name}" vars (regular.map fun k => r.eq (sortOf k) false as[k]! bs[k]!)
+      (r.eq rs false lhs rhs) #[] (.cong t) termAfter[t]!
+    asserts := a
+    r := { r with cong := r.cong.insert t id }
+    for i in regular do
+      let (a, id) := add asserts s!"cong'_{info.name}_{i}" vars
+        (regular.map fun k => r.eq (sortOf k) (k == i) as[k]! bs[k]!) (r.eq rs true lhs rhs) #[] (.cong t) termAfter[t]!
+      asserts := a
+      r := { r with congS := r.congS.insert (t, i) id }
+  for t in [0:base] do
+    let info := terms[t]!
+    let some value := info.value | continue
+    let n := info.args.size
+    let m := value.dummies.size
+    let xs := (Array.range n).map fun k => Node.var k info.args[k]!
+    let rs := Ty.sort info.ty
+    let other := Node.var (n + m) (Ty.mk rs false)
+    let vars := xs ++ value.dummies ++ #[other]
+    let app := Exp.mkApp t info.ty (xs.map Exp.ofVar)
+    let mut disjs : Array (Nat × Nat) := #[]
+    for j in [0:m] do
+      for i in [0:n] do disjs := disjs.push (n + j, i)
+      for j' in [j + 1:m] do disjs := disjs.push (n + j, n + j')
+    for strict in [false, true] do
+      let (a, id) := add asserts s!"unfold{if strict then "'" else ""}_{info.name}" vars
+        #[r.eq rs false value.expr (Exp.ofVar other)] (r.eq rs strict app (Exp.ofVar other)) disjs (.unfold t) termAfter[t]!
+      asserts := a
+      r := if strict then { r with unfoldS := r.unfoldS.insert t id } else { r with unfold := r.unfold.insert t id }
+      let (a, id) := add asserts s!"fold{if strict then "'" else ""}_{info.name}" vars
+        #[r.eq rs false (Exp.ofVar other) value.expr] (r.eq rs strict (Exp.ofVar other) app) disjs (.fold t) termAfter[t]!
+      asserts := a
+      r := if strict then { r with foldS := r.foldS.insert t id } else { r with fold := r.fold.insert t id }
+  return (terms, asserts, r)
+
 /-- The assertions and terms of a proof file. -/
 def Db.ofFile (f : MmbFile) : Except String Db := do
   if f.terms.size ≥ Node.constBase then throw "more than 2^23 terms"
@@ -167,11 +315,18 @@ def Db.ofFile (f : MmbFile) : Except String Db := do
   let mut before : Array (Nat × Nat) := Array.replicate f.thms.size (0, 0)
   let mut nSorts := 0
   let mut nTerms := 0
+  -- for each term, how many assertions are declared before it
+  let mut termAfter : Array Nat := Array.replicate f.terms.size 0
+  let mut nThms := 0
   for s in f.stmts do
     match s.kind with
     | .sort => nSorts := nSorts + 1
-    | .termDef _ => nTerms := nTerms + 1
-    | _ => before := before.set! s.index (nSorts, nTerms)
+    | .termDef _ =>
+      termAfter := termAfter.set! s.index nThms
+      nTerms := nTerms + 1
+    | _ =>
+      before := before.set! s.index (nSorts, nTerms)
+      nThms := nThms + 1
   let mut asserts := Array.mkEmpty f.thms.size
   for i in [0:f.thms.size] do
     let binders := f.thmArgs i
@@ -192,8 +347,10 @@ def Db.ofFile (f : MmbFile) : Except String Db := do
         heap := h
       asserts := asserts.push
         { id := i, name := f.thmName i, binders, vars, hyps, concl, disjs := disjPairs binders,
-          sortsBefore := before[i]!.1, termsBefore := before[i]!.2 }
-  return { file := f, terms, defs, asserts }
+          sortsBefore := before[i]!.1, termsBefore := before[i]!.2, rank := 2 * i + 1 }
+  if defs.isEmpty then return { file := f, terms, defs, asserts }
+  let (terms', asserts', conv) := convRules f terms termAfter asserts
+  return { file := f, terms := terms', defs, asserts := asserts', conv }
 
 namespace Db
 
@@ -221,9 +378,9 @@ def unfolded (db : Db) (t : Nat) (args dummies : Array Exp) : Exp :=
       else m.insert k (SubExp.mk' v.dummies[k - n]! dummies[k - n]!)
     ({ map } : Subst).apply v.expr
 
-/-- The index of the conclusions of all assertions, each ranked by its number. -/
+/-- The index of the conclusions of all assertions, each with its rank (`Assertion.rank`). -/
 def index (db : Db) : Index Nat :=
-  db.asserts.foldl (init := {}) fun ix a => ix.insert a.concl a.id a.id
+  db.asserts.foldl (init := {}) fun ix a => ix.insert a.concl a.id a.rank
 
 end Db
 
@@ -240,7 +397,8 @@ structure HypIndexes where
 /-- `ruInitProverForwardProved`, the part that does not depend on the task. -/
 def Db.hypIndexes (db : Db) : HypIndexes :=
   db.asserts.foldl (init := {}) fun ix a =>
-    if a.hyps.size == 1 then { ix with single := ix.single.insert a.hyps[0]! a.id a.id }
+    if a.pseudo.isSome then ix
+    else if a.hyps.size == 1 then { ix with single := ix.single.insert a.hyps[0]! a.id a.id }
     else
       (Array.range a.hyps.size).foldl (init := ix) fun ix i =>
         if a.hyps[i]!.isVar then ix else { ix with multi := ix.multi.insert a.hyps[i]! (a.id, i) a.id }
@@ -348,9 +506,14 @@ partial def size (s : Skeleton) (cap : Nat := 1000000000) : Nat :=
 
 end Skeleton
 
-/-- An unfolding as the skeleton reader collects it: the def, the path, and whether it is
-an unfolding of the statement being proved (else a folding). -/
-abbrev ConvStep := Nat × Array Nat × Bool
+/-- A node of a conversion proof as the skeleton reader rebuilds it, in the orientation
+`a ≡ b` of its `Conv` (the goal's side on the left); the numbers are holes. -/
+inductive CNode where
+  | refl
+  | cong (t : Nat) (kids : Array Nat)
+  | unfold (f : Nat) (kid : Nat)
+  | fold (f : Nat) (kid : Nat)
+  deriving Inhabited
 
 /-- What the stack holds while a proof body is read with its expressions. -/
 inductive SkItem where
@@ -358,52 +521,96 @@ inductive SkItem where
   | proof (e : Exp) (sk : Skeleton)
   /-- `⊢ e1` made by `Conv`, whose conversion is still being read: slot `k`. -/
   | pending (e1 : Exp) (k : Nat)
-  /-- The obligation `left =?= right` of the conversion in slot `k`, at `path` from the
-  statement; `flipped` if `left` is on the side of the proved statement, not the goal. -/
-  | obl (left right : Exp) (k : Nat) (path : Array Nat) (flipped : Bool)
+  /-- The obligation `left =?= right` that hole `h` stands for; `flipped` if `left` is
+  on the side of the proved statement, not the goal (after `Symm`). -/
+  | obl (left right : Exp) (h : Nat) (flipped : Bool)
   deriving Inhabited
 
-/-- A `Conv` being read: the unfoldings found on the side of the goal and on the side
-of the proved statement, how many obligations are open, and the proof converted. -/
+/-- A `Conv` being read: its hole, how many obligations are open, its sort, and the proof
+converted. -/
 structure SkSlot where
-  unfolds : Array ConvStep := #[]
-  folds : Array ConvStep := #[]
+  root : Nat
   open_ : Nat := 1
+  sort : Nat
   sk : Skeleton
   deriving Inhabited
 
-/-- The skeleton of a proof body with conversions. The expressions are tracked, so that a
-conversion can be read as single unfoldings with their places: at `Unfold`, the def and
-the path of the obligation are one step — an unfolding of the goal if the obligation
-has the goal's side on the left, a folding otherwise. The steps of a `Conv` are chained
-in the order they are applied to the goal: the unfoldings as found (an inner one after
-the outer), then the foldings in reverse (an inner one before the outer). `ConvCut` and
-`ConvSave`, which share a conversion, are not read: `none`. -/
+/-- Does the conversion proof at hole `h` unfold or fold anything? -/
+partial def convUnfolds (holes : Array CNode) (h : Nat) : Bool :=
+  match holes[h]! with
+  | .refl => false
+  | .cong _ kids => kids.any (convUnfolds holes)
+  | .unfold .. | .fold .. => true
+
+/-- The conversion proof at hole `h` as a tree of conversion rules; `strict` asks for
+`≡'`, whose proof has an unfolding: of a `cong`, the first argument that has one carries
+it. `none` if a strict one has none. -/
+partial def convSkeleton (db : Db) (holes : Array CNode) (sorts : Array Nat) (h : Nat) (strict : Bool) :
+    Except String (Option Skeleton) := do
+  let r := db.conv
+  let refl : Except String (Option Skeleton) :=
+    if strict then .ok none
+    else match r.refl[sorts[h]!]? with
+      | some id => .ok (some (.step id #[]))
+      | none => .error "no refl for this sort"
+  let rule (m : Std.HashMap Nat Nat) (t : Nat) : Except String Nat :=
+    match m[t]? with
+    | some id => .ok id
+    | none => .error s!"no conversion rule for term {t}"
+  match holes[h]! with
+  | .refl => refl
+  | .cong t kids =>
+    let args := db.terms[t]!.args
+    let regular := (Array.range args.size).filter fun k => !Ty.isName args[k]!
+    -- a term with bound arguments only: the two sides are the same expression
+    if regular.isEmpty || kids.size != args.size then return ← refl
+    let carrier := regular.find? fun k => convUnfolds holes kids[k]!
+    let id ←
+      if strict then
+        match carrier with
+        | none => return none
+        | some i =>
+          match r.congS[(t, i)]? with
+          | some id => pure id
+          | none => throw s!"no conversion rule for term {t}"
+      else rule r.cong t
+    let mut children := #[]
+    for k in regular do
+      match ← convSkeleton db holes sorts kids[k]! (strict && some k == carrier) with
+      | some c => children := children.push c
+      | none => return none
+    return some (.step id children)
+  | .unfold f kid =>
+    let id ← rule (if strict then r.unfoldS else r.unfold) f
+    return (← convSkeleton db holes sorts kid false).map fun c => .step id #[c]
+  | .fold f kid =>
+    let id ← rule (if strict then r.foldS else r.fold) f
+    return (← convSkeleton db holes sorts kid false).map fun c => .step id #[c]
+
+/-- The skeleton of a proof body with conversions, in the conversion rules of
+`convRules`: each `Conv` is a step of `conv_s` whose second child is its conversion
+proof, read back from the commands — `Refl` is `refl`, `Cong` is `cong`, `Unfold` is
+`unfold`, or `fold` where a `Symm` has turned the obligation round. The expressions are
+tracked, because a conversion is told by them. A `Conv` with no unfolding in it changes
+nothing and is left out. `ConvCut` and `ConvSave`, which share a conversion, are not
+read: `none`. -/
 def skeletonWithConvs (db : Db) (a : Assertion) (cmds : Array ProofCmd) : Except String (Option Skeleton) := do
+  let r := db.conv
   let mut stack : Array SkItem := #[]
   let mut heap : Array SkItem := a.vars.map fun v => .expr (Exp.ofVar v)
   let mut slots : Array SkSlot := #[]
+  let mut holes : Array CNode := #[]
+  let mut sorts : Array Nat := #[]
   let mut hyps := 0
   let mut dummies := 0
   let popExpr (stack : Array SkItem) : Except String (Exp × Array SkItem) :=
     match stack.back? with
     | some (.expr e) => .ok (e, stack.pop)
     | _ => .error "expected an expression on the stack"
-  let popObl (stack : Array SkItem) : Except String (SkItem × Array SkItem) :=
+  let popObl (stack : Array SkItem) : Except String ((Exp × Exp × Nat × Bool) × Array SkItem) :=
     match stack.back? with
-    | some (it@(.obl ..)) => .ok (it, stack.pop)
+    | some (.obl l r h fl) => .ok ((l, r, h, fl), stack.pop)
     | _ => .error "expected an obligation on the stack"
-  -- the last obligation of a slot closed: the pending proof below becomes a proof
-  let finish (slots : Array SkSlot) (stack : Array SkItem) (k : Nat) : Except String (Array SkItem) :=
-    match stack.back? with
-    | some (.pending e1 k') =>
-      if k' != k then .error "the conversions are not nested"
-      else
-        let slot := slots[k]!
-        let steps := slot.unfolds ++ slot.folds.reverse
-        let sk := steps.foldr (init := slot.sk) fun (t, path, unfold) sk => .conv t path unfold sk
-        .ok (stack.pop.push (.proof e1 sk))
-    | _ => .error "the obligations of a conversion are not above its proof"
   for c in cmds do
     match c with
     | .term t save =>
@@ -447,37 +654,61 @@ def skeletonWithConvs (db : Db) (a : Assertion) (cmds : Array ProofCmd) : Except
     | .conv =>
       let some (.proof e2 sk) := stack.back? | throw "Conv: expected a proof on the stack"
       let (e1, st) ← popExpr stack.pop
-      let k := slots.size
-      slots := slots.push { sk }
-      stack := (st.push (.pending e1 k)).push (.obl e1 e2 k #[] false)
-    | .refl =>
-      let (.obl _ _ k _ _, st) ← popObl stack | throw "Refl"
+      let h := holes.size
+      holes := holes.push .refl
+      sorts := sorts.push (Ty.sort e1.ty)
+      slots := slots.push { root := h, sort := Ty.sort e1.ty, sk }
+      stack := (st.push (.pending e1 (slots.size - 1))).push (.obl e1 e2 h false)
+    | .refl | .cong | .unfold =>
+      let (e, st) ← if c matches .unfold then popExpr stack else pure (default, stack)
+      let ((l, rt, h, fl), st) ← popObl st
       stack := st
-      slots := slots.modify k fun sl => { sl with open_ := sl.open_ - 1 }
-      if slots[k]!.open_ == 0 then stack ← finish slots stack k
+      -- the slot of the innermost pending `Conv`
+      let some k := (stack.findSomeRev? fun it => match it with | .pending _ k => some k | _ => none)
+        | throw "a conversion command outside a conversion"
+      match c with
+      | .refl =>
+        holes := holes.set! h .refl
+        slots := slots.modify k fun sl => { sl with open_ := sl.open_ - 1 }
+      | .cong =>
+        let ls := l.argStarts 0
+        let rs := rt.argStarts 0
+        if ls.size != rs.size then throw "Cong: the two sides differ in arity"
+        let kids := (Array.range ls.size).map (holes.size + ·)
+        for i in [0:ls.size] do
+          holes := holes.push .refl
+          sorts := sorts.push (Ty.sort (l.sub ls[i]!).ty)
+        holes := holes.set! h (.cong (Node.appId l.nodes[0]!) kids)
+        -- the first argument ends on top
+        for j in [0:ls.size] do
+          let i := ls.size - 1 - j
+          stack := stack.push (.obl (l.sub ls[i]!) (rt.sub rs[i]!) kids[i]! fl)
+        slots := slots.modify k fun sl => { sl with open_ := sl.open_ + ls.size - 1 }
+      | _ =>
+        let t := Node.appId l.nodes[0]!
+        let kid := holes.size
+        holes := holes.push .refl
+        sorts := sorts.push sorts[h]!
+        holes := holes.set! h (if fl then .fold t kid else .unfold t kid)
+        stack := stack.push (.obl e rt kid fl)
+      if slots[k]!.open_ == 0 then
+        -- the conversion is complete: the pending proof becomes a `conv_s` step
+        match stack.back? with
+        | some (.pending e1 k') =>
+          if k' != k then throw "the conversions are not nested"
+          let slot := slots[k]!
+          let sk ← match convSkeleton db holes sorts slot.root true with
+            | .ok (some conv) =>
+              match r.conv[slot.sort]? with
+              | some id => pure (Skeleton.step id #[slot.sk, conv])
+              | none => throw "Conv in a sort that is not provable"
+            | .ok none => pure slot.sk
+            | .error e => throw e
+          stack := stack.pop.push (.proof e1 sk)
+        | _ => throw "the obligations of a conversion are not above its proof"
     | .symm =>
-      let (.obl l r k path fl, st) ← popObl stack | throw "Symm"
-      stack := st.push (.obl r l k path !fl)
-    | .cong =>
-      let (.obl l r k path fl, st) ← popObl stack | throw "Cong"
-      stack := st
-      let ls := l.argStarts 0
-      let rs := r.argStarts 0
-      if ls.size != rs.size then throw "Cong: the two sides differ in arity"
-      -- the first argument ends on top
-      for j in [0:ls.size] do
-        let i := ls.size - 1 - j
-        stack := stack.push (.obl (l.sub ls[i]!) (r.sub rs[i]!) k (path.push i) fl)
-      slots := slots.modify k fun sl => { sl with open_ := sl.open_ + ls.size - 1 }
-      if slots[k]!.open_ == 0 then stack ← finish slots stack k
-    | .unfold =>
-      let (e, st) ← popExpr stack
-      let (.obl l r k path fl, st) ← popObl st | throw "Unfold"
-      let t := Node.appId l.nodes[0]!
-      slots := slots.modify k fun sl =>
-        if fl then { sl with folds := sl.folds.push (t, path, false) }
-        else { sl with unfolds := sl.unfolds.push (t, path, true) }
-      stack := st.push (.obl e r k path fl)
+      let ((l, rt, h, fl), st) ← popObl stack
+      stack := st.push (.obl rt l h !fl)
     | .convCut | .convSave => return none
     | .save =>
       match stack.back? with

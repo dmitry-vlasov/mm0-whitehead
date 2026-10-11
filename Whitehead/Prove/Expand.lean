@@ -89,7 +89,7 @@ def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
   let e := env.hyps[h]!.expr
   match only with
   | none =>
-    (env.assertions.unify e {} env.task.limit).map (fun u => { step := .assertion u.data, rule := env.db.asserts[u.data]!, sub := u.sub })
+    (env.assertions.unify e {} (rankLimit env.task.limit)).map (fun u => { step := .assertion u.data, rule := env.db.asserts[u.data]!, sub := u.sub })
       ++ convCandidates env e
   | some (.assertion id) =>
     match unifyExps #[e, env.db.asserts[id]!.concl] {} with
