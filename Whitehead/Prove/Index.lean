@@ -145,7 +145,12 @@ the given expression under that unifier. -/
 structure Unified (α : Type) where
   sub : Subst
   data : α
-  expr : Exp
+  /-- Made when it is asked for: most results are candidates whose instance nobody
+  reads. -/
+  instance_ : Thunk Exp
+
+/-- The given expression under the unifier. -/
+def Unified.expr {α : Type} (u : Unified α) : Exp := u.instance_.get
 
 mutual
 
@@ -202,7 +207,7 @@ partial def bindVar (ix : Index α) (limit : Nat) (e : Exp) (j at_ : Nat) (v : N
 partial def unifyNode (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub : Subst)
     (acc : Array (Unified α)) : Array (Unified α) :=
   if i + 1 == e.size then
-    let instance_ := sub.apply e
+    let instance_ : Thunk Exp := Thunk.mk fun _ => sub.apply e
     let node := ix.nodes[at_]!
     (node.data.zip node.ranks).foldl (init := acc) fun acc (d, rank) =>
       if rank < limit then acc.push ⟨sub, d, instance_⟩ else acc

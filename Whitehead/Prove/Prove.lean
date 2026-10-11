@@ -360,6 +360,14 @@ def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String 
 def over (env : Env) (limits : Limits) (now start : Nat) : Bool :=
   env.props.size > limits.maxProps || now - start > limits.maxMs || env.overBudget
 
+/-- Set while the process uses more memory than it should (`watchMemory` in
+`Replay.lean`): every search running then gives up, as at a limit. -/
+initialize memoryHigh : IO.Ref Bool ← IO.mkRef false
+
+/-- `over`, now, and while memory is short. -/
+def overNow (env : Env) (limits : Limits) (start : Nat) : IO Bool := do
+  return over env limits (← IO.monoMsNow) start || (← memoryHigh.get)
+
 /-- `ruReverseJoin` for each of the new facts: the goal, then every subgoal it unifies
 with, as long as the limits allow. -/
 def joinFacts (env : Env) (facts : Array Nat) (limits : Limits) (start : Nat) : IO Env := do
@@ -368,7 +376,7 @@ def joinFacts (env : Env) (facts : Array Nat) (limits : Limits) (start : Nat) : 
     let (targets, env') := (joinRoot f).run env
     env := env'
     for h in targets do
-      if over env limits (← IO.monoMsNow) start then return env
+      if ← overNow env limits start then return env
       env := ((joinSubgoal f h).run env).2
   return env
 
@@ -382,7 +390,7 @@ def forwardWave (env : Env) (limits : Limits) (start : Nat) : IO (Env × Bool) :
   let mut env := { env with forward := some { fwd with front := #[] } }
   for f in front do
     for (id, pos) in forwardTriggers env f do
-      if over env limits (← IO.monoMsNow) start then return (env, false)
+      if ← overNow env limits start then return (env, false)
       if ((env.forward.map (·.count)).getD 0) ≥ limits.maxFacts then break
       let (made, env') := (applyForward f env.db.asserts[id]! pos limits.maxFacts).run env
       env ← joinFacts env' made limits start
@@ -445,7 +453,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
       if let some (tree, body, answer, values) := found then
         return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                  rejected, rejection, rejectedProof, others, env }
-      if over env limits (← IO.monoMsNow) start then
+      if ← overNow env limits start then
         return { ending := .limit, rejected, rejection, rejectedProof, others, env }
       if more then dry := false
       else if !dry then dry := true
@@ -455,7 +463,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
-        if over env limits (← IO.monoMsNow) start then
+        if ← overNow env limits start then
           return { ending := .limit, rejected, rejection, rejectedProof, others, env }
         let (_, env') := (proveProp p only).run env
         env := env'

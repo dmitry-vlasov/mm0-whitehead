@@ -28,12 +28,23 @@ namespace Whitehead.Prove
 def Exp.varIds (e : Exp) : Std.HashSet Nat :=
   e.nodes.foldl (init := {}) fun acc n => if Node.isVar n then acc.insert (Node.varId n) else acc
 
+/-- The numbers of the variables of `e`, each once. An array: an image has few
+variables, and a hash set for each of the millions of bindings that the index makes
+was a large part of the time spent allocating and freeing. -/
+def Exp.varIdArray (e : Exp) : Array Nat := Id.run do
+  let mut out : Array Nat := #[]
+  for n in e.nodes do
+    if Node.isVar n then
+      let id := Node.varId n
+      if !out.contains id then out := out.push id
+  return out
+
 /-- `RuSubExpr`: the image of the variable `var` (a variable node), with the numbers of
 the variables that occur in it. -/
 structure SubExp where
   var : Nat
   exp : Exp
-  vars : Std.HashSet Nat
+  vars : Array Nat
   deriving Inhabited
 
 /-- `RuSubst`, keyed by the number of the variable. -/
@@ -43,7 +54,7 @@ structure Subst where
 
 namespace SubExp
 
-def mk' (v : Nat) (e : Exp) : SubExp := ⟨v, e, e.varIds⟩
+def mk' (v : Nat) (e : Exp) : SubExp := ⟨v, e, e.varIdArray⟩
 
 end SubExp
 
@@ -131,7 +142,7 @@ def addVars (s : Subst) (v : Nat) (e0 : SubExp) : Option Subst :=
       match s.map[vid]? with
       | some e1 => if e.exp == e1.exp then some s else none
       | none =>
-        let p : Bool × Option Nat := e.vars.fold (init := (true, none)) fun acc ev =>
+        let p : Bool × Option Nat := e.vars.foldl (init := (true, none)) fun acc ev =>
           if !acc.1 then acc
           else
             match s.map[ev]? with

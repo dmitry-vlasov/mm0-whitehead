@@ -11,17 +11,20 @@ def usage : String :=
   verify <file.mmb>              check the proofs of a proof file, without a specification
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
-               [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N] [--jobs N] [--quiet]
+               [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N]
                                  reconstruct the proofs of a file from the assertions they use;
                                  --full: every node gets all its variants, the known proof's are
                                  expanded, and N (or all) others of each node on the way too
                                  (limits per theorem by default: 60 s, 2,000,000 nodes,
-                                 300,000 joined proofs); --jobs N: N theorems at once
+                                 300,000 joined proofs)
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
                                  forward from the premises, or both in turn. --meta: the binders
                                  with these numbers are metavariables, for which values are found
+                                 replay and search: [--jobs N] theorems at once (default: one per
+                                 processor), [--max-mem GB] memory limit (default 32; above 90%
+                                 running theorems give up, above it the process stops), [--quiet]
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
@@ -250,6 +253,23 @@ def strOption (args : List String) (name : String) : Option String :=
   | _ :: value :: _ => some value
   | _ => none
 
+/-- The number of processors (`nproc`); 1 if it cannot be found. -/
+def processors : IO Nat := do
+  try
+    let out ← IO.Process.output { cmd := "nproc" }
+    return (out.stdout.trimAscii.toString.toNat?).getD 1
+  catch _ => return 1
+
+/-- The options that `prove replay` and `prove search` share: how many theorems at once
+(`--jobs`, by default one per processor), progress lines (`--quiet` turns them off), and
+the memory the process may use (`--max-mem` in GB, by default 32; 0 for no limit). -/
+def jobOptions (args : List String) : IO (Nat × Bool × Nat) := do
+  let jobs := match strOption args "--jobs" with
+    | some n => n.toNat?.getD 1
+    | none => 0
+  let jobs ← if jobs == 0 then processors else pure jobs
+  return (max 1 jobs, !args.contains "--quiet", numOption args "--max-mem" 32 * 1000000000)
+
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/
 def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
@@ -265,12 +285,13 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
+  let (jobs, progress, memLimit) ← jobOptions args
   let opts : Prove.ReplayOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose",
       full := args.contains "--full",
       others := if strOption args "--others" == some "all" then none else some (numOption args "--others" 0),
-      jobs := max 1 (numOption args "--jobs" 1), progress := !args.contains "--quiet",
+      jobs, progress, memLimit,
       -- the full expansion can grow without bound: it has limits unless told otherwise
       limits := if args.contains "--full" then
           { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 60000,
@@ -319,6 +340,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
+  let (jobs, progress, memLimit) ← jobOptions args
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       every := max 1 (numOption args "--every" 1),
@@ -326,7 +348,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
                   maxFacts := numOption args "--max-facts" 512 },
       metas := numsOption args "--meta",
-      verbose := args.contains "--verbose" }
+      verbose := args.contains "--verbose", jobs, progress, memLimit }
   -- the marks must fit every theorem of the range
   for a in db.asserts do
     if a.id ≥ opts.first && a.id < opts.last && a.id % opts.every == 0 then

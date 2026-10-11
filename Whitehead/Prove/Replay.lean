@@ -32,6 +32,8 @@ structure ReplayOptions where
   jobs : Nat := 1
   /-- Say every ten seconds how far the replay has got. -/
   progress : Bool := false
+  /-- The memory the process may use, in bytes; 0 for no limit (`watchMemory`). -/
+  memLimit : Nat := 0
 
 structure ReplayStats where
   /-- Theorems with a proof in the range. -/
@@ -57,6 +59,7 @@ structure ReplayStats where
   otherProofs : Nat := 0
   limited : Nat := 0
   counters : Counters := {}
+  deriving Inhabited
 
 /-- For a replay that found no proof: does a step of the known proof unfold a def at a
 place that the tree has as a variable? The tree is walked along the known proof, as the
@@ -102,6 +105,67 @@ def add (a b : ReplayStats) : ReplayStats :=
     counters := a.counters.add b.counters }
 
 end ReplayStats
+
+/-- The resident memory of this process, in bytes (`/proc/self/statm`); 0 if it cannot be
+read. -/
+def residentBytes : IO Nat := do
+  try
+    let text ← IO.FS.readFile "/proc/self/statm"
+    match (text.splitOn " ")[1]? >>= String.toNat? with
+    | some pages => return pages * 4096
+    | none => return 0
+  catch _ => return 0
+
+/-- Watches the memory of the process until `stop` is set. Above nine tenths of `limit`
+bytes it sets `memoryHigh`, and the searches that are running give up as at a limit,
+which frees their memory; above `limit` it ends the process. -/
+partial def watchMemory (limit : Nat) (stop : IO.Ref Bool) (log : String → IO Unit) : IO Unit := do
+  if ← stop.get then return
+  let rss ← residentBytes
+  if rss > limit then
+    log s!"memory: {rss / 1000000} MB in use, over the limit of {limit / 1000000} MB; stopping"
+    IO.Process.exit 3
+  memoryHigh.set (rss * 10 > limit * 9)
+  IO.sleep 250
+  watchMemory limit stop log
+
+/-- Runs `f` on `0 .. count-1` with `jobs` workers, each on a thread of its own; a worker
+takes the next number when it has finished one. The results are in the order of the
+numbers, whatever the order of the work. With `progress`, a line every ten seconds; with
+`memLimit` (bytes, 0 for none), the memory is watched (`watchMemory`). -/
+def runJobs {β : Type} [Inhabited β] (jobs count : Nat) (f : Nat → IO β) (progress : Bool) (memLimit : Nat)
+    (log : String → IO Unit) : IO (Array β) := do
+  let next ← IO.mkRef 0
+  let done ← IO.mkRef 0
+  let stop ← IO.mkRef false
+  let watcher ← if memLimit > 0 then some <$> IO.asTask (watchMemory memLimit stop log) (prio := .dedicated)
+    else pure none
+  let worker : IO (Array (Nat × β)) := do
+    let mut out := #[]
+    while true do
+      let k ← next.modifyGet fun k => (k, k + 1)
+      if k ≥ count then break
+      out := out.push (k, ← f k)
+      done.modify (· + 1)
+    return out
+  let start ← IO.monoMsNow
+  let tasks ← (Array.range (max 1 jobs)).mapM fun _ => IO.asTask worker (prio := .dedicated)
+  if progress then
+    let mut last := start
+    while !(← tasks.allM fun t => (IO.hasFinished t : IO Bool)) do
+      IO.sleep 200
+      let now ← IO.monoMsNow
+      if now - last ≥ 10000 then
+        last := now
+        log s!"  ... {← done.get} of {count}, {(now - start) / 1000} s"
+  let mut results : Array β := Array.replicate count default
+  for t in tasks do
+    match ← IO.wait t with
+    | .ok r => for (k, b) in r do results := results.set! k b
+    | .error e => stop.set true; throw e
+  stop.set true
+  if let some w := watcher then discard <| IO.wait w
+  return results
 
 /-- Replays the proof of statement `i` of the file, a theorem. Returns what it adds to
 the statistics, the new proof body, and the lines for the log. -/
@@ -169,35 +233,11 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
   let todo := (Array.range f.stmts.size).filter fun i =>
     let s := f.stmts[i]!
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last
-  let next ← IO.mkRef 0
-  let done ← IO.mkRef 0
-  let worker : IO (Array (Nat × ReplayStats × Option ByteArray × Array String)) := do
-    let mut out := #[]
-    while true do
-      let k ← next.modifyGet fun k => (k, k + 1)
-      if k ≥ todo.size then break
-      let r ← replayOne db vc index opts todo[k]!
-      out := out.push (todo[k]!, r)
-      done.modify (· + 1)
-    return out
-  let start ← IO.monoMsNow
-  let tasks ← (Array.range (max 1 opts.jobs)).mapM fun _ => IO.asTask worker (prio := .dedicated)
-  if opts.progress then
-    let mut last := start
-    while !(← tasks.allM fun t => (IO.hasFinished t : IO Bool)) do
-      IO.sleep 200
-      let now ← IO.monoMsNow
-      if now - last ≥ 10000 then
-        last := now
-        log s!"  ... {← done.get} of {todo.size} theorems, {(now - start) / 1000} s"
-  let mut results := #[]
-  for t in tasks do
-    match ← IO.wait t with
-    | .ok r => results := results ++ r
-    | .error e => throw e
+  let results ← runJobs opts.jobs todo.size (fun k => do return (todo[k]!, ← replayOne db vc index opts todo[k]!))
+    opts.progress opts.memLimit log
   let mut stats : ReplayStats := {}
   let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
-  for (i, (st, body, lines)) in results.qsort (·.1 < ·.1) do
+  for (i, (st, body, lines)) in results do
     stats := stats.add st
     if let some b := body then bodies := bodies.set! i (some b)
     for l in lines do log l
@@ -220,6 +260,12 @@ structure SearchOptions where
   metas : Array Nat := #[]
   /-- Report every theorem. -/
   verbose : Bool := false
+  /-- How many theorems are searched at once, progress lines, the memory limit: as in
+  `ReplayOptions`. With several jobs the time limit of a theorem is wall-clock time
+  shared with the others. -/
+  jobs : Nat := 1
+  progress : Bool := false
+  memLimit : Nat := 0
 
 /-- What the search test reports for one theorem. -/
 structure SearchRow where
@@ -235,6 +281,7 @@ structure SearchRow where
   /-- Facts of the forward front, and joins of a fact with a subgoal or the goal. -/
   facts : Nat := 0
   joins : Nat := 0
+  deriving Inhabited
 
 /-- Searches for a proof of every theorem of `db.file` in the range, each from the
 assertions before it, with the strategy of `opts`. Returns a row per theorem and the new
@@ -245,14 +292,12 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
   let vc := Verify.Ctx.ofFile f
   let index := db.index
   let hypIndexes := if opts.strategy == "bfs" then {} else db.hypIndexes
-  let mut rows : Array SearchRow := #[]
-  let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
-  for i in [0:f.stmts.size] do
+  let todo := (Array.range f.stmts.size).filter fun i =>
     let s := f.stmts[i]!
-    let isThm := match s.kind with
-      | .thm _ => true
-      | _ => false
-    if !isThm || s.index < opts.first || s.index ≥ opts.last || s.index % opts.every != 0 then continue
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last &&
+      s.index % opts.every == 0
+  let one (i : Nat) : IO (SearchRow × Option ByteArray × Array String) := do
+    let s := f.stmts[i]!
     let known := match db.skeleton s with
       | .ok (some skel) => skel.size
       | _ => 0
@@ -268,26 +313,34 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
       else searchWith accept env breadthFirst opts.limits
     let ms := (← IO.monoMsNow) - start
     let steps := (result.proof.map (·.size)).getD 0
-    if task.metas.isEmpty then
-      if let some body := result.body then bodies := bodies.set! i (some body)
+    let body := if task.metas.isEmpty then result.body else none
     let row : SearchRow :=
       { thm := s.index, name := f.thmName s.index, ending := result.ending, steps, knownSteps := known, ms,
         props := result.env.props.size, rejected := result.rejected,
         facts := result.env.counters.facts, joins := result.env.counters.joins }
-    rows := rows.push row
+    let mut lines := #[]
     if opts.verbose then
       let what := match result.ending with
         | .proved => s!"proved in {steps} steps (the file has {known})"
         | .exhausted => "nothing left to expand"
         | .limit => "limit reached"
-      log s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
+      lines := lines.push s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
         {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}\
         {if opts.strategy == "bfs" then "" else s!", {row.facts} facts, {row.joins} joins"}"
       if result.ending == .proved && !task.metas.isEmpty then
         let names := f.thmVarNames s.index
         let found := (Array.range task.metas.size).map fun j =>
           s!"{Db.varName (Node.varId task.metas[j]!)} := {db.showExp result.values[j]! names}"
-        log s!"  found {", ".intercalate found.toList}; proved {(result.answer.map (db.showExp · names)).getD ""}"
+        lines := lines.push s!"  found {", ".intercalate found.toList}; proved {(result.answer.map (db.showExp · names)).getD ""}"
+    return (row, body, lines)
+  let results ← runJobs opts.jobs todo.size (fun k => one todo[k]!) opts.progress opts.memLimit log
+  let mut rows : Array SearchRow := #[]
+  let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
+  for k in [0:todo.size] do
+    let (row, body, lines) := results[k]!
+    rows := rows.push row
+    if let some b := body then bodies := bodies.set! todo[k]! (some b)
+    for l in lines do log l
   return (rows, bodies)
 
 end Whitehead.Prove

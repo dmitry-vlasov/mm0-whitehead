@@ -105,8 +105,13 @@ def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
 def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
   let env ← get
   -- the candidates that bind more come first; among equals, the order of the index
-  let unified := (candidates env h only).toList.mergeSort (fun a b => a.sub.size ≥ b.sub.size)
-  for unif in unified do
+  let found := candidates env h only
+  -- a stable bucket sort by the number of bindings, the most first
+  let most := found.foldl (init := 0) fun m c => max m c.sub.size
+  let mut buckets : Array (Array Candidate) := Array.replicate (most + 1) #[]
+  for c in found do
+    buckets := buckets.modify (most - c.sub.size) (·.push c)
+  for unif in buckets.flatten do
     -- a candidate keeps the raw unifier; it is split when it is expanded (`splitProp`)
     let prop : PropNode := { step := unif.step, rule := unif.rule, parent := h, unif := some unif.sub }
     modify fun env =>
