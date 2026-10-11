@@ -855,6 +855,33 @@ all substitutions by unification.
 
 `out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
 
+### The replay over the full expansion
+
+    mm0-whitehead prove replay setmm.mmb --full [--others N|all] --max-tuples T
+
+The test of the engine in its hard regime (after Russell's oracle tactic,
+`tactics/oracle.flow`). Every expression node is expanded without restriction, so it
+gets all its variants — every assertion that the index finds, every unfolding, every
+premise it unifies with — and the strategy (`oracleAll`) clicks those of the known
+proof; with `--others` it expands that many other variants of each node on the way, so
+that their proofs meet the known one's in the joins of `ruAddProof`. Every proof that
+reaches the root is checked by the verifier; only the known proof is accepted. A tuple
+budget (`--max-tuples`) ends a theorem as a limit when the joins would go past it.
+
+First 6,000 statements of set.mm (2026-10-11), no other variants, 300,000 tuples per
+theorem: 5,883 of 5,899 known proofs found, no root proof rejected by the verifier,
+seven other proofs reached the root; 16 theorems stopped at the budget, 85 s, 1.5 GB.
+22 million assertion nodes were made and 33,280 expanded; 3.95 million tuples of proofs
+were tried, of which 3.34 million did not unify.
+
+The 16 are the explosion of variants that keeping all of them brings. In `syl133anc`
+(2 steps, 8 hypotheses) every subgoal of the applied assertion is a variable or has
+one, unifies with every hypothesis of the theorem, and each such match is a proof; the
+products of them are 840,000 tuples. In `propeqop` (200 steps, 6 hypotheses
+`X e. _V`) the variables that a step leaves open below a node give proofs that differ
+only there, and their number multiplies at each step: after 14 expansions one node has
+about a million proofs. Without a budget it took more than 27 GB.
+
 ### The search test
 
     scripts/search-baseline.sh          # mm0-whitehead prove search, per section

@@ -429,7 +429,9 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
     let (decision, st') := strategy.step env st
     st := st'
     match decision with
-    | .done => return { ending := .exhausted, rejected, rejection, rejectedProof, others, env }
+    | .done =>
+      -- a join that the budget stopped leaves the tree without some of its proofs
+      return { ending := if env.overBudget then .limit else .exhausted, rejected, rejection, rejectedProof, others, env }
     | .forward =>
       let (env', more) ← forwardWave env limits start
       env := env'
@@ -468,7 +470,7 @@ partial def searchWith {σ : Type} (accept : Env → ProofTree → Array Cond �
           if let some (tree, body, answer, values) := found then
             return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                      rejected, rejection, rejectedProof, others, env }
-  return { ending := .exhausted, rejected, rejection, rejectedProof, others, env }
+  return { ending := if env.overBudget then .limit else .exhausted, rejected, rejection, rejectedProof, others, env }
 
 /-- `searchWith` for a theorem of the file: a proof counts if the verifier accepts its
 proof body. -/
