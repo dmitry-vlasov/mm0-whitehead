@@ -86,8 +86,9 @@ structure Env where
   /-- The proofs that reached the root and have not been taken by the driver yet. -/
   rootProofs : Array Proof := #[]
   counters : Counters := {}
-  /-- The largest number of tuples of proofs that `addProof` may join in the whole
-  search. When a join would go past it, nothing of it is done and `overBudget` is set:
+  /-- The largest number of tuples of proofs that unify — proofs to be made — that
+  `addProof` may join in the whole search. When a join would go past it, nothing of it
+  is kept and `overBudget` is set:
   the search stops there and says so (`Ending.limit`). A resource limit, not a choice of
   variants: no variant is dropped while the search goes on. -/
   tupleBudget : Nat := 0xFFFFFFFFFFFF

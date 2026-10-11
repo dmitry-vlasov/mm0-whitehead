@@ -189,9 +189,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   if sets.any (·.isEmpty) then return
   let hypExpr := env.hyps[prop.parent]!.expr
   let size := sets.foldl (init := 1) (· * ·.size)
-  if env.overBudget || env.counters.tuples + size > env.tupleBudget then
-    set { env with overBudget := true }
-    return
+  if env.overBudget then return
   let mut counters := { env.counters with tuples := env.counters.tuples + size }
   -- the tuples whose substitutions unify, each with the unifier: tuple by tuple for a
   -- small product, by `unifySubsProd` from 64 tuples on, as in Russell. A product with
@@ -207,6 +205,10 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     unified := (unifySubsProd (sets.map (·.map (·.sub)))).map fun (s, picks) =>
       (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
+  -- the budget is on the tuples that unify: each is a proof to be made and kept
+  if counters.tuples - counters.notUnified > env.tupleBudget then
+    set { env with overBudget := true }
+    return
   if let some made := made then unified := unified.filter fun (_, row) => !made row
   let mut proofs := prop.proofs
   let mut keys := prop.keys

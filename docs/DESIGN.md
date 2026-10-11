@@ -868,19 +868,22 @@ that their proofs meet the known one's in the joins of `ruAddProof`. Every proof
 reaches the root is checked by the verifier; only the known proof is accepted. A tuple
 budget (`--max-tuples`) ends a theorem as a limit when the joins would go past it.
 
-First 6,000 statements of set.mm (2026-10-11), no other variants, 300,000 tuples per
-theorem: 5,883 of 5,899 known proofs found, no root proof rejected by the verifier,
-seven other proofs reached the root; 16 theorems stopped at the budget, 85 s, 1.5 GB.
-22 million assertion nodes were made and 33,280 expanded; 3.95 million tuples of proofs
-were tried, of which 3.34 million did not unify.
+A proof of an assertion node is kept once per substitution of the parent's variables
+with its open conditions (`proofKey`, decided 2026-10-11): two such proofs can replace
+each other in every proof above. So the proof found need not be the known one, and the
+replay accepts any proof the verifier accepts, and reports how many are not the known
+one.
 
-The 16 are the explosion of variants that keeping all of them brings. In `syl133anc`
-(2 steps, 8 hypotheses) every subgoal of the applied assertion is a variable or has
-one, unifies with every hypothesis of the theorem, and each such match is a proof; the
-products of them are 840,000 tuples. In `propeqop` (200 steps, 6 hypotheses
-`X e. _V`) the variables that a step leaves open below a node give proofs that differ
-only there, and their number multiplies at each step: after 14 expansions one node has
-about a million proofs. Without a budget it took more than 27 GB.
+First 6,000 statements of set.mm (2026-10-11), no other variants, budget 300,000
+unified tuples per theorem: a proof found for 5,896 of 5,899, 7 of them not the known
+one; no proof at the root rejected by the verifier; 3 theorems stopped at the budget
+(`propeqop`, its neighbour, and one of 21 steps); 183 s, 1.8 GB. 22 million assertion
+nodes were made and 33,336 expanded; the products of proofs had 1.82 billion tuples, of
+which all but about 950,000 failed to unify (`ruUnifySubsProd` finds those without
+trying each). Merging by key removed 5 proofs only: what multiplies is not duplicates
+but proofs with different visible substitutions — in `propeqop`, each of the 6
+hypotheses `X e. _V` matches each subgoal `?A e. _V`, and the choices multiply along
+the proof. Without a budget that theorem took more than 27 GB.
 
 ### The search test
 
