@@ -162,16 +162,30 @@ def semiCompose (s1 s2 : Subst) : Option Subst :=
   s1.map.fold (init := some {}) fun acc _ e1 =>
     acc.bind fun s => s.addVars e1.var (s2.applyVars e1)
 
-/-- `ruCompose`: first `s1`, then `s2`; `none` if a binding contradicts another. -/
-def compose (s1 s2 : Subst) : Option Subst :=
-  s2.map.fold (init := semiCompose s1 s2) fun acc v2 e2 =>
-    acc.bind fun s => if s1.map.contains v2 then some s else s.addVars e2.var e2
-
 /-- `ruUnsafeCompose`: as `compose`, without the checks: every image of `s1` followed by
 `s2`, and the bindings of `s2` for the variables that `s1` does not bind. -/
 def unsafeCompose (s1 s2 : Subst) : Subst :=
   let m : Std.HashMap Nat SubExp := s1.map.fold (init := {}) fun m v e => m.insert v (s2.applyVars e)
   { map := s2.map.fold (init := m) fun m v e => if m.contains v then m else m.insert v e }
+
+/-- `ruComposeSlow`: binding by binding, each added with `addVars`, which scans the
+substitution; it decides the cases that the fast path of `compose` leaves to it. -/
+def composeSlow (s1 s2 : Subst) : Option Subst :=
+  s2.map.fold (init := semiCompose s1 s2) fun acc v2 e2 =>
+    acc.bind fun s => if s1.map.contains v2 then some s else s.addVars e2.var e2
+
+/-- `ruCompose`: first `s1`, then `s2`; `none` if a binding contradicts another.
+
+As in Russell since `7657286c`: the images of `s1` with `s2` applied, and the bindings
+of `s2` for the variables that `s1` does not bind, in one pass; identity bindings are
+dropped. The result is taken if it is idempotent — no image has a variable that it binds
+— which it is for idempotent inputs; otherwise `composeSlow` decides (chains, cycles,
+renamings that cancel). -/
+def compose (s1 s2 : Subst) : Option Subst :=
+  let u := unsafeCompose s1 s2
+  let m := u.map.fold (init := u.map) fun m v x => if x.exp.isTheVar x.var then m.erase v else m
+  if m.fold (init := true) fun ok _ x => ok && !x.vars.any m.contains then some { map := m }
+  else composeSlow s1 s2
 
 /-- `ruMergeSubst`: the union of two substitutions, if they agree where both bind. -/
 def merge (s1 s2 : Subst) : Option Subst :=
