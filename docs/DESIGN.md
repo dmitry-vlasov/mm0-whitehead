@@ -896,6 +896,15 @@ but proofs with different visible substitutions — in `propeqop`, each of the 6
 hypotheses `X e. _V` matches each subgoal `?A e. _V`, and the choices multiply along
 the proof. Without a budget that theorem took more than 27 GB.
 
+The whole of set.mm (2026-10-12), no other variants, the default limits (60 s, 2,000,000
+assertion nodes, 300,000 joined proofs, 20,000,000 proofs looked at in joins), one job
+per processor (24): a proof found for 46,254 of 47,611 theorems, 282 of them not the
+known one; no proof at the root rejected by the verifier; 1,357 stopped at a limit;
+1 h 57 min, 43.5 hours of processor time, at most 25 GB. 8.2 billion assertion nodes were
+made and 2 million expanded. The theorems that stop are those with long proofs: every
+subgoal that is a bare variable, as the minor premise of `ax_mp`, unifies with nearly
+every conclusion, and a proof of a thousand steps has hundreds of such subgoals.
+
 ### Concurrency, memory, speed (2026-10-11)
 
 `prove replay` and `prove search` run one theorem per processor by default (`runJobs`

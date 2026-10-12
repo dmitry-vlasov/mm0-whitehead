@@ -314,7 +314,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 
 ## Next steps
 
-0. The full replay of set.mm beyond the first 6,000 theorems, and with other variants.
+0. The full replay of the whole of set.mm (2026-10-12): 46,254 of 47,611 in 1 h 57 min,
+   1,357 at a limit, none rejected (`DESIGN.md`). With other variants, not yet run.
    Where the time goes now (callgrind): unification against the index of conclusions,
    most of it building substitutions (hash maps) for millions of candidates.
 1. The answers to the questions above.
