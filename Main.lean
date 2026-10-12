@@ -10,10 +10,11 @@ def usage : String :=
   dump <file.mmb>                print a decoded proof file: statements and proofs
   verify <file.mmb>              check the proofs of a proof file, without a specification
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
-  prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
+  prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--verbose]
                [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N]
                [--total S [--factor F]]
-                                 reconstruct the proofs of a file from the assertions they use;
+                                 reconstruct the proofs of a file from the assertions they use
+                                 (--every K: every K-th theorem of the range, a sample);
                                  --full: every node gets all its variants, the known proof's are
                                  expanded, and N (or all) others of each node on the way too
                                  (limits per theorem by default: 60 s, 2,000,000 nodes,
@@ -23,9 +24,12 @@ def usage : String :=
                                  1,000,000 by default), each next with F (4) times those, on the
                                  theorems stopped at a limit
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
+               [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
+               [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
-                                 forward from the premises, or both in turn. --meta: the binders
+                                 forward from the premises, or both in turn. --max-facts: the
+                                 size of the forward front (512); --join-cap: how many facts a
+                                 new subgoal is joined with when it is made (4). --meta: the binders
                                  with these numbers are metavariables, for which values are found
                                  replay and search: [--jobs N] theorems at once (default: one per
                                  processor), [--max-mem GB] memory limit (default 32; above 80%
@@ -296,6 +300,7 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let total := numOption args "--total" 0
   let opts : Prove.ReplayOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
+      every := max 1 (numOption args "--every" 1),
       maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose",
       full := args.contains "--full",
       others := if strOption args "--others" == some "all" then none else some (numOption args "--others" 0),
@@ -363,7 +368,9 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       every := max 1 (numOption args "--every" 1),
       strategy := (strOption args "--strategy").getD "bfs",
       limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
-                  maxFacts := numOption args "--max-facts" 512 },
+                  maxFacts := numOption args "--max-facts" 512,
+                  joinCap := if strOption args "--join-cap" == some "all" then 0xFFFFFFFFFFFF
+                    else numOption args "--join-cap" 4 },
       metas := numsOption args "--meta",
       verbose := args.contains "--verbose", jobs, progress, memLimit }
   -- the marks must fit every theorem of the range

@@ -141,10 +141,6 @@ def splitProp (p : Nat) : ProverM Unit := do
                    { prop with sub := sAll.filter (fun v e => !isOfAssertion v e), outer := sAll.filter isOfAssertion,
                                unif := none } }
 
-/-- How many facts of the forward front a new subgoal is joined with (`fwd_cap` in
-`ruExpandProp`). The facts that come later find the subgoal themselves. -/
-def joinCap : Nat := 4
-
 /-- `ruExpandProp`. `only` restricts, for each premise of the assertion, what its
 expression node may use. -/
 def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := do
@@ -184,14 +180,14 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
         modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof } }
         addProof p proof
       -- the join with the forward front: the subgoal is recorded for the facts to come
-      -- (`backwardFront`), and the facts that unify with it prove it. As in Russell, the
-      -- four facts with the smallest proofs are taken.
+      -- (`backwardFront`), and the facts that unify with it prove it. The `joinCap`
+      -- facts with the smallest proofs are taken (Russell's `fwd_cap`: four).
       if (← get).forward.isSome && restriction.isNone then
         modify fun env => { env with backwardFront := env.backwardFront.insert ex h }
         let env ← get
         let found := ((env.forward.map (·.index.unify ex)).getD #[]).map (·.data)
         let size (f : Nat) : Nat := (env.hyps[f]!.factProof.map (·.size)).getD 0
-        let nearest := (found.qsort fun a b => size a < size b || size a == size b && a < b).extract 0 joinCap
+        let nearest := (found.qsort fun a b => size a < size b || size a == size b && a < b).extract 0 env.joinCap
         for f in nearest do
           if let some (proof, _) ← graft f h ex then
             modify fun env =>

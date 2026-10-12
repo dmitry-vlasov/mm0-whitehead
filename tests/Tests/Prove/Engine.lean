@@ -218,6 +218,12 @@ def engineTests : TestM Unit := do
       (con1Forward.env.forward.map (·.count)) == some limits.maxFacts)
   let mpcomBoth ← search vc (forwardEnv "mpcom") bidirectional limits
   checkEq "both directions: mpcom" ((mpcomBoth.proof.map (proofText db)).getD "none") "(com12 id)"
+  -- `fwd_cap` is a limit on the growth of the tree, not a choice of variants: raised,
+  -- the search still proves the goal, with at least as many joins
+  let mpcomAll ← search vc (forwardEnv "mpcom") bidirectional { limits with joinCap := 0xFFFFFFFFFFFF }
+  check "both directions: with the join cap raised, mpcom is proved with at least as many joins"
+    (mpcomAll.ending == .proved && mpcomAll.env.counters.joins ≥ mpcomBoth.env.counters.joins)
+    s!"{mpcomAll.env.counters.joins} joins, {mpcomBoth.env.counters.joins} with the cap of 4"
   let (bothRows, bothBodies) ← searchAll db { strategy := "both", limits := { maxProps := 3000, maxMs := 20000 } }
     fun _ => pure ()
   let bothProved := (bothRows.filter (·.ending == .proved)).size

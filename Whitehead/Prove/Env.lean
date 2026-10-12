@@ -107,6 +107,9 @@ structure Env where
   tupleBudget : Nat := 0xFFFFFFFFFFFF
   /-- The largest work of the joins (`Counters.work`); past it, as past `tupleBudget`. -/
   workBudget : Nat := 0xFFFFFFFFFFFF
+  /-- How many facts of the forward front a new subgoal is joined with when it is made
+  (`Limits.joinCap`, `fwd_cap`). -/
+  joinCap : Nat := 4
   /-- When the search must stop, by the monotonic clock in milliseconds. -/
   deadline : Nat := 0xFFFFFFFFFFFFFFFF
   overBudget : Bool := false

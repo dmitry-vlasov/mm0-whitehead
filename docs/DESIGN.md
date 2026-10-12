@@ -495,6 +495,41 @@ reads it. The prover reads the `.mmb` file alone; the front end stays as it is.
   numbered below 6,000 (5,899 proofs) and `peano.mmb` are replayed and the resulting
   files are verified.
 
+### Two layers
+
+`lake test` is the fast layer: fixtures, hand-written cases and samples of the corpus,
+in seconds (a few minutes with the corpus built). `lake exe thorough`
+(`tests/Tests/Thorough/Main.lean`) is the thorough layer, for the prover, and takes the
+time it is given (`--minutes`, 30 by default) on every proof file there is: the corpus,
+with the specification beside each file, and with `MM0_REPO` the proof files of the MM0
+repository. A file that the verifier rejects (`hello_assembler`, with its `sorry`) is
+skipped and said so.
+
+1. The replay test on every file in full. Every proof without a shared conversion must
+   be reconstructed, step for step.
+2. The search test on samples: every `--every`-th theorem (10) of the first two parts
+   of set.mm, backward and in both directions, and of `peano`, 1 s each, one search
+   per physical core as `scripts/search-baseline.sh` runs them. No proof found may be
+   rejected by the verifier; the fraction proved has a floor well under the baseline
+   (30%, 35% and 20%), which only a gross regression would go under, since what a
+   second buys depends on the machine.
+3. The replay over the full expansion (`prove replay --full --total`), in rounds within
+   a share of the time: the files with fewer than 6,000 theorems in full, each within
+   an equal share of half the time left (most end in seconds and give the rest back),
+   then the larger ones with the stride, smallest first, each with the share of what
+   is left that its sample is of the samples left, so that what one gives back goes to
+   the larger ones after it — set.mm, the largest, gets the most and runs last. No
+   tuple of the known proof may fail to unify and no proof may be rejected; at most 5%
+   of the theorems of a file may stop at a limit (the whole of set.mm has 2.9% after
+   two hours; every tenth theorem 3.7% after 13 minutes and 2.1% after 25; the
+   example files stay under 1%), and each that does is named with its limit.
+
+Every file with new bodies is written to `.tools/thorough` and checked by our verifier,
+matched against its specification where there is one, and accepted by `mm0-rs` when it
+is built (`.tools/bin`). The stride, the time, the jobs and the memory limit are
+options; the three thresholds are constants of the driver, with the measured values
+beside them.
+
 ### External tools and the acceptance corpus
 
 Neither is under version control; both are rebuilt by scripts.
@@ -1300,17 +1335,24 @@ Answered on 2026-10-06:
 Answered on 2026-10-11: the unfoldings inside a variable are to be reached (was question
 3). Built: the conversion rules above.
 
-Open:
+Answered on 2026-10-12:
 
-6. **Three places in the source that look unintended**: `ruCheckDisjs` in `ruAddProof`
-   (change 3), the variable set of `ruMakeFresherSubst` (change 4), the order of the
-   arguments of `ruSuperRule` in `unify_var` (change 2). For the second, the source
-   itself has a note: `ruApplyForward` builds its fresh substitution with `ruAdd2Subst`
-   "NOT ruMakeFresherSubst: the latter stores each entry's var-set as the ORIGINAL var
-   id, so ruApplySubstVars ... won't chase the fresh placeholder into its binding".
-9. **Limits of the forward front that are not dedup**: at most 512 facts
-   (`forward-search-size`), and a new subgoal is joined with the four facts that have
-   the smallest proofs (`fwd_cap` in `ruExpandProp`; facts made later find the subgoal
-   themselves). Both are in the source and are kept. They cut what the forward
-   direction adds; the backward tree, which is what the paper's theorems are about, does
-   not depend on them. Say if the second should go too.
+- **Three places in the source that look unintended** (was question 6): `ruCheckDisjs`
+  in `ruAddProof` (change 3), the variable set of `ruMakeFresherSubst` (change 4), the
+  order of the arguments of `ruSuperRule` in `unify_var` (change 2). For the second,
+  the source itself has a note: `ruApplyForward` builds its fresh substitution with
+  `ruAdd2Subst` "NOT ruMakeFresherSubst: the latter stores each entry's var-set as the
+  ORIGINAL var id, so ruApplySubstVars ... won't chase the fresh placeholder into its
+  binding". Decided: the port keeps what it does at each of the three, which is what
+  MM0 needs. Nothing changed.
+- **Limits of the forward front that are not dedup** (was question 9): at most 512
+  facts (`forward-search-size`), and a new subgoal is joined with the four facts that
+  have the smallest proofs (`fwd_cap` in `ruExpandProp`; facts made later find the
+  subgoal themselves). Decided: completeness is needed, so no variant is thrown away;
+  a bound on the growth of the tree is acceptable when it is configurable, as the
+  bounds of the backward tree are (`maxProps`, `maxMs`), because it can always be
+  raised — with the limit raised far enough the algorithm is the complete one. So
+  both are limits of that kind: the size of the front was one already
+  (`Limits.maxFacts`, `--max-facts`); the join cap was a constant of `Expand.lean` and
+  is `Limits.joinCap`, `--join-cap N|all`, set into `Env.joinCap` when a search starts.
+  The defaults are Russell's, 512 and 4. Nothing is open.

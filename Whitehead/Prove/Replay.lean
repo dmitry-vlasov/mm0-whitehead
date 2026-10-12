@@ -15,6 +15,8 @@ structure ReplayOptions where
   /-- The theorems to replay: those with numbers in `[first, last)`. -/
   first : Nat := 0
   last : Nat := 1000000000
+  /-- Only every `every`-th theorem of the range: a sample. -/
+  every : Nat := 1
   /-- Proofs with more steps than this, counted as a tree, are left out. -/
   maxSteps : Nat := 1000000000
   /-- Report every theorem that is not reconstructed. -/
@@ -262,7 +264,8 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
   let index := db.index
   let todo := (Array.range f.stmts.size).filter fun i =>
     let s := f.stmts[i]!
-    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last &&
+      s.index % opts.every == 0
   let name (i : Nat) := s!"theorem {f.stmts[i]!.index} {f.thmName f.stmts[i]!.index}"
   let start ← IO.monoMsNow
   let deadline := if opts.total == 0 then none else some (start + opts.total)

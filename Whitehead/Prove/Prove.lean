@@ -303,6 +303,11 @@ structure Limits where
   maxMs : Nat := 1000000000
   /-- The largest number of facts in the forward front (`forward-search-size`). -/
   maxFacts : Nat := 512
+  /-- How many facts of the front a new subgoal is joined with when it is made, those
+  with the smallest proofs first (`fwd_cap` in `ruExpandProp`); the facts made later
+  find the subgoal themselves. A bound on the growth of the tree, like `maxProps`: it
+  can be raised, and the search is complete for the limit raised far enough. -/
+  joinCap : Nat := 4
   /-- The largest number of tuples of proofs joined (`Env.tupleBudget`), and the largest
   work of the joins (`Env.workBudget`). -/
   maxTuples : Nat := 0xFFFFFFFFFFFF
@@ -424,6 +429,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
       return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
                values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
   let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork,
+                             joinCap := limits.joinCap,
                              deadline := match limits.deadline with
                                | some d => min d (start + limits.maxMs)
                                | none => start + limits.maxMs }

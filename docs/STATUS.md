@@ -7,8 +7,8 @@ Last updated: 2026-10-12.
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
 **Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
 **Phase 3 — prover**: the engine is ported, in both directions, with unfolding of
-definitions as a step; both acceptance tests are run (report below). Open: the
-questions of `DESIGN.md`.
+definitions as a step; both acceptance tests are run (report below). The questions of
+`DESIGN.md` are all answered; what is left is under "Next steps".
 
 ### Phase 1 acceptance
 
@@ -160,8 +160,9 @@ given by the def and the occurrence in the goal, and inside a variable of the tr
 MM0's conversion rules taken as assertions (`DESIGN.md`, "Unfolding as an inference
 step"). On the files with defs compiled from the examples of the MM0 repository, replay
 reconstructs every proof that does not share a conversion: 2,650 of 2,700 of `peano`,
-4,800 of 4,895 of `mm0`, 7,518 of 7,671 of `x86`, 79 of 99 of `hol`, 26 of 26 of `set`;
-every output is accepted by our verifier and `mm0-rs`. Searched from scratch at 1 s per
+3,751 of 3,810 of `peano_hex`, 4,800 of 4,895 of `mm0`, 7,518 of 7,671 of `x86`, 9,909
+of 10,124 of `compiler`, 9,919 of 10,134 of `hello_mmc`, 79 of 99 of `hol`, 26 of 26 of
+`set`; every output is accepted by our verifier and `mm0-rs`. Searched from scratch at 1 s per
 theorem, a sample of every tenth theorem of `peano` has 97 of 270 proved; on the fixture
 with definitions, 24 of 26 theorems are proved.
 
@@ -193,6 +194,21 @@ was a fact once, forward alone proved 38 of the 281, and both in turn 156 or 157
 
 `CLAUDE.md` states this order of authority; `MMB-NOTES.md` section 9 applies it to each
 point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` grammar.
+
+## Decisions (2026-10-12)
+
+1. The three places of the Russell source that look unintended (`ruCheckDisjs` in
+   `ruAddProof`, the variable set of `ruMakeFresherSubst`, the argument order of
+   `ruSuperRule` in `unify_var`; `DESIGN.md`, changes 2–4): the port keeps what it does
+   at each, which is what MM0 needs.
+2. The limits of the forward front: completeness is needed, so no variant is thrown
+   away; a bound on the growth of the tree is acceptable when it is configurable, as
+   the backward tree's are, because it can always be raised. The size of the front was
+   configurable (`--max-facts`, 512); the number of facts a new subgoal is joined with
+   (`fwd_cap`, 4) was a constant and is `--join-cap N|all`. Built.
+3. The tests are in two layers: `lake test`, fast, and `lake exe thorough`, which runs
+   the prover over every proof file within a time of about 30 minutes, with a stride
+   (every 10th theorem) where a full run would be too long. Built (below).
 
 ## Decisions (2026-10-05)
 
@@ -263,6 +279,27 @@ other corpus groups and the pairs are reduced to what the repository holds, and 
 prover's corpus group is skipped; without `.tools/bin` the verdicts of `mm0-rs` and
 mm0-c are not compared. Each is reported.
 
+That is the fast layer. `MM0_REPO=/path/to/mm0 lake exe thorough` is the thorough one
+(`DESIGN.md`, "Two layers"): the prover over every proof file there is, within 30
+minutes, every 10th theorem where a sample is taken, one theorem per processor (24)
+and one search per physical core (12). Run on 2026-10-12 — 153 checks, 0 failures,
+1 skip (`hello_assembler`, for its `sorry`), in 29 minutes:
+
+- Replay of every proof of 15 files in full: the 9 of the corpus and the 6 that the
+  MM0 repository ships. Every proof without a shared conversion is reconstructed, step
+  for step; set.mm's 47,611 in 12 s. Each file with the new bodies is accepted by our
+  verifier, matches its specification where there is one, and is accepted by `mm0-rs`.
+- Search samples, 1 s per theorem: of propositional and predicate calculus of set.mm,
+  backward 138 of 281 and in both directions 167 of 281; of `peano`, 90 of 270. No
+  proof found was rejected, and the files are checked as above.
+- Replay over the full expansion, in rounds: the 11 files with fewer than 6,000
+  theorems in full — none stopped at a limit but 12 of the 4,895 of `mm0` — and
+  `x86`, `compiler`, `hello_mmc` and set.mm every 10th theorem: 4 of 765, 4 of 1,011,
+  4 of 1,012, and 100 of 4,778 of set.mm in the 25 minutes it had (5 rounds, up to
+  256 s per theorem), 29 of set.mm's proofs found not the known one. No tuple of a
+  known proof failed to unify, and no proof was rejected. The allowance is 5%: the
+  whole of set.mm, with two hours, has 2.9% at a limit.
+
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
 with every kind of notation gives the same trees through `mm0-rs` as through our
@@ -316,12 +353,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. **Phase 3** (`DESIGN.md`, "The prover", "Questions"). Answered on 2026-10-01: forward
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
-   built (decision 2 as refined on 2026-10-11). Still open:
-   6. three places in the Russell source that look unintended (for the author to
-      investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
-      `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
-   9. the two limits of the forward front that are not dedup — 512 facts, and four
-      facts joined with a new subgoal (`fwd_cap`) — are kept as in the source.
+   built (decision 2 as refined on 2026-10-11). Answered on 2026-10-12: the three
+   places of the source stay as the port has them, and the forward limits are
+   configurable. No question is open.
 
 ## Next steps
 
@@ -331,14 +365,13 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    6,000 with two other variants a few theorems take most of the time and stop at the
    tuple limit — the proofs of the alternatives multiply through the joins
    (`DESIGN.md`, "Concurrency, memory, speed").
-1. The answers to the questions above.
-2. Shared conversions (`ConvCut`, `ConvSave`) in the replay reader: 20 of the 99 proofs
+1. Shared conversions (`ConvCut`, `ConvSave`) in the replay reader: 20 of the 99 proofs
    of `hol` use them.
-3. For tasks with metavariables: a way to write the marking, and a check of the proof
+2. For tasks with metavariables: a way to write the marking, and a check of the proof
    found (it proves an instance of the theorem, which no file states).
-4. The cost of joins in a search in both directions (see the forward report above):
+3. The cost of joins in a search in both directions (see the forward report above):
    which joins a strategy admits is the lever that Russell's tactic layer has. The
    clock and the memory are now looked at before each forward application and between
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
-5. Phase 4 is designed only after the search baseline is accepted.
+4. Phase 4 is designed only after the search baseline is accepted.

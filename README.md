@@ -8,8 +8,11 @@ state is in [docs/STATUS.md](docs/STATUS.md).
 ## Build and test
 
     lake build                           # builds .lake/build/bin/mm0-whitehead
-    lake test                            # the self-contained tests
-    MM0_REPO=/path/to/mm0 lake test      # also runs over the .mm0 files of the MM0 repository
+    lake test                            # the fast layer: the self-contained tests, in seconds
+    MM0_REPO=/path/to/mm0 lake test      # also runs over the files of the MM0 repository
+    MM0_REPO=/path/to/mm0 lake exe thorough [--minutes 30] [--every 10]
+                                         # the thorough layer: the prover over every proof file
+                                         # there is, within the time (needs the corpus, below)
 
 The Lean toolchain is pinned in `lean-toolchain`. There are no dependencies beyond core
 Lean.
@@ -27,6 +30,7 @@ Lean.
     mm0-whitehead prove replay file.mmb --full --total 7200   # over all variants, in rounds within 2 hours
     mm0-whitehead prove search file.mmb --ms 1000    # prove every theorem from scratch
                                                      #   --strategy bfs (backward), forward, or both
+                                                     #   --max-facts N, --join-cap N|all: the forward limits
     mm0-whitehead prove db file.mmb                  # what the prover reads from a proof file
 
 `verify` exits with 0 if the file is accepted; otherwise it prints the first error with
@@ -62,9 +66,13 @@ machine with 12 cores (24 threads) and 32 GB given to the process, 2026-10-12:
 
 Every proof found is checked by the verifier and none was rejected; the replayed file
 is also accepted by `mm0-rs`. The example files with definitions replay likewise:
-`set` 26 of 26, `hol` 79 of 99, `peano` 2,650 of 2,700, `mm0` 4,800 of 4,895, `x86`
-7,518 of 7,671 — every proof except those that share a conversion (`ConvCut`), which
-the replay does not read yet. A search with a time limit depends on the machine and
+`set` 26 of 26, `hol` 79 of 99, `peano` 2,650 of 2,700, `peano_hex` 3,751 of 3,810,
+`mm0` 4,800 of 4,895, `x86` 7,518 of 7,671, `compiler` 9,909 of 10,124, `hello_mmc`
+9,919 of 10,134 — every proof except those that share a conversion (`ConvCut`), which
+the replay does not read yet. `lake exe thorough` runs all of this, and the replay over
+the full expansion of every file, within 30 minutes (every 10th theorem of the large
+files).
+ A search with a time limit depends on the machine and
 on how many searches share it: with 24 at once on the 12 cores, propositional calculus
 gives 682 and predicate calculus 347. See [docs/STATUS.md](docs/STATUS.md) and
 [docs/DESIGN.md](docs/DESIGN.md), "The replay test", "The search test".
