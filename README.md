@@ -91,3 +91,9 @@ With both in place, the verifier can be compared with `mm0-rs` on mutated proof 
   the formal semantics, `mm0-rs` and mm0-c differ
 - [docs/DESIGN.md](docs/DESIGN.md) — how the code is built and why
 - [docs/STATUS.md](docs/STATUS.md) — what passes, what is open
+
+## License
+
+Apache License 2.0 (see [LICENSE](LICENSE)). The fixture
+`tests/fixtures/prove/defs.mm1` is a copy of `examples/set.mm1` of the MM0 repository,
+which is CC0.
