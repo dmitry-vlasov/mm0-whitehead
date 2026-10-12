@@ -925,11 +925,32 @@ What made the full replay faster, measured on theorems 1380–6000 of set.mm (on
 | Russell's fast `ruCompose` (`7657286c`) | 59 s | 70 s |
 | image variables in an array, lazy instances, a bucket sort of candidates | 49 s | |
 | proofs appended to a node in place (they were copied at every join: `nfpo` 88 s → 2.8 s) | | 13 s |
+| an index of each child's proofs kept on the node for the joins (`catchUp`) | 26 s | 16 s |
+| candidates as shared binding lists, a substitution only when expanded; subexpressions precomputed on the trie nodes | 16.6 s | 13.4 s |
+| the product unifier walks only the tuples of children of one term, onto one accumulator | 16.6 s | 12.4 s |
 
-Where the time goes now (callgrind): with no other variants, the lookup in the index of
-conclusions (building a substitution for each of the millions of candidates); with other
-variants, the joins (`unifySubsProd`, which builds an index of the proofs of the
-siblings for every new proof).
+(The 6,000 with no other variants: 9 s → 7.1 s → 6.6 s over the last two rows.) Tried and dropped: a
+hash map of the children on the wide nodes of the trie (the node under `=` has 1,340),
+which changed nothing measurable — a walk reaches a wide node a few hundred times per
+theorem.
+
+Where the time goes now (callgrind, theorems 1600–1800). With no other variants: the
+walk of the index of conclusions (`unifyRaw`, a third), making the children of an
+expanded node from its candidates (a tenth), reading the database (a quarter, fixed),
+and a quarter in allocation and freeing spread over all of it. With two other variants
+the picture is different: 196 theorems take 8.1 s, of which two take 6.7 s, and the
+rest ~0.25 s each (1612: 286,000 tuples of proofs; 1628, 97 steps: 1.2 million tuples,
+300,000 of them unified, stopped at the tuple limit before the known proof is joined,
+with one other variant as well). An alternative that is a theorem without hypotheses
+proves its node at once under another substitution, and the proofs multiply through
+the joins up the path: a node with *k* children of two proofs each has up to 2^k. That
+is the size of the search space the tree represents, not a cost per tuple (about 3.5 µs
+each, all of `addProof` included); the dedup by key removes those with the same
+restriction (176,000 of the 300,000 in 1628) and no other. The walk of the product
+unifier (`indexesDown`) once built the whole product of the children of the indexes and
+let `indexesStep` reject the tuples whose applications differ; it now builds only the
+others, in the same order, and pushes its results onto one accumulator — a few percent
+on these theorems.
 
 ### The search test
 
