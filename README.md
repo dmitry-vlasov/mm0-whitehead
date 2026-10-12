@@ -34,10 +34,12 @@ its file offset and statement.
 
 `prove replay` forgets every expression of a proof, keeps only which assertions it uses,
 where it unfolds a definition, and how they nest, and lets the engine find the rest by
-unification; `prove search` is given no proof at all. Both take `--from A --to B` (numbers of theorems) and `--verbose`,
-check every proof they find with the verifier, and with `-o` write the file with the new
-proofs. The engine is a port of the Russell prover; see [docs/DESIGN.md](docs/DESIGN.md),
-"The prover".
+unification; `prove search` is given no proof at all. Both take `--from A --to B`
+(numbers of theorems) and `--verbose`, check every proof they find with the verifier,
+and with `-o` write the file with the new proofs. They run one theorem per processor
+(`--jobs N`) within 32 GB of memory (`--max-mem GB`); `mm0-whitehead` without arguments
+lists every option. The engine is a port of the Russell prover; see
+[docs/DESIGN.md](docs/DESIGN.md), "The prover".
 
 A variable of a theorem is a free variable: the proof holds for every value of it.
 `prove search --meta 0,2` marks the binders 0 and 2 of the theorems in the range as

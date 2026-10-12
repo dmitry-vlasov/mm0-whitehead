@@ -557,13 +557,16 @@ is the subject of point 1 in the next section.
 
 Every point found on which the formal semantics, mmb.md, `mm0-rs` and mm0-c do not say
 the same thing. The rule for deciding is the one at the top of these notes: the formal
-semantics, then `mm0-rs`, then mmb.md; mm0-c is listed for comparison.
+semantics first; where they are silent on a check, what mmb.md states (points 9, 10, 11
+and 20, where `mm0-rs` is more lenient than its own format description); for the
+layout, the framing and the index, `mm0-rs`; mm0-c is listed for comparison.
 
 Each row marked with a fixture was checked by running both implementations on a
 hand-assembled file from `tests/fixtures/disputed/` (`gen.py` there), `mm0-rs` as
-`mm0-rs compile x.mmb` and mm0-c as `mm0-c x.mmb < x.mm0`. Rows without a fixture were
-checked on throwaway files in the same way, or on the mutants in `tests/mmb/` of the MM0
-repository.
+`mm0-rs compile x.mmb` and mm0-c as `mm0-c x.mmb < x.mm0`. Points 8, 10, 11 and 20 have
+fixtures among the files of `tests/fixtures/verify/` as well (`cases.tsv` names the
+point). Rows without a fixture were checked on throwaway files in the same way, or on
+the mutants in `tests/mmb/` of the MM0 repository.
 
 | # | Point | Formal semantics | `mm0-rs` | mm0-c | We |
 | - | ----- | ---------------- | -------- | ----- | -- |
@@ -684,7 +687,7 @@ Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.m
 
 ## 10. The reader
 
-`Whitehead/Mmb/Types.lean`, `Reader.lean`, `Encode.lean`, `Dump.lean`.
+`Whitehead/Mmb/Types.lean`, `Reader.lean`, `Encode.lean`, `Dump.lean`, and `Write.lean`, which writes a file with other proof bodies (`MmbFile.withBodies`, for `prove ... -o`): `END`, padding to a multiple of 8 and 8 zero bytes after each body, no index.
 
 - Input: the whole file as one `ByteArray` (core Lean has no memory mapping).
 - **`MmbFile.parse` opens a file.** It decodes the header, the sort table, the entries of
@@ -695,7 +698,8 @@ Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.m
   `thmArgs`, as `Arg` words with `sort`, `bound` and `deps` accessors), the unify streams
   (`termUnifyCmds`, `thmUnifyCmds`, or as trees: `termValue`, `thmStatement`) and the
   proof bodies (`proofCmds`). The first plan was to decode binders and unify streams when
-  opening; the set.mm translation has 49,156 theorems and 6.6 MB of such data, which is
+  opening; the set.mm translation has 49,156 entries in its theorem table (axioms and
+  theorems) and 6.6 MB of such data, which is
   not worth turning into heap objects for a verifier that reads them from the bytes.
   Opening `setmm.mmb` (39 MB) takes 8 ms; decoding every stream in it takes 0.35 s.
 - `MmbFile.checkStreams` decodes every unify stream (as a tree) and every proof body once
@@ -742,5 +746,7 @@ theorem t (a: wff): $ dbl a $;
 
 A `Ref` to a variable or hypothesis is annotated with its name; a command that adds to
 the heap is annotated with the index it gets. Names come from the index, or are generated
-as in section 7. Non-zero reserved fields and a term-table sort that differs from the
-return type are printed as `-- note:` lines.
+as in section 7, with `d<k>` for the dummies of a proof and `?<j>` for what has no name
+yet; a header line says the version and whether the file has an index. Non-zero
+reserved fields and a term-table sort that differs from the return type are printed as
+`-- note:` lines.

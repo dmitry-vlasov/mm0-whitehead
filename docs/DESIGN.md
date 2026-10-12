@@ -20,12 +20,13 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `Whitehead/Mmb/Encode.lean` | command streams back to bytes |
 | `Whitehead/Mmb/Dump.lean` | a `.mmb` file as text |
 | `Whitehead/Verify/Machine.lean` | the proof stack machine: store, stack, heap, unification, one rule per command |
-| `Whitehead/Verify/Check.lean` | the statements of a proof file: binders, proof body, what must hold at its end; `checkProofs` |
+| `Whitehead/Verify/Check.lean` | the statements of a proof file: binders, proof body, what must hold at its end; `checkProofs`, and `checkBody` for a body that is not in the file |
 | `Whitehead/Verify/Spec.lean` | a proof file against a specification: `matchSpec` |
 | `Whitehead/Mmb/Write.lean` | a proof file with other proof bodies |
 | `Whitehead/Prove/*.lean` | the prover: see "The prover", "Modules" |
 | `Main.lean` | the command line: `dump`, `join`, `verify`, `bench`, `prove replay`, `prove search`, `prove db` |
 | `tests/Tests/Harness.lean` | a counting test harness (`check`, `checkEq`, `skip`) |
+| `tests/Tests/Main.lean` | the test driver: the groups, in order |
 | `tests/Tests/Mm0/Parser.lean` | lexer and parser tests on hand-written snippets |
 | `tests/Tests/Mm0/Load.lean` | `import` resolution on `tests/fixtures/imports` |
 | `tests/Tests/Mm0/Elab.lean` | formulas, notations and declarations on hand-written specifications |
@@ -38,17 +39,19 @@ in `STATUS.md`, and the `.mmb` format is in `MMB-NOTES.md`.
 | `tests/Tests/Verify/Spec.lean` | `matchSpec` on `small.mmb` against altered specifications |
 | `tests/Tests/Verify/Corpus.lean` | the proof checker over real `.mmb` files |
 | `tests/Tests/Prove/Util.lean` | a small language for the prover's tests, random expressions, a reference unifier on trees |
-| `tests/Tests/Prove/Subst.lean`, `Unify.lean`, `Index.lean` | expressions and substitutions; unification and the index, also against the reference on random input |
-| `tests/Tests/Prove/Engine.lean` | the engine on the logic fixture: database, replay, search, conditions on bound variables, answers |
+| `tests/Tests/Prove/Subst.lean`, `Unify.lean`, `Index.lean`, `Prod.lean` | expressions and substitutions; unification, the index and the product unifier, also against the reference on random input |
+| `tests/Tests/Prove/Engine.lean` | the engine on the logic fixture: database, replay, search in both directions, conditions on bound variables, the proofs kept, metavariables; the replay of set.mm when the corpus is built |
+| `tests/Tests/Prove/Defs.lean` | definitions on the defs fixture: values, unfolding steps, conversion rules, the full replay (also in rounds), the replay of `peano.mmb` when the corpus is built |
 | `tests/Tests/Mutate/Engine.lean` | mutations of a proof file, from a seed |
 | `tests/Tests/Mutate/Main.lean` | `lake exe mutate`: our verdict against that of `mm0-rs` on mutants |
 | `tests/fixtures/mmbasm.py` | a hand assembler for small `.mmb` files, used by the `gen.py` scripts |
-| `tests/fixtures/mmb/` | `small.mmb`: a valid file with one of everything, and its expected dump |
+| `tests/fixtures/mmb/` | `small.mmb` (from `gen.py`): a valid file with one of everything, its specification `small.mm0` and its expected dump |
 | `tests/fixtures/disputed/` | hand-assembled `.mmb` files on which the sources disagree |
 | `tests/fixtures/verify/` | hand-assembled `.mmb` files, one per rule of the verifier, and `cases.tsv` with the expected verdicts |
-| `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` and `mm0-hs` into `.tools/bin` |
+| `tests/fixtures/imports/` | specifications with `import`, for the loader |
+| `scripts/build-oracles.sh` | builds `mm0-rs`, `mm0-c` (also as `mm0-c-np`, without its `.mm0` parser) and `mm0-hs` into `.tools/bin` |
 | `scripts/build-corpus.sh` | builds the `.mm0`/`.mmb` pairs for acceptance testing into `.tools/corpus` |
-| `tests/fixtures/prove/` | `logic.mm1`, a small deductive system with proofs, and `logic.mmb` compiled from it by `mm0-rs` (`gen.sh`) |
+| `tests/fixtures/prove/` | `logic.mm1`, a small deductive system with proofs, and `defs.mm1`, a copy of `examples/set.mm1` with definitions; their `.mmb` files compiled by `mm0-rs` (`gen.sh`) |
 | `scripts/mutation-campaign.sh` | runs the mutation campaigns of the phase 2 acceptance test |
 | `scripts/search-baseline.sh`, `scripts/search-summary.py` | run and summarize the search test of phase 3 |
 
@@ -135,7 +138,7 @@ Two extensions go beyond both references, because the example files need them:
 - **`import "file";`** is an `mm0-rs` extension, and nine of the example specifications
   use it. It is a statement in the syntax tree (`StmtKind.importFile`), and
   `Whitehead.Mm0.load` resolves it. The string literal has the escapes of `mm0-rs`
-  (`\\`, `\"`, `\n`, `\r`, `\xHH`); an unknown escape is an error here and a warning there.
+  (`\\`, `\"`, `\n`, `\r`, `\xHH` or `\XHH`); an unknown escape is an error here and a warning there.
 - **Arrows in a `def`** (`def all: type > term;`) are used by `examples/hol.mm0`. Neither
   `mm0.md` nor the formal specification has them; `mm0-rs` and mm0-c accept them.
   Decided (2026-10-05): do as `mm0-rs` does. It reads what follows the `:` of a `def`
@@ -149,7 +152,7 @@ formal specification is followed.
 The grammar accepts some things that are wrong for reasons the primary parser does not
 look at, and that the elaborator must check: unknown sorts and terms, a variable declared
 twice, dependencies on variables that are not bound, a bound variable given dependencies,
-a variable binder after a hypothesis, precedences out of range.
+a variable binder after a hypothesis.
 
 ### Imports
 
@@ -269,7 +272,8 @@ What is specific to the Lean code:
 - **The file stays a `ByteArray`.** `MmbFile` holds the bytes and what is cheap and small:
   the header, one structure per table entry and per statement, and the names. Binders,
   unify streams and proof bodies are decoded by accessor functions when asked for. The
-  verifier does not ask for them as arrays at all: it steps through the bytes.
+  verifier steps through the bytes of proof bodies and unify streams; it decodes the
+  binders into arrays, and the specification match decodes unify streams into trees.
 - **`Arg` is a structure around one `UInt64`**, which Lean represents as the bare scalar,
   with `bound`, `sort` and `deps` as bit operations. 64-bit words are assembled with
   `UInt64` operations, not through `Nat`, so that a set top bit (every bound variable)
@@ -286,14 +290,14 @@ What is specific to the Lean code:
 
 `Encode.lean` exists because the acceptance test needs the inverse of the stream decoders
 (decode, encode, compare with the original bytes). It writes the shortest encoding, as
-`mm0-rs` does. The prover's `.mmb` emission will build on it.
+`mm0-rs` does. The prover's `.mmb` emission (`Prove/Emit.lean`) builds on it.
 
 `dump` writes line by line through a callback rather than building a string: the dump of
 the set.mm translation is 15.6 million lines (390 MB), written in 3.5 s.
 
 ## The verifier
 
-`verify spec.mm0 proof.mmb` does two things, in two modules that do not know each other:
+`verify spec.mm0 proof.mmb` does two things, in two modules (the second uses only the error type of the first):
 
 1. `checkProofs` (`Verify/Check.lean`, on top of `Verify/Machine.lean`): the proof file
    is valid on its own. Every statement's binders are well-formed, its proof body runs
@@ -390,8 +394,8 @@ foo: <message>`. The verifier stops at the first error.
 `matchSpec` walks the statements of the proof file and the declarations of the
 elaborated specification side by side. Local definitions and theorems of the proof file
 are skipped; everything else must be the same kind of declaration with the same
-content: the modifiers of a sort, the binders and return type of a term bit for bit,
-and each formula as a tree, the expression elaborated from the `.mm0` text against the
+content: the modifiers of a sort, the binders and return type of a term (sort, bound
+flag and dependencies of each), and each formula as a tree, the expression elaborated from the `.mm0` text against the
 unify stream of the proof file. A definition may have its value in the proof file only.
 Names are not compared — the index is not part of what is proved — and the term numbers
 of the two sides differ by the local definitions, so a map from one to the other is
@@ -409,7 +413,7 @@ Time on the set.mm translation (49,156 axioms and theorems), one run:
 
 mm0-c does the same in 0.26 s. Half of our time is the `.mm0` front end, which builds a
 syntax tree and an environment where mm0-c compares the text with the proof file as it
-reads it. That tree is what the prover will work on, so the front end stays as it is.
+reads it. The prover reads the `.mmb` file alone; the front end stays as it is.
 
 ## Testing
 
@@ -424,19 +428,21 @@ reads it. That tree is what the prover will work on, so the front end stays as i
   and message as above.
 - The pair test is the elaborator's strongest check. For a `.mm0`/`.mmb` pair it compares
   every statement elaborated from the `.mm0` text with the statement the proof file
-  declares at the same place: modifiers of sorts, binders and return types bit for bit,
-  and every formula against the tree of its unify stream. The two were produced
+  declares at the same place: modifiers of sorts, binders and return types (sort, bound
+  flag, dependencies), and every formula against the tree of its unify stream. The two were produced
   independently (ours by parsing notation; theirs by `mm0-rs` or `mm0-hs`). It runs on
   the fixtures of this repository, on the pairs of the MM0 repository, and on the built
   corpus including the set.mm translation.
-- Corpus tests need a checkout of the MM0 repository, named by `MM0_REPO`; without it they
-  are reported as skipped. Every `.mm0` file there must parse and round-trip; every file
-  of `tests/mm0_mmu/fail` must be rejected, except the one that is grammatical and wrong
+- Corpus tests run over a checkout of the MM0 repository, named by `MM0_REPO`, and over
+  the built corpus in `.tools/corpus`; without `MM0_REPO` the `.mm0` corpus test is
+  skipped and the others are reduced to the built corpus, and that is reported. Every
+  `.mm0` file of the MM0 repository must parse and round-trip; every file of
+  `tests/mm0_mmu/fail` must be rejected, except the one that is grammatical and wrong
   for a later reason. If `mm0-rs` is available (`.tools/bin/mm0-rs`, or `MM0_RS`), the
   joined form of every file with imports is compared with `mm0-rs join`.
 - Reader tests decode the file that `MMB-NOTES.md` section 8 annotates byte by byte and
-  compare every decoded field with that listing; then they corrupt single bytes of it and
-  check the offset and the message of each rejection. A second file, `small.mmb`, has an
+  compare every decoded field with that listing; then they corrupt it, a byte or a few at
+  a time, and check the offset and the message of each rejection. A second file, `small.mmb`, has an
   index, a definition with a dummy, hypotheses and a proof by conversion; its dump is
   compared with the checked-in `small.dump`.
 - The `.mmb` corpus test runs over the proof files of the MM0 repository and of
@@ -449,9 +455,10 @@ reads it. That tree is what the prover will work on, so the front end stays as i
   `mm0-rs` and mm0-c.
 - `tests/fixtures/verify/gen.py` assembles one proof file per rule of the verifier: 48
   files, each valid or invalid in one known way. `cases.tsv` records for each our
-  verdict (a fragment of the error message), the verdicts of `mm0-rs` and of mm0-c, and,
-  where `mm0-rs` differs from us, the point of section 9 that explains it. The test
-  checks our verdict always and the other two when the tools are built. This is the
+  verdict (a fragment of the error message), the verdicts of `mm0-rs` and of mm0-c (its
+  build without the `.mm0` parser, `mm0-c-np`), and, where `mm0-rs` differs from us, the
+  point of section 9 that explains it. The test checks our verdict always and the other
+  two when the tools are built. This is the
   differential test on hand-written cases.
 - The verifier corpus test runs `checkProofs` over the same proof files as the reader
   corpus test. Every valid one must be accepted; the mutants of the MM0 repository that
@@ -474,24 +481,32 @@ reads it. That tree is what the prover will work on, so the front end stays as i
   expressions and 5,000 sets of substitutions must give the same outcome, and a unifier
   that makes the expressions equal, is idempotent, and is as general as the reference
   one. The index is compared with unifying the given expression with each stored one,
-  on 2,000 lookups among 400 expressions.
+  on 2,000 lookups among 400 expressions; the product unifier with trying every tuple,
+  on 3,000 random products, some of chained substitutions.
 - The engine is tested on `tests/fixtures/prove/logic.mmb`: every proof of the file
-  replays; breadth-first search finds 15 of its 16 theorems, none by a longer proof than
-  the file's, and the file with the proofs found is valid; a condition on a bound
-  variable is judged violated, settled or open in hand-made cases; a goal with a
-  variable gets its answer. When the corpus is built, the first 6,000 statements of
-  set.mm are replayed and the resulting file is verified.
+  replays; breadth-first search finds 15 of its 16 theorems (the test asks for 13), none
+  by a longer proof than the file's, and the file with the proofs found is valid; so do
+  the forward direction and both in turn; a condition on a bound variable is judged
+  violated, settled or open in hand-made cases; which proofs a node keeps, and that no
+  application is made twice; a goal with a variable gets its answer, and metavariables
+  get values. On `defs.mmb`: the values of the defs, the unfolding steps and the
+  conversion rules, search and replay, and the replay over the full expansion with
+  other variants and in rounds. When the corpus is built, the theorems of set.mm
+  numbered below 6,000 (5,899 proofs) and `peano.mmb` are replayed and the resulting
+  files are verified.
 
 ### External tools and the acceptance corpus
 
 Neither is under version control; both are rebuilt by scripts.
 
 - `scripts/build-oracles.sh` builds `mm0-rs` (the reference implementation), `mm0-c` (a
-  second verifier and the speed yardstick) and, with `--with-hs`, `mm0-hs` (needed only
-  to translate set.mm) into `.tools/bin`, without writing into the MM0 checkout.
+  second verifier and the speed yardstick; also `mm0-c-np`, built without its `.mm0`
+  parser, which the case test runs) and, with `--with-hs`, `mm0-hs` (needed only to
+  translate set.mm) into `.tools/bin`, without writing into the MM0 checkout.
 - `scripts/build-corpus.sh` compiles every example that has a specification into
-  `.tools/corpus/<name>.mmb` with its joined `<name>.mm0`, translates set.mm into
-  `setmm.mm0`/`setmm.mmb`, and prints what `mm0-rs` and mm0-c say about each pair.
+  `.tools/corpus/<name>.mmb` with its joined `<name>.mm0`, translates set.mm (given as
+  `SET_MM=/path/to/set.mm`, with `mm0-hs` built) into `setmm.mm0`/`setmm.mmb`, and
+  prints what `mm0-rs` and mm0-c say about each pair.
 
 Two workarounds are needed for set.mm, both because `mm0-hs` is older than its
 surroundings; the script documents them. It cannot read the double-quoted strings that
@@ -528,7 +543,7 @@ bugs fixed in the engine and in unification, and its algorithms optimized. Revie
 | `07af2072`, `0410851a` | quadratic merges of new props | not in the port: leaves are pushed, and cleaned once per round |
 | `49935cba` | the oracle as a pure node selector | as here (`oracle`, `oracleAll`) |
 | `e381104b` | fresh variables in a band of their own | as here (`freshBase`) |
-| `3e145b47`, `25c4be54` | budgets per theorem | here: limits of nodes, time and joined proofs (`Limits`) |
+| `3e145b47`, `25c4be54` | budgets per theorem | here: limits of nodes, time, joined proofs, proofs looked at by joins, facts, and a deadline (`Limits`), and the memory of the process (`memoryLevel`) |
 | `f1b9317a` | statements of several expressions | not applicable: an MM0 statement is one expression |
 
 ### Modules
@@ -539,22 +554,23 @@ bugs fixed in the engine and in unification, and its algorithms optimized. Revie
 | `Prove/Subst.lean` | `ru/subst.flow` | `RuSubst`: `ruApplySubst`, `ruAdd2Subst`, `ruCompose`, `ruUnsafeCompose`, `ruMatchExp`, `ruMergeSubst`, `ruSplitSubs` |
 | `Prove/Unify.lean` | `ru/unify/exps.flow` | `ruUnifyExps`, `ruUnifySubs` |
 | `Prove/Index.lean` | `ru/index.flow`, `ru/unify/index.flow` | `RuIndex`, `ruSetIndex`, `ruIndexSubexpr`, `ruUnifyIndex` |
-| `Prove/Db.lean` | `ru/prover/core/util.flow` | the assertions and the values of the defs of a proof file as expressions, the task with its constants (`ruConstProverTask`), proofs of the file as trees of assertions and unfoldings |
+| `Prove/Db.lean` | `ru/prover/core/util.flow` | the assertions and the values of the defs of a proof file as expressions, the conversion rules (`convRules`), the indexes of hypotheses for the forward front, the task with its constants (`ruConstProverTask`), proofs of the file as trees of assertions and conversion steps |
 | `Prove/Prod.lean` | `ru/unify/prod.flow`, `ru/unify/indexes.flow` | `ruUnifySubsProd`, `ruUnifyIndexes`: the tuples of substitutions that unify, without trying each |
 | `Prove/Tree.lean` | `core/tree.flow` | the nodes of the tree, the proofs on them, `RuProofTree` |
 | `Prove/Env.lean` | `core/env.flow` | `RuProverEnv` |
 | `Prove/Proofs.lean` | `core/proofs.flow`, `core/tree.flow` | `ruAddProof`, `ruBuildPropProofs`, `ruBuildExpProofs`, `ruMakeProofTree` |
 | `Prove/Forward.lean` | `core/forward.flow` | the forward front: `ruSeedForwardFront`, `ruApplyForward`, `ruExpandForwardProved`, `ruReverseJoin` |
-| `Prove/Expand.lean` | `core/expand.flow` | `ruExpandHyp` with the unfolding steps (`convRule`, `convCandidates`), `ruExpandProp` with its join with the forward front; `ruProveProp` of `prove.flow` |
-| `Prove/Prove.lean` | `core/prove.flow`, `core/controls.flow`, `tactics/breadth_first.flow`, `tactics/oracle.flow`, `ruRunForwardWave` | the loop, the strategy interface, the strategies (breadth first, forward, both in turn, replay of a known proof); closing and accepting a proof |
-| `Prove/Emit.lean` | — | a proof tree as the proof body of a `.mmb` file, an unfolding as `Conv` |
-| `Prove/Replay.lean` | — | the two acceptance tests as commands: `prove replay`, `prove search` |
+| `Prove/Expand.lean` | `core/expand.flow` | `ruExpandHyp` with the unfolding steps (`convRule`, `convCandidates`), the lazy split of a candidate (`splitProp`), `ruExpandProp` with its join with the forward front (`joinCap`); `ruProveProp` of `prove.flow` |
+| `Prove/Prove.lean` | `core/prove.flow`, `core/controls.flow`, `tactics/breadth_first.flow`, `tactics/oracle.flow`, `ruRunForwardWave` | the loop with its limits (`overNow`), the strategy interface, the strategies (breadth first, forward, both in turn, replay of a known proof, over the full expansion); closing and accepting a proof |
+| `Prove/Emit.lean` | — | a proof tree as the proof body of a `.mmb` file, a conversion step as `Conv` |
+| `Prove/Replay.lean` | — | the two acceptance tests as commands: `prove replay` (in rounds with `--total`), `prove search`; the jobs (`runJobs`) and the memory watcher |
 | `Mmb/Write.lean` | — | a proof file with other proof bodies |
 
 Not ported, each being a layer of its own in the source: proof fragments
 (`fragment.flow`), the forward closure (`forward_closure.flow`), the variant-admission
-hook, the seed hooks and the ordered wave of the forward front, statistics, concurrency,
-and the tactic language.
+hook, the seed hooks and the ordered wave of the forward front, statistics, Russell's
+concurrency (the port has its own: one theorem per thread, `runJobs`), and the tactic
+language.
 
 ### The engine
 
@@ -565,17 +581,20 @@ and the tactic language.
   parts: `outer`, on the variables of the assertion, and `sub`, on the variables of the
   goal that the unification had to instantiate.
 - **Upward pass** (`Expand.lean`). `expandHyp` unifies an expression node with the
-  conclusions in the index, renames the variables of the assertion that the unifier left
-  free with fresh ones, and makes an assertion node for each result, those that bind
-  more first. `expandProp` makes the child expression nodes, the premises under the
-  unifier, matches each with the premises of the task, and expands each child at once.
-  So the leaves that a strategy chooses among are assertion nodes.
+  conclusions in the index and makes an assertion node for each result, holding the
+  bindings of the walk, those that bind more first. When the node is expanded,
+  `splitProp` turns the bindings into the two parts of the unifier and renames the
+  variables of the assertion that it left free with fresh ones (Russell's lazy
+  candidates); `expandProp` then makes the child expression nodes, the premises under
+  the unifier, matches each with the premises of the task, and expands each child at
+  once. So the leaves that a strategy chooses among are assertion nodes.
 - **Downward pass** (`Proofs.lean`). `addProof`: when a child gets a new proof, the
   product of it with the proofs of the siblings is walked; for each tuple the most
   general unifier of their substitutions (`unifySubs`) is composed with the node's `sub`,
   the conditions on bound variables are checked, and the result is a proof of the
-  assertion node. Every such proof is kept (change 5). `buildPropProofs` and
-  `buildExpProofs` carry new proofs to the parent, up to the root.
+  assertion node. One proof is kept per key — what it shows to the nodes above (change
+  5). `buildPropProofs` and `buildExpProofs` carry new proofs to the parent, up to the
+  root.
 - **The proofs on the nodes** (`Proof`: `RuProverProof`) are the substitution proof trees
   of the paper, immutable as in Russell.
 - **Forward** (`Forward.lean`). The mirror of `expandHyp`: a *fact* is unified with the
@@ -598,7 +617,7 @@ and the tactic language.
 
 The variables of an assertion are numbered `0, 1, ...` by its binders, the same numbers
 in every assertion; the variables that the prover makes are numbered from 2^16. This is
-safe because no variable of an assertion gets into the tree: `expandHyp` replaces each
+safe because no variable of an assertion gets into the tree: `splitProp` replaces each
 by an expression over the goal's variables or by a fresh variable.
 
 ### MM0 as a deductive system of the paper
@@ -745,19 +764,27 @@ Each of these is also noted in the file it concerns.
    tuples unify with the same result on everything visible. The same proof takes
    0.38 s.
 
-   **Every proof is kept** (decided 2026-10-05). `ruAddProof` keeps one proof of an
-   assertion node per substitution (`ruProofSubKey`): of the tuples of child proofs that
-   compose to the same `theta`, the first. The source gives the reason in a comment
-   ("interchangeable for everything upstream"); the paper does not: its generality
-   theorem gives every valid proof a tree of its own shape, and a proof that is dropped
-   has none. Until it is proved that proofs with the same substitution may stand for
-   each other, `addProof` drops nothing. (The port had first taken the restricted
-   substitution as the key, and then the whole one put together from the proof; with
-   the whole one, 133 of the 52,866 proofs made in the search test were dropped.)
+   **Which proofs are kept** (decided 2026-10-05, refined 2026-10-11). `ruAddProof`
+   keeps one proof of an assertion node per substitution (`ruProofSubKey`): of the
+   tuples of child proofs that compose to the same `theta`, the first. The source gives
+   the reason in a comment ("interchangeable for everything upstream"); the paper does
+   not: its generality theorem gives every valid proof a tree of its own shape, and a
+   proof that is dropped has none. So on 2026-10-05 `addProof` dropped nothing. On
+   2026-10-11 the rule became: one proof per *key* — the substitution restricted to the
+   variables of the parent's expression together with the open conditions on bound
+   variables (`proofKey`). That is all a proof shows to the nodes above (the parent's
+   proof goes up with these bindings only, `restrict`, and the conditions are all that
+   is judged later), so two proofs with one key stand for each other in every proof
+   above, and the goals proved and the substitutions found at the root are the same
+   with one as with both; what is lost is the other subproof below the node. The key is
+   coarser than Russell's, which tells apart proofs that differ only in variables made
+   below the node, whose number multiplies with every step (`propeqop` of set.mm: a
+   million proofs on one node after 14 expansions).
 
-   No proof is made twice either, so nothing needs to be told apart: a tuple of child
-   proofs is joined when the last of its members arrives (`addProof` takes the new
-   proof alone for its own node and all proofs of the siblings), and at no other time.
+   No proof is made twice either: a tuple of child proofs is joined when the last of
+   its members arrives (`addProof` takes the new proof alone for its own node and the
+   proofs of the siblings — all of them, or from 64 on those whose key unifies with the
+   new proof's, `catchUp`), and at no other time.
 6. **Proof extraction in one pass** (`makeProofTree`). Russell instantiates a step by
    its own substitution and then applies the substitution of every step above it to the
    whole subtree. After change 5 the substitution of a step no longer contains those
@@ -876,8 +903,9 @@ gets all its variants — every assertion that the index finds, every unfolding,
 premise it unifies with — and the strategy (`oracleAll`) clicks those of the known
 proof; with `--others` it expands that many other variants of each node on the way, so
 that their proofs meet the known one's in the joins of `ruAddProof`. Every proof that
-reaches the root is checked by the verifier; only the known proof is accepted. A tuple
-budget (`--max-tuples`) ends a theorem as a limit when the joins would go past it.
+reaches the root is checked by the verifier; the first that passes counts, known or not
+(see below). A tuple budget (`--max-tuples`) ends a theorem as a limit when the joins
+would go past it.
 
     mm0-whitehead prove replay setmm.mmb --full --total 7200 [--factor 4]
 
@@ -898,11 +926,12 @@ join are made at once (`unifySubsProd`, `tuplesUpTo`), each with its unifier and
 proofs, about 5 KB; their budget is one of memory, and in rounds it grows only up to a
 tenth of the memory limit (`tupleCap`) — the first run of rounds multiplied it without
 end, and one join took the process from 32 to 44 GB in 15 s, past every check. A
-theorem stopped for memory was the largest of those running at once; when nothing
-else is left, the next round runs a quarter as many at once, down to one, where
-memory is the limit and the rounds end. Over the memory limit, the watcher has every
-search give up and waits up to 15 s for the memory to come back before it ends the
-process.
+theorem stopped for memory was stopped by what ran beside it (the largest of those
+running gives up first, all of them when memory is very short): it waits, and when
+nothing else is left, a round with a quarter as many at once takes the waiting ones,
+down to one at once, where memory is the limit and the rounds end. Over the memory
+limit, the watcher has every search give up and waits up to 15 s for the memory to
+come back before it ends the process.
 
 A proof of an assertion node is kept once per substitution of the parent's variables
 with its open conditions (`proofKey`, decided 2026-10-11): two such proofs can replace
@@ -938,7 +967,8 @@ every theorem has a search state of its own, the database and the index are only
 and the results come in the order of the file, so the output does not depend on the
 number of jobs. Memory is limited to 32 GB by default (`--max-mem`): a watcher reads the
 resident size every 250 ms; above 80% the largest running search gives up as at a limit,
-above 90% every running one does, above the limit the process stops (exit code 3).
+above 90% every running one does, and above the limit the process stops (exit code 3)
+unless the memory comes back within 15 s of every search giving up.
 
 What made the full replay faster, measured on theorems 1380–6000 of set.mm (one job,
 2 s per theorem) and on the first 6,000 (one job per processor):
@@ -1014,7 +1044,8 @@ The test was run three times, as the rule for which proofs `addProof` keeps chan
 The three differ by less than two in a hundred, in no order: the limit is time, so two
 runs of the same code differ as well. Keeping every proof costs nothing that shows at
 this depth. With the whole substitution as the key, 133 of the 52,866 proofs that
-`addProof` made in this test were dropped; those are the proofs that are now kept.
+`addProof` made in this test were dropped; with the key of 2026-10-11, which is
+coarser, such proofs are dropped again.
 
 What the numbers say:
 
@@ -1072,8 +1103,11 @@ was a fact once, forward alone proved 38 of the 281 where it now proves 31: of t
 facts of a front, some are now the same statement derived in another way. Both in turn
 proved 156 or 157 then and proves 154 now, which is within what two runs differ by. A
 larger front is not the way out as the wave stands: with 2,048 facts the search for one
-theorem ran for two minutes where its limit is 1 s, because the clock is looked at
-between applications and an application joins every fact that fits with every other.
+theorem ran for two minutes where its limit is 1 s, because the clock was looked at
+between applications only and an application joins every fact that fits with every
+other. (Since then an application is capped by the room left in the front, the clock
+and the memory are looked at before each application and between joins, and `addProof`
+looks at the deadline itself; the case has not been measured again.)
 
 Carrying the conditions on bound variables matters here. The first version, which only
 discarded what was violated for certain, proved 357 theorems of predicate calculus under
@@ -1138,12 +1172,15 @@ for the arguments beside it, and at the end `Unfold` with the value pushed first
 the sharing of expressions gives it, as everything beside the path is asked for by both
 statements.
 
-**Replay** (`Db.skeletonWithConvs`): a proof body with conversions is read with its
-expressions, and each `Unfold` is one step with the path of its obligation, on the
-goal's side if the obligation has the goal on the left, else on the proved statement's;
-the steps of one `Conv` are chained in the order they apply to the goal (the unfoldings
-as found, then the foldings in reverse). The oracle expands exactly those steps
-(`Only.conv`). A body that shares a conversion (`ConvCut`, `ConvSave`) is not read.
+**Replay** (`skeletonWithConvs` in `Db.lean`): a proof body with conversions is read
+with its expressions, and each `Conv` becomes a step of the rule `conv_s` whose second
+child is the tree of conversion rules (`refl`, `cong`, `unfold`, `fold`) that the
+conversion proof stands for — the form described under "Unfolding inside a variable"
+below — and the oracle clicks those steps like any other. A `Conv` with no unfolding in
+it is dropped. A body that shares a conversion (`ConvCut`, `ConvSave`) is not read.
+(An earlier reader turned each `Unfold` into a (def, occurrence) step with the path of
+its obligation; it could not replay an unfolding inside what the tree has as a
+variable, and was removed with the rules below.)
 
 **Results** (2026-10-06). The fixture `tests/fixtures/prove/defs.mmb`, a copy of
 `examples/set.mm1` (CC0) whose `df_*` theorems are proved from the definitions: 24 of
@@ -1165,13 +1202,14 @@ of `peano` (270 theorems) has 98 proved (36%), with proofs of up to 7 steps, all
 accepted by the verifier and by `mm0-rs`.
 
 Every proof not replayed, without exception, unfolds a def at a place that the tree has
-as a variable (`convInVariable` in `Replay.lean` checks this). The typical case is
+as a variable (checked then by a walk of the tree along the known proof, since removed
+with that reader). The typical case is
 `notan2` of peano: `~(a /\ b) <-> a -> ~b` by `ax_mp` from `bicom` and `notnot`, where
 the conversion is on the minor premise of `ax_mp`, whose statement in the tree is the
 variable `?X`. That is the gap of this expansion, and it is 7 to 8% of the proofs of
 these files.
 
-**Unfolding inside a variable** (`Db.convRules`, decided 2026-10-11). A conversion
+**Unfolding inside a variable** (`convRules` in `Db.lean`, decided 2026-10-11). A conversion
 inside what the tree has as a variable cannot be a (def, occurrence) step of that node.
 So, for a file with defs, MM0's own judgment `a ≡ b` is added as assertions: terms `≡`
 and `≡'` per sort (`≡'`: the same judgment with at least one unfolding in its proof), and
@@ -1244,9 +1282,11 @@ Answered later on 2026-10-05:
 - "All variants" means every proof (was question 8). The two places where the source
   keeps one proof of several were written without a proof that this is safe:
   `ruProofSubKey` in `ruAddProof` came with a later refactoring of the source, and
-  `ruApplyForward` is new code. Until such a proof exists, nothing is dropped. Built:
-  `addProof` keeps every proof (change 5); every derivation of a statement is a fact of
-  the forward front, and an application is made once (change 13).
+  `ruApplyForward` is new code. Built: `addProof` keeps one proof per key, the
+  restriction that is all a proof shows upward (change 5, refined 2026-10-11 with the
+  decision that proofs with identical restrictions may be merged); every derivation of
+  a statement is a fact of the forward front, and an application is made once (change
+  13).
 
 Answered on 2026-10-06:
 

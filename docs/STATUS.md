@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-11.
+Last updated: 2026-10-12.
 
 ## Phase
 
@@ -81,8 +81,8 @@ mutants that both accept, mm0-c rejects 74: all are an `END` byte with data-widt
 point 21. No mutant made the verifier index out of bounds (`LEAN_ABORT_ON_PANIC=1`).
 
 The same comparison on hand-written files: 48 proof files, one per rule
-(`tests/fixtures/verify`). We agree with mm0-c on all 48; `mm0-rs` accepts 11 that we
-reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed files that
+(`tests/fixtures/verify`). We agree with mm0-c (its build without the `.mm0` parser,
+`mm0-c-np`) on all 48; `mm0-rs` accepts 11 that we reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed files that
 `mm0-rs` and we reject (points 1 and 7): it is not the reference.
 
 > `mm0-rs` [...] has no command that checks a `.mmb` against a `.mm0`. That step follows
@@ -174,8 +174,8 @@ every tenth theorem of the two sections, 1 s per theorem:
 | both in turn | 108 | 46 |
 
 All proofs found are accepted by the verifier. Every derivation of a statement is now
-a fact of the front; while a statement was a fact once, forward alone proved 38 of the
-281, and both in turn 156 or 157.
+a fact of the front (one per application and key, as in the tree); while a statement
+was a fact once, forward alone proved 38 of the 281, and both in turn 156 or 157.
 
 ## Decisions (2026-10-01)
 
@@ -201,8 +201,11 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 2. All variants of a proof are needed, and a proof is dropped only where it is proved
    that this is safe. The two places where the Russell source keeps one proof of
    several have no such proof (`ruProofSubKey` in `ruAddProof`; the set `seen` and "one
-   proof per matched fact" in `ruApplyForward`), so the port keeps every proof of an
+   proof per matched fact" in `ruApplyForward`), so the port kept every proof of an
    assertion node, and every derivation of a statement as a fact of the forward front.
+   Refined on 2026-10-11: proofs with identical restrictions on the free variables may
+   be merged, so one proof is kept per key — the substitution restricted to the
+   parent's variables with the open conditions (`proofKey`; `DESIGN.md`, change 5).
 3. A variable of a goal is a free variable or a metavariable, by a mark. How the mark is
    written is a stub, MM0 having no syntax for it: `prove search --meta`.
 4. `>` in the type of a `def` (`def all: type > term;`, five statements in
@@ -215,8 +218,8 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 
 ## What passes
 
-`MM0_REPO=/path/to/mm0 lake test`, with the corpus of `scripts/build-corpus.sh` built —
-869 checks, 0 failures, in 15 seconds:
+`MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
+corpus of `scripts/build-corpus.sh` built — 900 checks, 0 failures, in 18 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -231,33 +234,40 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
   the MM0 repository, the reader rejects the 14 it should and decodes the 7 that are
   wrong only for a verifier.
 - Verifier, hand-written: `small.mmb` and the 7 disputed files; 48 files with one rule
-  each, with our verdict and those of `mm0-rs` and mm0-c; 18 specification cases.
+  each, with our verdict and those of `mm0-rs` and mm0-c (`mm0-c-np`); 18 specification
+  cases.
 - Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.
 - Prover, hand-written and random: expressions and substitutions; unification and the
-  index, also compared with a reference unifier on 27,000 random inputs; the engine on
-  the logic fixture (database, replay of its 16 proofs, breadth-first search, the
-  forward direction, conditions on bound variables, every variant of a proof kept in
+  index, also compared with a reference unifier on 27,000 random inputs; the product
+  unifier against trying every tuple on 3,000 random products; the engine on the logic
+  fixture (database, replay of its 16 proofs, breadth-first search, the forward
+  direction and both in turn, conditions on bound variables, one proof per key kept in
   the tree and in the forward front and none made twice, variables marked as
   metavariables and the values found for them).
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
   `examples/set.mm1`), the rule made for an unfolding, the expansion of a goal by its
-  unfoldings and foldings, 24 of its 26 theorems proved from scratch and all 26
-  replayed, the files verified.
-- Prover, corpus: the first 6,000 statements of set.mm replayed, and all of `peano.mmb`
-  with its conversions, the resulting files verified.
+  unfoldings and foldings, an unfolding inside a variable by the conversion rules and
+  its emission as `Conv`, 24 of its 26 theorems proved from scratch (the test asks for
+  20) and all 26 replayed, the files verified; the full replay of both fixtures with
+  0, 4 and all other variants, and in rounds.
+- Prover, corpus: the theorems of set.mm numbered below 6,000 (5,899 proofs) replayed,
+  and `peano.mmb` — 2,650 of its 2,700 proofs, the 50 that share a conversion left
+  out — the resulting files verified.
 - Pairs: 22 specification/proof pairs (8 fixtures of this repository, 4 pairs of the MM0
   repository, 10 of the built corpus). 21 agree on every statement, 55,165 in all; one is
   the expected mismatch.
 
-Without `MM0_REPO` and the corpus the last three groups are skipped or reduced, and that
-is reported.
+Without `MM0_REPO` the `.mm0` corpus group is skipped; without the built corpus the
+other corpus groups and the pairs are reduced to what the repository holds, and the
+prover's corpus group is skipped; without `.tools/bin` the verdicts of `mm0-rs` and
+mm0-c are not compared. Each is reported.
 
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
 with every kind of notation gives the same trees through `mm0-rs` as through our
 elaborator.
 
-Timings (`mm0-whitehead bench`, one run each):
+Timings (`mm0-whitehead bench`, one run each; the dump row by the shell's `time`):
 
 | Input | Size | Time |
 | ----- | ---- | ---- |
@@ -305,7 +315,7 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. **Phase 3** (`DESIGN.md`, "The prover", "Questions"). Answered on 2026-10-01: forward
    expansion is ported; unfolding is to be an inference step that looks like an
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
-   built. Still open:
+   built (decision 2 as refined on 2026-10-11). Still open:
    6. three places in the Russell source that look unintended (for the author to
       investigate): `ruCheckDisjs` in `ruAddProof`, the variable set in
       `ruMakeFresherSubst`, the argument order of `ruSuperRule` in `unify_var`;
@@ -326,7 +336,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 3. For tasks with metavariables: a way to write the marking, and a check of the proof
    found (it proves an instance of the theorem, which no file states).
 4. The cost of joins in a search in both directions (see the forward report above):
-   which joins a strategy admits is the lever that Russell's tactic layer has. And the
-   cost of one forward application, which the clock does not interrupt: with a front of
-   2,048 facts a search ran for minutes past its limit.
+   which joins a strategy admits is the lever that Russell's tactic layer has. The
+   clock and the memory are now looked at before each forward application and between
+   joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
+   search once ran for minutes past its limit, has not been measured again.
 5. Phase 4 is designed only after the search baseline is accepted.
