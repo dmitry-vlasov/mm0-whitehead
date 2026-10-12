@@ -315,6 +315,9 @@ structure Limits where
   work of the joins (`Env.workBudget`). -/
   maxTuples : Nat := 0xFFFFFFFFFFFF
   maxWork : Nat := 0xFFFFFFFFFFFF
+  /-- A time (`IO.monoMsNow`) past which the search stops as at a limit, whatever is
+  left of `maxMs`: the end of a run of many searches. -/
+  deadline : Option Nat := none
 
 structure Result where
   ending : Ending
@@ -336,6 +339,8 @@ structure Result where
   /-- Proofs that reached the root and were turned down as `anotherProof`; they are not
   counted in `rejected`. -/
   others : Nat := 0
+  /-- The limit reached (`ending = .limit`). -/
+  stop : Option Stop := none
   env : Env
 
 /-- What a proof at the root puts for the metavariables of the task. -/
@@ -360,7 +365,8 @@ def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String 
 
 /-- Is a limit of the search reached? -/
 def over (env : Env) (limits : Limits) (now start : Nat) : Bool :=
-  env.props.size > limits.maxProps || now - start > limits.maxMs || env.overBudget
+  env.props.size > limits.maxProps || now - start > limits.maxMs || limits.deadline.any (now > ·) ||
+    env.overBudget
 
 
 /-- The searches that are running, by a number of their own, with the number of
@@ -371,15 +377,18 @@ initialize nextSearch : IO.Ref Nat ← IO.mkRef 0
 /-- `over`, now; and while memory is short, for the largest search that is running (as
 Russell's heap-aware budget, `25c4be54`): it gives up, as at a limit, and frees its
 memory, and the others go on — or, when memory is very short, for every search. -/
-def overNow (env : Env) (limits : Limits) (start : Nat) (sid : Nat) : IO Bool := do
+def overNow (env : Env) (limits : Limits) (start : Nat) (sid : Nat) : IO (Option Stop) := do
   let size := env.props.size
   runningSizes.modify (·.insert sid size)
-  if over env limits (← IO.monoMsNow) start then return true
+  let now ← IO.monoMsNow
+  if size > limits.maxProps then return some .nodes
+  if now - start > limits.maxMs || limits.deadline.any (now > ·) then return some .time
+  if env.overBudget then return some (env.stop.getD .work)
   let level ← memoryLevel.get
-  if level == 0 then return false
-  if level ≥ 2 then return true
+  if level == 0 then return none
+  if level ≥ 2 then return some .memory
   let largest := (← runningSizes.get).fold (init := 0) fun m _ n => max m n
-  return size ≥ largest
+  return if size ≥ largest then some .memory else none
 
 /-- `ruReverseJoin` for each of the new facts: the goal, then every subgoal it unifies
 with, as long as the limits allow. -/
@@ -389,7 +398,7 @@ def joinFacts (env : Env) (facts : Array Nat) (limits : Limits) (start : Nat) (s
     let (targets, env') ← (joinRoot f).run env
     env := env'
     for h in targets do
-      if ← overNow env limits start sid then return env
+      if (← overNow env limits start sid).isSome then return env
       env := ((← (joinSubgoal f h).run env)).2
   return env
 
@@ -403,7 +412,7 @@ def forwardWave (env : Env) (limits : Limits) (start : Nat) (sid : Nat) : IO (En
   let mut env := { env with forward := some { fwd with front := #[] } }
   for f in front do
     for (id, pos) in forwardTriggers env f do
-      if ← overNow env limits start sid then return (env, false)
+      if (← overNow env limits start sid).isSome then return (env, false)
       if ((env.forward.map (·.count)).getD 0) ≥ limits.maxFacts then break
       let (made, env') ← (applyForward f env.db.asserts[id]! pos limits.maxFacts).run env
       env ← joinFacts env' made limits start sid
@@ -426,7 +435,9 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
       return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
                values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
   let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork,
-                             deadline := start + limits.maxMs }
+                             deadline := match limits.deadline with
+                               | some d => min d (start + limits.maxMs)
+                               | none => start + limits.maxMs }
   let mut rejected := 0
   let mut others := 0
   let mut rejection := ""
@@ -453,7 +464,8 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     match decision with
     | .done =>
       -- a join that the budget stopped leaves the tree without some of its proofs
-      return { ending := if env.overBudget then .limit else .exhausted, rejected, rejection, rejectedProof, others, env }
+      return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
+               rejected, rejection, rejectedProof, others, env }
     | .forward =>
       let (env', more) ← forwardWave env limits start sid
       env := env'
@@ -467,8 +479,8 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
       if let some (tree, body, answer, values) := found then
         return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                  rejected, rejection, rejectedProof, others, env }
-      if ← overNow env limits start sid then
-        return { ending := .limit, rejected, rejection, rejectedProof, others, env }
+      if let some stop ← overNow env limits start sid then
+        return { ending := .limit, stop, rejected, rejection, rejectedProof, others, env }
       if more then dry := false
       else if !dry then dry := true
       else return { ending := .exhausted, rejected, rejection, rejectedProof, others, env }
@@ -477,8 +489,8 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
-        if ← overNow env limits start sid then
-          return { ending := .limit, rejected, rejection, rejectedProof, others, env }
+        if let some stop ← overNow env limits start sid then
+          return { ending := .limit, stop, rejected, rejection, rejectedProof, others, env }
         let (_, env') ← (proveProp p only).run env
         env := env'
         if !env.rootProofs.isEmpty then
@@ -492,7 +504,8 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
           if let some (tree, body, answer, values) := found then
             return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
                      rejected, rejection, rejectedProof, others, env }
-  return { ending := if env.overBudget then .limit else .exhausted, rejected, rejection, rejectedProof, others, env }
+  return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
+           rejected, rejection, rejectedProof, others, env }
 
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
 reaches the root is given to `accept`, which says whether it counts. -/

@@ -12,12 +12,16 @@ def usage : String :=
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--verbose]
                [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N]
+               [--total S [--factor F]]
                                  reconstruct the proofs of a file from the assertions they use;
                                  --full: every node gets all its variants, the known proof's are
                                  expanded, and N (or all) others of each node on the way too
                                  (limits per theorem by default: 60 s, 2,000,000 nodes,
                                  300,000 joined proofs, 20,000,000 proofs looked at in joins
-                                 (--max-work N))
+                                 (--max-work N)); --total S: rounds within S seconds, the first
+                                 with the limits given (then 1 s, 100,000 nodes, 10,000 proofs,
+                                 1,000,000 by default), each next with F (4) times those, on the
+                                 theorems stopped at a limit
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
@@ -288,14 +292,22 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
       IO.eprintln s!"{path}: {msg}"
       return 1
   let (jobs, progress, memLimit) ← jobOptions args
+  let total := numOption args "--total" 0
   let opts : Prove.ReplayOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       maxSteps := numOption args "--max-steps" 1000000000, verbose := args.contains "--verbose",
       full := args.contains "--full",
       others := if strOption args "--others" == some "all" then none else some (numOption args "--others" 0),
-      jobs, progress, memLimit,
-      -- the full expansion can grow without bound: it has limits unless told otherwise
+      jobs, progress, memLimit, total := total * 1000, factor := numOption args "--factor" 4,
+      -- a join takes about 5 KB per tuple, and may have a tenth of the memory
+      tupleCap := memLimit / 50000,
+      -- the full expansion can grow without bound: it has limits unless told otherwise;
+      -- in rounds, small ones to begin with
       limits := if args.contains "--full" then
+          if total > 0 then
+            { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
+              maxTuples := numOption args "--max-tuples" 10000, maxWork := numOption args "--max-work" 1000000 }
+          else
           { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 60000,
             maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
         else
@@ -306,7 +318,8 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let ms := (← IO.monoMsNow) - start
   IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed\
     {if stats.convInVariable == 0 then "" else s!" ({stats.convInVariable} with an unfolding where the tree has a variable)"}, \
-    {stats.conversions} with a shared conversion and {stats.tooLarge} too large left out, in {ms} ms"
+    {stats.conversions} with a shared conversion and {stats.tooLarge} too large left out, in {ms} ms\
+    {if total > 0 then s!" over {stats.rounds} rounds" else ""}"
   IO.println s!"  steps of the known proofs {stats.stepsIn}, of the reconstructed ones {stats.stepsOut}; \
     proof bodies {stats.bytesIn} bytes before, {stats.bytesOut} after"
   let c := stats.counters
@@ -315,7 +328,8 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
     {c.inconsistent} inconsistent, {c.duplicate} with the key of another; root proofs rejected by the verifier {stats.rejected}"
   if opts.full then
     IO.println s!"  full expansion, {match opts.others with | none => "all" | some n => toString n} other variants \
-      expanded per node: {stats.otherProofs} proofs found are not the known one; {stats.limited} theorems stopped at a limit"
+      expanded per node: {stats.otherProofs} proofs found are not the known one; {stats.limited} theorems stopped at a limit\
+      {if stats.memoryLimited == 0 then "" else s!", {stats.memoryLimited} of them by memory"}"
   if let some out := strOption args "-o" then
     IO.FS.writeBinFile out (file.withBodies bodies)
     IO.println s!"  written to {out}"

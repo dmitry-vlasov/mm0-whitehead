@@ -210,6 +210,18 @@ def fullReplayTests : TestM Unit := do
         match Whitehead.Verify.checkProofs f2 with
         | .ok () => check s!"full replay {name}, {others.getD 0} others: the file with the replayed bodies is valid" true
         | .error e => check s!"full replay {name}: the file with the replayed bodies is valid" false (e.format f2 "replayed")
+    -- in rounds: a first budget of a few nodes stops most theorems at the limit, and
+    -- every round gives four times as much, until every proof is found
+    let (stats, bodies) ← replay db { full := true, total := 3600000, limits := { maxProps := 4 } } fun _ => pure ()
+    check s!"full replay {name} in rounds: every proof is found, after more than one round"
+      (stats.replayed == stats.theorems && stats.failed == 0 && stats.limited == 0 && stats.rounds > 1)
+      s!"{stats.replayed} of {stats.theorems} in {stats.rounds} rounds, {stats.limited} at a limit"
+    match MmbFile.parse (file.withBodies bodies) with
+    | .error e => check s!"full replay {name} in rounds: the file is read" false e.msg
+    | .ok f2 =>
+      match Whitehead.Verify.checkProofs f2 with
+      | .ok () => check s!"full replay {name} in rounds: the file with the replayed bodies is valid" true
+      | .error e => check s!"full replay {name} in rounds: the file with the replayed bodies is valid" false (e.format f2 "replayed")
 
 /-- The replay of `peano.mmb` of the corpus, whose proofs unfold definitions: what is
 replayed, and what is not and why. -/

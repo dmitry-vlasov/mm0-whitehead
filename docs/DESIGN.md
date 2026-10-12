@@ -879,6 +879,31 @@ that their proofs meet the known one's in the joins of `ruAddProof`. Every proof
 reaches the root is checked by the verifier; only the known proof is accepted. A tuple
 budget (`--max-tuples`) ends a theorem as a limit when the joins would go past it.
 
+    mm0-whitehead prove replay setmm.mmb --full --total 7200 [--factor 4]
+
+Proofs differ a lot in what they need: most are replayed within a small budget, some
+need more, a few need far more. With `--total S` the replay runs in *rounds*
+(`replay` in `Replay.lean`): the first with small limits per theorem (1 s, 100,000
+nodes, 10,000 joined proofs, 1,000,000 proofs looked at in joins; `--ms` and the others
+set them), every next with `--factor` times the limits of the one before, on the
+theorems that stopped at a limit in the round before — until none is left or the S
+seconds are out, which also ends the searches under way (`Limits.deadline`). The whole
+run has a fixed time and a fixed memory (`--max-mem`), and the budget per theorem is
+not chosen in advance but grows as far as the time allows. A theorem's statistics are
+those of its last round.
+
+A search says which limit stopped it (`Stop`: time, nodes, tuples, work, memory), and
+only a theorem whose limit grows in the next round is tried again. The tuples of a
+join are made at once (`unifySubsProd`, `tuplesUpTo`), each with its unifier and its
+proofs, about 5 KB; their budget is one of memory, and in rounds it grows only up to a
+tenth of the memory limit (`tupleCap`) — the first run of rounds multiplied it without
+end, and one join took the process from 32 to 44 GB in 15 s, past every check. A
+theorem stopped for memory was the largest of those running at once; when nothing
+else is left, the next round runs a quarter as many at once, down to one, where
+memory is the limit and the rounds end. Over the memory limit, the watcher has every
+search give up and waits up to 15 s for the memory to come back before it ends the
+process.
+
 A proof of an assertion node is kept once per substitution of the parent's variables
 with its open conditions (`proofKey`, decided 2026-10-11): two such proofs can replace
 each other in every proof above. So the proof found need not be the known one, and the

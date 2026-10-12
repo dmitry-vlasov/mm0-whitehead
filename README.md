@@ -24,6 +24,7 @@ Lean.
     mm0-whitehead bench file ...             # time the .mm0 front end or the .mmb reader
 
     mm0-whitehead prove replay file.mmb -o out.mmb   # reconstruct every proof from the assertions it uses
+    mm0-whitehead prove replay file.mmb --full --total 7200   # over all variants, in rounds within 2 hours
     mm0-whitehead prove search file.mmb --ms 1000    # prove every theorem from scratch
                                                      #   --strategy bfs (backward), forward, or both
     mm0-whitehead prove db file.mmb                  # what the prover reads from a proof file

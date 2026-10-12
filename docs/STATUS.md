@@ -315,11 +315,11 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 ## Next steps
 
 0. The full replay of the whole of set.mm (2026-10-12): 46,254 of 47,611 in 1 h 57 min,
-   1,357 at a limit, none rejected (`DESIGN.md`). With other variants, not yet run: on
-   the first 6,000 (13 s) a few theorems take most of the time and stop at the tuple
-   limit — the proofs of the alternatives multiply through the joins (`DESIGN.md`,
-   "Concurrency, memory, speed") — so that run would need a decision on the limits
-   first.
+   1,357 at a limit, none rejected (`DESIGN.md`), with one budget for every theorem.
+   To run again in rounds (`--total`), with and without other variants: on the first
+   6,000 with two other variants a few theorems take most of the time and stop at the
+   tuple limit — the proofs of the alternatives multiply through the joins
+   (`DESIGN.md`, "Concurrency, memory, speed").
 1. The answers to the questions above.
 2. Shared conversions (`ConvCut`, `ConvSave`) in the replay reader: 20 of the 99 proofs
    of `hol` use them.

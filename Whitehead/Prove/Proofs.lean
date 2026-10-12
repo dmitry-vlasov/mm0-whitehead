@@ -221,8 +221,11 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   if !ready then return
   -- the theorem's time, and the memory of the process (`memoryLevel`): a join can be the
   -- one step that runs long
-  if (← IO.monoMsNow) > (← get).deadline || (← memoryLevel.get) ≥ 2 then
-    modify fun env => { env with overBudget := true }
+  if (← memoryLevel.get) ≥ 2 then
+    modify fun env => { env with overBudget := true, stop := some .memory }
+    return
+  if (← IO.monoMsNow) > (← get).deadline then
+    modify fun env => { env with overBudget := true, stop := some .time }
     return
   -- in place: the state is the only holder of the node here
   modify fun env => catchUp env p
@@ -246,7 +249,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   -- the work of a join is about the proofs it looks at; past the budget the search stops
   let work := env.counters.work + sets.foldl (init := 0) (· + ·.size)
   if work > env.workBudget then
-    set { env with overBudget := true }
+    set { env with overBudget := true, stop := some .work }
     return
   let mut counters := { env.counters with tuples := env.counters.tuples + size, work }
   -- the tuples whose substitutions unify, each with the unifier: tuple by tuple for a
@@ -268,7 +271,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   -- the budget is on the tuples that unify: each is a proof to be made and kept
   if counters.tuples - counters.notUnified > env.tupleBudget then
-    set { env with overBudget := true }
+    set { env with overBudget := true, stop := some .tuples }
     return
   if let some made := made then unified := unified.filter fun (_, row) => !made row
   -- the new proofs are collected apart and appended at the end: the node's own array
@@ -277,7 +280,15 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   -- a node: `nfpo` of set.mm took 88 s)
   let mut proofs : Array Proof := #[]
   let mut keys : Std.HashSet (Array Nat) := {}
+  -- the memory is looked at now and then along the way: the proofs made here can be
+  -- what takes it past its limit
+  let mut memoryStop := false
+  let mut n := 0
   for (s, row) in unified.extract 0 maxTuples do
+    n := n + 1
+    if n % 4096 == 0 && (← memoryLevel.get) ≥ 2 then
+      memoryStop := true
+      break
     match prop.sub.compose s with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
     | some theta =>
@@ -294,7 +305,9 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
             keys := keys.insert key
             proofs := proofs.push (.prop p theta row conds)
   modify fun env =>
-    { env with counters, props := env.props.modify p fun prop =>
+    { env with counters, overBudget := env.overBudget || memoryStop,
+               stop := if memoryStop then some .memory else env.stop,
+               props := env.props.modify p fun prop =>
         { prop with proofs := prop.proofs ++ proofs, keys := keys.fold (init := prop.keys) (·.insert ·) } }
 
 mutual

@@ -47,6 +47,17 @@ structure Counters where
   joins : Nat := 0
   deriving Inhabited
 
+/-- The limit that ended a search: its time, its number of assertion nodes, the tuples
+of proofs joined, the proofs looked at by the joins, or the memory of the process. A
+run in rounds asks which, since only a limit that grows is worth trying again. -/
+inductive Stop where
+  | time
+  | nodes
+  | tuples
+  | work
+  | memory
+  deriving BEq, Inhabited, Repr
+
 /-- `RuProverForward`: the forward front. Its facts are expression nodes of the tree. -/
 structure Forward where
   /-- The facts by their expression. -/
@@ -102,6 +113,8 @@ structure Env where
   /-- When the search must stop, by the monotonic clock in milliseconds. -/
   deadline : Nat := 0xFFFFFFFFFFFFFFFF
   overBudget : Bool := false
+  /-- What stopped a join (`overBudget`). -/
+  stop : Option Stop := none
   deriving Inhabited
 
 /-- The leaves without those that have been expanded. -/

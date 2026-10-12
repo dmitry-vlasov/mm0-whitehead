@@ -34,6 +34,13 @@ structure ReplayOptions where
   progress : Bool := false
   /-- The memory the process may use, in bytes; 0 for no limit (`watchMemory`). -/
   memLimit : Nat := 0
+  /-- The time of the whole replay, in milliseconds: it then runs in rounds, the first
+  with `limits`, every next with `factor` times the limits of the one before, on the
+  theorems that stopped at a limit; 0 for one round. The tuples of a join are made at
+  once, so their budget is one of memory; it grows up to `tupleCap` (0: without end). -/
+  total : Nat := 0
+  factor : Nat := 4
+  tupleCap : Nat := 0
 
 structure ReplayStats where
   /-- Theorems with a proof in the range. -/
@@ -55,9 +62,14 @@ structure ReplayStats where
   /-- Proofs that reached the root and that the verifier did not accept. -/
   rejected : Nat := 0
   /-- With `full`: proofs found that are not the known one, and theorems stopped at a
-  limit. -/
+  limit, of which those stopped for the memory of the process. -/
   otherProofs : Nat := 0
   limited : Nat := 0
+  memoryLimited : Nat := 0
+  /-- For one theorem: the limit that stopped it. -/
+  stop : Option Stop := none
+  /-- The rounds run (`ReplayOptions.total`). -/
+  rounds : Nat := 0
   counters : Counters := {}
   deriving Inhabited
 
@@ -103,6 +115,7 @@ def add (a b : ReplayStats) : ReplayStats :=
     tooLarge := a.tooLarge + b.tooLarge, stepsIn := a.stepsIn + b.stepsIn, stepsOut := a.stepsOut + b.stepsOut,
     bytesIn := a.bytesIn + b.bytesIn, bytesOut := a.bytesOut + b.bytesOut, rejected := a.rejected + b.rejected,
     otherProofs := a.otherProofs + b.otherProofs, limited := a.limited + b.limited,
+    memoryLimited := a.memoryLimited + b.memoryLimited, rounds := a.rounds + b.rounds,
     counters := a.counters.add b.counters }
 
 end ReplayStats
@@ -119,13 +132,24 @@ def residentBytes : IO Nat := do
 
 /-- Watches the memory of the process until `stop` is set. Above 80% of `limit` bytes
 the largest running search gives up as at a limit, above 90% every one does, which
-frees their memory (`memoryLevel`); above `limit` it ends the process. -/
+frees their memory (`memoryLevel`). Above `limit`, every one gives up, and the process
+ends if the memory has not come back under the limit within 15 s: a search looks at
+the level between expansions and along a join, and one step can take more than the
+memory left. -/
 partial def watchMemory (limit : Nat) (stop : IO.Ref Bool) (log : String → IO Unit) : IO Unit := do
   if ← stop.get then return
-  let rss ← residentBytes
+  let mut rss ← residentBytes
   if rss > limit then
-    log s!"memory: {rss / 1000000} MB in use, over the limit of {limit / 1000000} MB; stopping"
-    IO.Process.exit 3
+    memoryLevel.set 2
+    log s!"memory: {rss / 1000000} MB in use, over the limit of {limit / 1000000} MB; every search gives up"
+    let mut waited := 0
+    while rss > limit && waited < 15000 do
+      IO.sleep 250
+      waited := waited + 250
+      rss ← residentBytes
+    if rss > limit then
+      log s!"memory: {rss / 1000000} MB in use after {waited} ms, still over the limit; stopping"
+      IO.Process.exit 3
   memoryLevel.set (if rss * 10 > limit * 9 then 2 else if rss * 10 > limit * 8 then 1 else 0)
   IO.sleep 250
   watchMemory limit stop log
@@ -212,6 +236,8 @@ def replayOne (db : Db) (vc : Verify.Ctx) (index : Index Nat) (opts : ReplayOpti
         | some t => if sameShape t skel then 0 else 1
         | none => 0),
       limited := if result.ending == .limit then 1 else 0,
+      memoryLimited := if result.ending == .limit && result.stop == some .memory then 1 else 0,
+      stop := if result.ending == .limit then result.stop else none,
       counters := c }
     match result.body, result.proof with
     | some body, some tree =>
@@ -239,7 +265,20 @@ the file, the new proof body if its proof was reconstructed.
 With `jobs` above one, that many theorems are replayed at once, each on a thread of its
 own: every theorem has a search state of its own, and the database and the index are
 only read. A worker takes the next theorem when it has finished one. With `progress`,
-a line every ten seconds says how far it has got. -/
+a line every ten seconds says how far it has got.
+
+With `total`, the replay runs in rounds: the first with `limits` per theorem, every
+next with `factor` times the limits of the one before (time, nodes, tuples, work), on
+the theorems that stopped at a limit in the round before — until none is left, or the
+time `total` is out, which also ends the searches of the round under way. Most proofs
+are replayed within a small budget; the few that need more get it without the rest
+waiting for them, and without a budget chosen in advance. A theorem's statistics are
+those of its last round.
+
+Only a theorem whose limit grows in the next round is tried again: the tuple budget
+stops at `tupleCap`, and a theorem stopped for the memory of the process was the
+largest of those running at once — when nothing else is left, the next round runs a
+quarter as many at once, down to one, where memory is the limit and the rounds end. -/
 def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
     IO (ReplayStats × Array (Option ByteArray)) := do
   let f := db.file
@@ -248,13 +287,65 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
   let todo := (Array.range f.stmts.size).filter fun i =>
     let s := f.stmts[i]!
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last
-  let results ← runJobs opts.jobs todo.size (fun k => do return (todo[k]!, ← replayOne db vc index opts todo[k]!))
-    opts.progress opts.memLimit log (fun k => s!"theorem {f.stmts[todo[k]!]!.index} {f.thmName f.stmts[todo[k]!]!.index}")
-  let mut stats : ReplayStats := {}
+  let name (i : Nat) := s!"theorem {f.stmts[i]!.index} {f.thmName f.stmts[i]!.index}"
+  let start ← IO.monoMsNow
+  let deadline := if opts.total == 0 then none else some (start + opts.total)
+  let mut results : Array (ReplayStats × Option ByteArray × Array String) := Array.replicate todo.size default
+  -- the places in `todo` still to replay
+  let mut pending := Array.range todo.size
+  let mut limits := opts.limits
+  let mut jobs := opts.jobs
+  let mut rounds := 0
+  while true do
+    rounds := rounds + 1
+    let roundStart ← IO.monoMsNow
+    let roundOpts := { opts with limits := { limits with deadline } }
+    let round ← runJobs jobs pending.size (fun k => do
+        -- past the time of the whole run a theorem is not started: it stays at a limit
+        if let some d := deadline then
+          if (← IO.monoMsNow) ≥ d then return ({ theorems := 1, failed := 1, limited := 1 }, none, #[])
+        -- nor while memory is short: it would give up at once
+        while (← memoryLevel.get) ≥ 1 do IO.sleep 100
+        replayOne db vc index roundOpts todo[pending[k]!]!)
+      opts.progress opts.memLimit log (fun k => name todo[pending[k]!]!)
+    let nextTuples := if opts.tupleCap == 0 then limits.maxTuples * opts.factor
+      else min (limits.maxTuples * opts.factor) opts.tupleCap
+    -- the theorems at a limit: those whose limit grows next round, and those stopped
+    -- for memory
+    let mut left := 0
+    let mut growing := #[]
+    let mut byMemory := #[]
+    let mut replayed := 0
+    for k in [0:pending.size] do
+      let r := round[k]!
+      results := results.set! pending[k]! r
+      replayed := replayed + r.1.replayed
+      if r.1.limited == 1 then
+        left := left + 1
+        match r.1.stop with
+        | some .memory => byMemory := byMemory.push pending[k]!
+        | some .tuples => if nextTuples > limits.maxTuples then growing := growing.push pending[k]!
+        | _ => growing := growing.push pending[k]!
+    let now ← IO.monoMsNow
+    if deadline.isSome then
+      log s!"  round {rounds}: {limits.maxMs} ms, {limits.maxProps} nodes, {limits.maxTuples} tuples, \
+        {limits.maxWork} work per theorem, {jobs} at once: {pending.size} theorems, {replayed} replayed, \
+        {left} at a limit, {byMemory.size} of them by memory, in {now - roundStart} ms"
+    if left == 0 || deadline.all (now ≥ ·) then break
+    if growing.isEmpty then
+      -- memory is what stops everything left: fewer at once, or the end
+      if byMemory.isEmpty || jobs == 1 then break
+      jobs := max 1 (jobs / 4)
+      pending := byMemory
+    else pending := growing
+    limits := { limits with maxMs := limits.maxMs * opts.factor, maxProps := limits.maxProps * opts.factor,
+                            maxTuples := nextTuples, maxWork := limits.maxWork * opts.factor }
+  let mut stats : ReplayStats := { rounds }
   let mut bodies : Array (Option ByteArray) := Array.replicate f.stmts.size none
-  for (i, (st, body, lines)) in results do
+  for k in [0:todo.size] do
+    let (st, body, lines) := results[k]!
     stats := stats.add st
-    if let some b := body then bodies := bodies.set! i (some b)
+    if let some b := body then bodies := bodies.set! todo[k]! (some b)
     for l in lines do log l
   return (stats, bodies)
 
