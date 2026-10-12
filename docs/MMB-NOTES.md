@@ -4,7 +4,7 @@ This is our own description of the MMB binary proof format, written from the for
 description, the formal semantics, and the reference implementation `mm0-rs`. It is meant
 to be enough to re-implement the reader without opening any of them.
 
-Sources, all in the local checkout `/home/dmitry/tools/mm0` at commit `0d414c0b`, in
+Sources, all in a checkout of the MM0 repository at commit `0d414c0b`, in
 order of authority:
 
 | Short name | Files | Role |

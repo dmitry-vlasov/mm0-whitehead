@@ -119,7 +119,7 @@ finds the substitutions again.
 | steps | 3,508,182, as in the file |
 | tuples of proofs that did not unify; proofs rejected by the verifier | 0; 0 |
 | proof bodies | 32.4 MB in the file, 32.7 MB reconstructed |
-| time | 70 to 90 s |
+| time | 77 s on one processor, 8.8 s on 24 (2026-10-12) |
 
 `out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
 
@@ -128,12 +128,13 @@ finds the substitutions again.
 > time budget; report the fraction proved and the proof lengths.
 
 `scripts/search-baseline.sh`: every theorem proved from the assertions before it and
-nothing else, breadth first, 1 s per theorem.
+nothing else, breadth first, 1 s per theorem, one search per physical core.
 
 | | propositional calculus | predicate calculus |
 | - | - | - |
 | theorems | 1,520 | 1,262 |
 | proved | 816 (53.7%) | 377 (29.9%) |
+| proved, 2026-10-12, one search per core (12 at once) | 840 (55.3%) | 422 (33.4%) |
 | steps of a proof found: median, largest | 2, 4 | 1, 3 |
 | proofs of 0, 1, 2, 3, 4 steps | 2, 26, 509, 270, 9 | 3, 300, 59, 15, 0 |
 | shorter than in the file / the same / longer | 15 / 604 / 197 | 233 / 136 / 8 |

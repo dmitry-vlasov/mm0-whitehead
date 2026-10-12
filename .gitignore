@@ -1,3 +1,4 @@
 /.lake
 /.tools
 __pycache__/
+/all.sh

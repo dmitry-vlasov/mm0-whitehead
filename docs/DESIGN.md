@@ -889,7 +889,7 @@ all substitutions by unification.
 | steps | 3,508,182, the same as in the file |
 | tuples that did not unify, proofs rejected by the verifier | 0, 0 |
 | proof bodies | 32.4 MB in the file, 32.7 MB reconstructed |
-| time | 73 s |
+| time | 77 s on one processor, 8.8 s on 24 (2026-10-12) |
 
 `out.mmb` is accepted by our verifier against `setmm.mm0`, by `mm0-rs`, and by mm0-c.
 
@@ -1013,8 +1013,10 @@ on these theorems.
 
 Every theorem of a section is proved from scratch: the engine is given the statement
 and the assertions that precede it, and no proof. The strategy is breadth first, all
-leaves round by round, with nothing to rank them. The limit is 1 s per theorem. A
-section is told by the numbers of its theorems: propositional calculus is what comes
+leaves round by round, with nothing to rank them. The limit is 1 s per theorem, and the
+script runs one search per physical core: with a time limit, what a search gets done
+depends on what shares its core (24 at once on 12 cores: 682 and 347 proved where 12
+at once give 840 and 422). A section is told by the numbers of its theorems: propositional calculus is what comes
 before the term `wal` (theorems 0 to 1532), predicate calculus what comes before
 `ax_ext` (1533 to 2824).
 
@@ -1022,6 +1024,7 @@ before the term `wal` (theorems 0 to 1532), predicate calculus what comes before
 | - | - | - |
 | theorems | 1,520 | 1,262 |
 | proved | 816 (53.7%) | 377 (29.9%) |
+| proved, 2026-10-12, one search per core (12 at once) | 840 (55.3%) | 422 (33.4%) |
 | stopped at the limit | 704 | 885 |
 | proofs rejected by the verifier | 0 | 0 |
 | steps of a proof found: median, largest | 2, 4 | 1, 3 |

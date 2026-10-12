@@ -44,9 +44,9 @@ Who is right when sources disagree, in this order:
 example files use it and our reader must support it.
 
 Local checkouts:
-- MM0: `/home/dmitry/tools/mm0/` (`mm0.md`, `mm0-c/mmb.md`, `examples/`, `mm0-rs/`,
+- MM0: a checkout of the MM0 repository, named by `MM0_REPO` (`mm0.md`, `mm0-c/mmb.md`, `examples/`, `mm0-rs/`,
   `mm0-lean/`, `mm0-c/`, `tests/`).
-- Russell: `/home/dmitry/dev/russell-flow/` (see the next section).
+- Russell: a checkout of `russell-flow` beside this repository (see the next section).
 
 When the formal semantics and `mm0-rs` disagree, follow the formal semantics and record
 the case in `docs/MMB-NOTES.md`. When the sources above do not settle a question, or
@@ -61,7 +61,7 @@ Phase 3 ports an existing, working engine; it does not design a new one.
   functions, explicit state threading, path-based imports (`import ru/src;` →
   `src/ru/src.flow`). Translating Flow9 to Lean is therefore mostly direct: structs
   become `structure`s, unions become `inductive`s, `switch` becomes `match`. Read
-  `/home/dmitry/dev/russell-flow/CLAUDE.md` for the Flow9 notes and the layout of that
+  `CLAUDE.md` of the Russell checkout for the Flow9 notes and the layout of that
   repository.
 - **The Russell source code is the final judge.** For anything in the prover — the
   proof variant tree, expansion, unification, substitution composition, indexing, proof

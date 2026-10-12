@@ -2,7 +2,7 @@
 
 Tooling for [Metamath Zero](https://github.com/digama0/mm0) in Lean 4: readers for the
 `.mm0` and `.mmb` formats, an independent verifier, and an automated prover ported from
-the Russell prover. The plan and its phases are in [CLAUDE.md](CLAUDE.md); the current
+the [Russell](https://github.com/dmitry-vlasov/russell-flow) prover. The plan and its phases are in [CLAUDE.md](CLAUDE.md); the current
 state is in [docs/STATUS.md](docs/STATUS.md).
 
 ## Build and test
@@ -46,6 +46,28 @@ A variable of a theorem is a free variable: the proof holds for every value of i
 metavariables instead: the prover finds values for them, and `--verbose` prints what it
 found. This marking is a stub — MM0 has no syntax for it — and such a proof, which proves
 an instance of the theorem, is not written or checked.
+
+## Results
+
+On the translation of set.mm to MM0 (47,611 theorems, 3.5 million proof steps), on a
+machine with 12 cores (24 threads) and 32 GB given to the process, 2026-10-12:
+
+| | theorems | limits per theorem | time |
+| - | - | - | - |
+| replay from the assertions used (`prove replay`) | 47,611 of 47,611 | none | 77 s on one processor, 8.8 s on 24 |
+| replay over all variants of every node (`--full`) | 46,254 of 47,611; 1,357 stopped at a limit | 60 s, 2,000,000 nodes, 300,000 joined proofs, 20,000,000 proofs looked at in joins | 1 h 57 min, 43.5 h of processor time, 25 GB at most |
+| the same for the first 5,899 theorems, in rounds (`--total 600`) | 5,897; with two other variants expanded per node, 5,894 | from 1 s, 100,000 nodes, 10,000 joined proofs, growing fourfold a round | 15 s; 31 s |
+| proved from scratch, breadth first (`prove search`), propositional calculus | 840 of 1,520 (55%) | 1 s, 2,000,000 nodes, one search per core | 10 min |
+| the same, predicate calculus | 422 of 1,262 (33%) | 1 s, 2,000,000 nodes, one search per core | |
+
+Every proof found is checked by the verifier and none was rejected; the replayed file
+is also accepted by `mm0-rs`. The example files with definitions replay likewise:
+`set` 26 of 26, `hol` 79 of 99, `peano` 2,650 of 2,700, `mm0` 4,800 of 4,895, `x86`
+7,518 of 7,671 — every proof except those that share a conversion (`ConvCut`), which
+the replay does not read yet. A search with a time limit depends on the machine and
+on how many searches share it: with 24 at once on the 12 cores, propositional calculus
+gives 682 and predicate calculus 347. See [docs/STATUS.md](docs/STATUS.md) and
+[docs/DESIGN.md](docs/DESIGN.md), "The replay test", "The search test".
 
 ## Reference tools and test corpus
 

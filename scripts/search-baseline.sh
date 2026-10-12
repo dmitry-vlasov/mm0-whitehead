@@ -5,6 +5,9 @@
 #
 #   scripts/search-baseline.sh [MS]        MS: the limit per theorem, default 1000
 #
+# One search runs per physical core: a search with a time limit gets less done when
+# two share a core, and the numbers would then depend on how many ran at once.
+#
 # The parts are told apart by the number of the theorem: propositional calculus is what
 # comes before the term wal, predicate calculus what comes before ax_ext. The numbers
 # below are those of the translation of the set.mm that scripts/build-corpus.sh was
@@ -12,13 +15,15 @@
 set -eu
 cd "$(dirname "$0")/.."
 ms=${1:-1000}
+jobs=$(lscpu -p=Core,Socket 2>/dev/null | grep -v '^#' | sort -u | wc -l)
+[ "$jobs" -gt 0 ] 2>/dev/null || jobs=$(nproc)
 out=.tools/search
 mkdir -p "$out"
 lake build mm0-whitehead
 bin=.lake/build/bin/mm0-whitehead
 run() {  # name first last
   "$bin" prove search .tools/corpus/setmm.mmb --from "$2" --to "$3" --ms "$ms" --max-nodes 2000000 \
-    --verbose -o "$out/$1.mmb" > "$out/$1.log"
+    --jobs "$jobs" --verbose -o "$out/$1.mmb" > "$out/$1.log"
   "$bin" verify "$out/$1.mmb" > /dev/null
   python3 scripts/search-summary.py "$1" "$out/$1.log"
 }
