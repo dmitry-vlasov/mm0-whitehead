@@ -96,44 +96,72 @@ def indexesStep (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst) :
                 rule := some id, leaf := node.ends.contains si.curr,
                 ok := st.ok && (st.rule.isNone || st.rule == some id) }
 
-/-- `ruDoUnifyTrivial`: one index alone: every subexpression that starts at the node. -/
-def indexesTrivial (ixs : Array (Index Nat)) (si : SubIndex) (sub : Subst) : Array IndexesRet :=
-  let ix := ixs[si.ix]!
-  ix.nodes[si.curr]!.ends.map fun last => ⟨#[last], sub, ix.subexpr si.curr last⟩
+/-- `ruDoUnifyTrivial`: one index alone: every subexpression that starts at the node, as
+it was stored. -/
+def indexesTrivial (ixs : Array (Index Nat)) (si : SubIndex) (sub : Subst) (acc : Array IndexesRet) :
+    Array IndexesRet :=
+  let node := ixs[si.ix]!.nodes[si.curr]!
+  (Array.range node.ends.size).foldl (init := acc) fun acc k =>
+    acc.push ⟨#[node.ends[k]!], sub, node.endExps[k]!⟩
 
+/- The results of a walk are pushed onto an accumulator, down the recursion, where Russell
+concatenates the arrays that come back. -/
 mutual
 
 /-- `ruDoUnifyIndexes`: each index goes one node on, to a child of where it is. -/
-partial def indexesDown (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst) : Array IndexesRet :=
-  let choices := at_.map fun si =>
-    let node := ixs[si.ix]!.nodes[si.curr]!
-    (node.rules ++ node.vars).map fun c => { si with curr := c }
-  (tuples choices).foldl (init := #[]) fun acc next => acc ++ indexesNodes ixs next sub
+partial def indexesDown (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst)
+    (acc : Array IndexesRet) : Array IndexesRet :=
+  indexesTuples ixs at_ false 0 none #[] sub acc
+
+/-- The tuples of children of the places `at_`, one from each, walked by `indexesNodes`:
+of the whole product (Russell's `CartProd`), only those whose applications are all of
+one term, since `indexesStep` rejects every other at once and the product is mostly
+those. The first `i` places are chosen (`picked`), their applications of the term
+`rule`; with `fromRoot` the places are the roots of the indexes, and a child starts a
+subexpression. The tuples come in the order of the product. -/
+partial def indexesTuples (ixs : Array (Index Nat)) (at_ : Array SubIndex) (fromRoot : Bool) (i : Nat)
+    (rule : Option Nat) (picked : Array SubIndex) (sub : Subst) (acc : Array IndexesRet) :
+    Array IndexesRet := Id.run do
+  if i == at_.size then return indexesNodes ixs picked sub acc
+  let si := at_[i]!
+  let ix := ixs[si.ix]!
+  let node := ix.nodes[si.curr]!
+  let mut acc := acc
+  for c in node.rules do
+    let id := Node.appId ix.nodes[c]!.key
+    if rule.isNone || rule == some id then
+      let next := if fromRoot then { si with start := c, curr := c } else { si with curr := c }
+      acc := indexesTuples ixs at_ fromRoot (i + 1) (some id) (picked.push next) sub acc
+  for c in node.vars do
+    let next := if fromRoot then { si with start := c, curr := c } else { si with curr := c }
+    acc := indexesTuples ixs at_ fromRoot (i + 1) rule (picked.push next) sub acc
+  return acc
 
 /-- `ruDoUnifyIndexNodes`: the indexes are at the nodes `at_`; these are unified, and the
 walk goes on behind them. -/
-partial def indexesNodes (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst) : Array IndexesRet :=
-  if at_.isEmpty then #[]
-  else if at_.size == 1 then indexesTrivial ixs at_[0]! sub
+partial def indexesNodes (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst)
+    (acc : Array IndexesRet) : Array IndexesRet :=
+  if at_.isEmpty then acc
+  else if at_.size == 1 then indexesTrivial ixs at_[0]! sub acc
   else
     let step := indexesStep ixs at_ sub
-    if !step.ok then #[]
+    if !step.ok then acc
     else
       -- binds the variables of the step to `ex` and goes on from `next`
-      let finish (s : Subst) (ex : Exp) (next : Array SubIndex) : Array IndexesRet :=
+      let finish (s : Subst) (ex : Exp) (next : Array SubIndex) (acc : Array IndexesRet) : Array IndexesRet :=
         match step.vars.foldlM (init := s) fun s1 v => s1.add1 v ex with
-        | some s1 => indexesNext ixs next s1
-        | none => #[]
+        | some s1 => indexesNext ixs next s1 acc
+        | none => acc
       match step.rule with
       | some _ =>
         if step.isVar.any fun isVar => isVar then
           if !step.leaf then
             -- the applications are unified among themselves first, as whole subexpressions
             let inner :=
-              if step.inds.size > 1 then indexesDown ixs step.inds sub
-              else if step.inds.size == 1 then indexesTrivial ixs step.inds[0]! sub
+              if step.inds.size > 1 then indexesDown ixs step.inds sub #[]
+              else if step.inds.size == 1 then indexesTrivial ixs step.inds[0]! sub #[]
               else #[]
-            inner.foldl (init := #[]) fun acc ret =>
+            inner.foldl (init := acc) fun acc ret =>
               match unifyExps (step.exprs.push ret.expr) ret.sub with
               | none => acc
               | some s =>
@@ -148,34 +176,41 @@ partial def indexesNodes (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub :
                       out := out.push { at_[i]! with curr := ret.vect[k]! }
                       k := k + 1
                   return out
-                acc ++ finish s (s.apply ret.expr) next
+                finish s (s.apply ret.expr) next acc
           else
             let const : Exp := ⟨#[ixs[step.inds[0]!.ix]!.nodes[step.inds[0]!.curr]!.key]⟩
             match unifyExps (step.exprs.push const) sub with
-            | some s => finish s const at_
-            | none => #[]
+            | some s => finish s const at_ acc
+            | none => acc
         else
           -- applications of one term everywhere: on into the arguments
-          indexesNext ixs at_ sub
+          indexesNext ixs at_ sub acc
       | none =>
         if step.exprs.isEmpty then
           match unifyStepVar step.vars with
-          | some w => finish sub (Exp.ofVar w) at_
-          | none => #[]
+          | some w => finish sub (Exp.ofVar w) at_ acc
+          | none => acc
         else
           match unifyExps step.exprs sub with
-          | some s => finish s (s.apply step.exprs[0]!) at_
-          | none => #[]
+          | some s => finish s (s.apply step.exprs[0]!) at_ acc
+          | none => acc
 
 /-- `ruDoUnifyIndexNodesNext`: if every index has reached the end of its subexpression
 the unification is complete; otherwise the walk goes on. -/
-partial def indexesNext (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst) : Array IndexesRet :=
+partial def indexesNext (ixs : Array (Index Nat)) (at_ : Array SubIndex) (sub : Subst)
+    (acc : Array IndexesRet) : Array IndexesRet :=
   let ended := at_.all fun si =>
     let ends := ixs[si.ix]!.nodes[si.start]!.ends
     ends.isEmpty || ends.contains si.curr
   if ended then
-    #[⟨at_.map (·.curr), sub, sub.apply (ixs[at_[0]!.ix]!.subexpr at_[0]!.start at_[0]!.curr)⟩]
-  else indexesDown ixs at_ sub
+    -- the expression of the first index: a variable (a node without ends), or the
+    -- stored subexpression that ends where it is
+    let si := at_[0]!
+    let node := ixs[si.ix]!.nodes[si.start]!
+    let ex := if node.ends.isEmpty then Exp.ofVar node.key
+      else node.endExps[(node.ends.findIdx? (· == si.curr)).getD 0]!
+    acc.push ⟨at_.map (·.curr), sub, sub.apply ex⟩
+  else indexesDown ixs at_ sub acc
 
 end
 
@@ -185,10 +220,8 @@ under the expression taken. -/
 def unifyIndexes (ixs : Array (Index Nat)) (sub : Subst := {}) : Array (Subst × Exp × Array (Array Nat)) :=
   if ixs.isEmpty then #[]
   else
-    let choices := (Array.range ixs.size).map fun i =>
-      let root := ixs[i]!.nodes[0]!
-      (root.rules ++ root.vars).map fun c => ({ ix := i, start := c, curr := c } : SubIndex)
-    let rets := (tuples choices).foldl (init := #[]) fun acc at_ => acc ++ indexesNodes ixs at_ sub
+    let roots := (Array.range ixs.size).map fun i => ({ ix := i, start := 0, curr := 0 } : SubIndex)
+    let rets := indexesTuples ixs roots true 0 none #[] sub #[]
     rets.map fun ret => (ret.sub, ret.expr, (Array.range ixs.size).map fun i => ixs[i]!.nodes[ret.vect[i]!]!.data)
 
 /-- `ruUnifySubsProd`: the tuples, one substitution from each set, that unify: for each,
