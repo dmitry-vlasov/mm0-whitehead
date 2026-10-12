@@ -14,15 +14,12 @@ inductive Only where
   | premise (ind : Nat)
   /-- Only this assertion, and no premise. -/
   | assertion (id : Nat)
-  /-- Only this unfolding: def `term` unfolded (or folded) at `path` of the expression. -/
-  | conv (term : Nat) (path : Array Nat) (unfold : Bool)
   deriving Inhabited
 
 /-- The restriction of an expansion to the step of a known proof. -/
 def Skeleton.only : Skeleton → Only
   | .step t _ => .assertion t
   | .hyp k => .premise k
-  | .conv t path unfold _ => .conv t path unfold
 
 /-- Counters of the engine's work, for reports. -/
 structure Counters where

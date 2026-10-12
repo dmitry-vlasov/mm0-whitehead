@@ -57,31 +57,28 @@ def convRule (db : Db) (e : Exp) (t pos : Nat) (unfold : Bool) : Option Assertio
 /-- The unfoldings and foldings that expression `e` has: for every application of a def
 in `e`, the unfolding of it; for every application whose term is the head of a def's
 value, the folding into that def, if the value unifies there. Only defs declared before
-the theorem. With `only`, that one, if it is there. -/
-def convCandidates (env : Env) (e : Exp) (only : Option (Nat × Nat × Bool) := none) : Array Candidate := Id.run do
+the theorem. -/
+def convCandidates (env : Env) (e : Exp) : Array Candidate := Id.run do
   let db := env.db
   let try_ (t pos : Nat) (unfold : Bool) : Option Candidate := do
     let rule ← convRule db e t pos unfold
     -- the conclusion first: of two variables the later is kept, so the rule's are bound
     let sub ← unifyExps #[rule.concl, e] {}
     return { step := .conv t pos unfold, rule, binds := Binds.ofSubst sub }
-  match only with
-  | some (t, pos, unfold) => return (try_ t pos unfold).toArray
-  | none =>
-    let mut out := #[]
-    for pos in [0:e.size] do
-      let node := e.nodes[pos]!
-      if Node.isVar node || Node.isConst node then continue
-      let head := Node.appId node
-      if head < env.task.terms && (db.terms[head]!.value).isSome then
-        if let some c := try_ head pos true then out := out.push c
-      for t in db.defs do
-        if t < env.task.terms then
-          if let some v := db.terms[t]!.value then
-            let root := v.expr.nodes[0]!
-            if !Node.isVar root && Node.appId root == head then
-              if let some c := try_ t pos false then out := out.push c
-    return out
+  let mut out := #[]
+  for pos in [0:e.size] do
+    let node := e.nodes[pos]!
+    if Node.isVar node || Node.isConst node then continue
+    let head := Node.appId node
+    if head < env.task.terms && (db.terms[head]!.value).isSome then
+      if let some c := try_ head pos true then out := out.push c
+    for t in db.defs do
+      if t < env.task.terms then
+        if let some v := db.terms[t]!.value then
+          let root := v.expr.nodes[0]!
+          if !Node.isVar root && Node.appId root == head then
+            if let some c := try_ t pos false then out := out.push c
+  return out
 
 /-- The ways to expand expression node `h`: the assertions whose conclusion unifies with
 its expression — all that the index finds among those declared before the task's
@@ -98,10 +95,6 @@ def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
     | some s => #[{ step := .assertion id, rule := env.db.asserts[id]!, binds := Binds.ofSubst s }]
     | none => #[]
   | some (.premise _) => #[]
-  | some (.conv t path unfold) =>
-    match e.nodeAt path with
-    | some pos => convCandidates env e (some (t, pos, unfold))
-    | none => #[]
 
 /-- `ruExpandHyp` -/
 def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
@@ -185,7 +178,7 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
         match restriction with
         | none => env.premises.unify ex
         | some (.premise k) => (env.premises.unify ex).filter (·.data == k)
-        | some (.assertion _) | some (.conv ..) => #[]
+        | some (.assertion _) => #[]
       for unif in unified do
         let proof := Proof.top h unif.expr unif.data unif.sub
         modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof } }

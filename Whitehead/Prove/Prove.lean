@@ -92,14 +92,12 @@ def oracle (skel : Skeleton) : Strategy OracleState where
       let wanted : Option Step := match s with
         | .step t _ => some (.assertion t)
         | .hyp _ => none
-        | .conv t path unfold _ => (env.hyps[h]!.expr.nodeAt path).map fun pos => .conv t pos unfold
       match wanted with
       | some step => env.hyps[h]!.children.filterMap fun p =>
           if env.props[p]!.step == step && !env.props[p]!.expanded then some (p, s) else none
       | none => #[]
     let children (s : Skeleton) : Array Skeleton := match s with
       | .step _ cs => cs
-      | .conv _ _ _ c => #[c]
       | .hyp _ => #[]
     let next : Array (Nat × Skeleton) :=
       if !st.started then matching 0 skel
@@ -133,10 +131,9 @@ def oracleAll (skel : Skeleton) (others : Option Nat) : Strategy OracleAllState 
   root := none
   init := {}
   step env st :=
-    let wanted (h : Nat) (s : Skeleton) : Option Step := match s with
+    let wanted (_ : Nat) (s : Skeleton) : Option Step := match s with
       | .step t _ => some (.assertion t)
       | .hyp _ => none
-      | .conv t path unfold _ => (env.hyps[h]!.expr.nodeAt path).map fun pos => .conv t pos unfold
     -- the variant on the path at node `h`, if any, and the alternatives to expand
     let at_ (h : Nat) (s : Skeleton) : Array (Nat × Skeleton) × Array Nat :=
       let w := wanted h s
@@ -149,7 +146,6 @@ def oracleAll (skel : Skeleton) (others : Option Nat) : Strategy OracleAllState 
       (onPath.map (·, s), alts)
     let children (s : Skeleton) : Array Skeleton := match s with
       | .step _ cs => cs
-      | .conv _ _ _ c => #[c]
       | .hyp _ => #[]
     let (next, alts) : Array (Nat × Skeleton) × Array Nat :=
       if !st.started then at_ 0 skel
@@ -169,11 +165,7 @@ partial def sameShape (t : ProofTree) (s : Skeleton) : Bool :=
   match t, s with
   | .hyp i, .hyp j => i == j
   | .step a _ cs, .step b ds => a == b && cs.size == ds.size && (cs.zip ds).all fun (c, d) => sameShape c d
-  | .conv t p u _ _ c, .conv t' p' u' d => t == t' && p == p' && u == u' && sameShape c d
   | _, _ => false
-
-/-- What `accept` says of a proof at the root that is not the one asked for. -/
-def anotherProof : String := "another proof than the known one"
 
 /-! ### Closing and accepting a proof -/
 
@@ -336,9 +328,6 @@ structure Result where
   rejection : String := ""
   /-- The last proof that was rejected. -/
   rejectedProof : Option ProofTree := none
-  /-- Proofs that reached the root and were turned down as `anotherProof`; they are not
-  counted in `rejected`. -/
-  others : Nat := 0
   /-- The limit reached (`ending = .limit`). -/
   stop : Option Stop := none
   env : Env
@@ -428,7 +417,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
   let direct := (env.premises.unify env.task.goal).filter fun u =>
     match strategy.root with
     | some (.premise j) => j == u.data
-    | some (.assertion _) | some (.conv ..) => false
+    | some (.assertion _) => false
     | none => true
   for u in direct.qsort (·.data < ·.data) do
     if let .ok body := accept env (.hyp u.data) #[] then
@@ -439,7 +428,6 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
                                | some d => min d (start + limits.maxMs)
                                | none => start + limits.maxMs }
   let mut rejected := 0
-  let mut others := 0
   let mut rejection := ""
   let mut rejectedProof : Option ProofTree := none
   -- the forward front is seeded before the root is expanded (`ruSeedForwardFront`), and
@@ -449,10 +437,9 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     env ← joinFacts env' seeds limits start sid
     let (found, r, env') := takeRootProofs accept env
     env := env'
-    others := others + (r.filter (·.1 == anotherProof)).size
-    rejected := rejected + (r.filter (·.1 != anotherProof)).size
+    rejected := rejected + r.size
     if let some (tree, body, answer, values) := found then
-      return { ending := .proved, proof := some tree, body := some body, answer := some answer, values, rejected, others, env }
+      return { ending := .proved, proof := some tree, body := some body, answer := some answer, values, rejected, env }
   env := ((← (expandHyp 0 strategy.root).run env)).2
   let mut st := strategy.init
   -- a wave that leaves no front lets the strategy decide once more; two in a row end
@@ -465,47 +452,45 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     | .done =>
       -- a join that the budget stopped leaves the tree without some of its proofs
       return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
-               rejected, rejection, rejectedProof, others, env }
+               rejected, rejection, rejectedProof, env }
     | .forward =>
       let (env', more) ← forwardWave env limits start sid
       env := env'
       let (found, r, env') := takeRootProofs accept env
       env := env'
-      others := others + (r.filter (·.1 == anotherProof)).size
-      rejected := rejected + (r.filter (·.1 != anotherProof)).size
-      if let some (msg, tree) := (r.filter (·.1 != anotherProof)).back? then
+      rejected := rejected + r.size
+      if let some (msg, tree) := r.back? then
         rejection := msg
         rejectedProof := some tree
       if let some (tree, body, answer, values) := found then
         return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
-                 rejected, rejection, rejectedProof, others, env }
+                 rejected, rejection, rejectedProof, env }
       if let some stop ← overNow env limits start sid then
-        return { ending := .limit, stop, rejected, rejection, rejectedProof, others, env }
+        return { ending := .limit, stop, rejected, rejection, rejectedProof, env }
       if more then dry := false
       else if !dry then dry := true
-      else return { ending := .exhausted, rejected, rejection, rejectedProof, others, env }
+      else return { ending := .exhausted, rejected, rejection, rejectedProof, env }
     | .expand items =>
       dry := false
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
         if let some stop ← overNow env limits start sid then
-          return { ending := .limit, stop, rejected, rejection, rejectedProof, others, env }
+          return { ending := .limit, stop, rejected, rejection, rejectedProof, env }
         let (_, env') ← (proveProp p only).run env
         env := env'
         if !env.rootProofs.isEmpty then
           let (found, r, env') := takeRootProofs accept env
           env := env'
-          others := others + (r.filter (·.1 == anotherProof)).size
-          rejected := rejected + (r.filter (·.1 != anotherProof)).size
-          if let some (msg, tree) := (r.filter (·.1 != anotherProof)).back? then
+          rejected := rejected + r.size
+          if let some (msg, tree) := r.back? then
             rejection := msg
             rejectedProof := some tree
           if let some (tree, body, answer, values) := found then
             return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
-                     rejected, rejection, rejectedProof, others, env }
+                     rejected, rejection, rejectedProof, env }
   return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
-           rejected, rejection, rejectedProof, others, env }
+           rejected, rejection, rejectedProof, env }
 
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
 reaches the root is given to `accept`, which says whether it counts. -/

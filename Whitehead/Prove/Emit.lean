@@ -14,7 +14,7 @@ proof, each step as the proofs of its premises, the expressions for all binders 
 assertion, the conclusion, and `Thm`. A variable that is left in the proof must be a
 name, and becomes a `Dummy`.
 
-A step of the conversion rule `conv_s` (`Db.convRules`) is `Conv` with the conversion
+A step of the conversion rule `conv_s` (`convRules` in `Db.lean`) is `Conv` with the conversion
 proof that the tree of rules under it stands for (`emitConvProof`): `refl` is `Refl`,
 `cong_t` is `Cong`, `unfold_f` is `Unfold`, `fold_f` is `Symm`, `Unfold`, `Symm`.
 

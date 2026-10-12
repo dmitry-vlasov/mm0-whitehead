@@ -179,7 +179,7 @@ def defsTests : TestM Unit := do
 gets all its variants, the known proof's are clicked, and with `others` that many other
 variants of every node on the way are expanded too, so that their proofs meet the known
 one's in the joins. Every proof that reaches the root is checked by the verifier; the
-known proof must be among them. -/
+first that passes counts, and it need not be the known one. -/
 def fullReplayTests : TestM Unit := do
   for (path, name) in [(logicPath, "logic"), (defsPath, "defs")] do
     let file ←
@@ -241,7 +241,7 @@ def replayDefsCorpusTests : TestM Unit := do
   let (stats, bodies) ← replay db {} fun _ => pure ()
   check "replay peano: every proof without a shared conversion is reconstructed"
     (stats.replayed + stats.conversions == stats.theorems && stats.failed == 0 && stats.rejected == 0)
-    s!"{stats.replayed} replayed, {stats.failed} not, {stats.convInVariable} at a variable, {stats.rejected} rejected"
+    s!"{stats.replayed} replayed, {stats.failed} not, {stats.rejected} rejected"
   match MmbFile.parse (file.withBodies bodies) with
   | .error e => check "replay peano: the file with the new bodies is read" false e.msg
   | .ok f2 =>

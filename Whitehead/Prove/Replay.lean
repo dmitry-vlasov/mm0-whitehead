@@ -20,8 +20,9 @@ structure ReplayOptions where
   /-- Report every theorem that is not reconstructed. -/
   verbose : Bool := false
   /-- Over the full expansion (`oracleAll`): every node gets all its variants, the
-  known proof's are clicked, and only the known proof is accepted. Otherwise each node
-  gets the known proof's variant alone (`oracle`). -/
+  known proof's are clicked, and the first proof at the root that the verifier accepts
+  counts, known or not (`otherProofs` says which). Otherwise each node gets the known
+  proof's variant alone (`oracle`). -/
   full : Bool := false
   /-- With `full`: how many other variants of each node on the path are expanded too
   (`none`: all). -/
@@ -49,9 +50,6 @@ structure ReplayStats where
   failed : Nat := 0
   /-- Left out: the proof shares a conversion (`ConvCut`), or is larger than `maxSteps`. -/
   conversions : Nat := 0
-  /-- Among those not replayed: the known proof unfolds a def at a place that the tree
-  has as a variable, where the expansion offers no unfolding. -/
-  convInVariable : Nat := 0
   tooLarge : Nat := 0
   /-- Steps of the known proofs that were replayed, and of the reconstructed ones. -/
   stepsIn : Nat := 0
@@ -73,29 +71,6 @@ structure ReplayStats where
   counters : Counters := {}
   deriving Inhabited
 
-/-- For a replay that found no proof: does a step of the known proof unfold a def at a
-place that the tree has as a variable? The tree is walked along the known proof, as the
-oracle expanded it. -/
-partial def convInVariable (env : Env) (h : Nat) (s : Skeleton) : Bool :=
-  let hyp := env.hyps[h]!
-  let under (p : Nat) (children : Array Skeleton) : Bool :=
-    let hyps := env.props[p]!.children
-    (Array.range (min children.size hyps.size)).any fun i => convInVariable env hyps[i]! children[i]!
-  match s with
-  | .hyp _ => false
-  | .conv t path unfold child =>
-    match hyp.expr.nodeAt path with
-    | none => true
-    | some pos =>
-      if Node.isVar hyp.expr.nodes[pos]! then true
-      else match hyp.children.find? fun p => env.props[p]!.step == .conv t pos unfold with
-        | some p => under p #[child]
-        | none => false
-  | .step t children =>
-    match hyp.children.find? fun p => env.props[p]!.step == .assertion t with
-    | some p => under p children
-    | none => false
-
 namespace Counters
 
 def add (a b : Counters) : Counters :=
@@ -111,7 +86,7 @@ namespace ReplayStats
 
 def add (a b : ReplayStats) : ReplayStats :=
   { theorems := a.theorems + b.theorems, replayed := a.replayed + b.replayed, failed := a.failed + b.failed,
-    conversions := a.conversions + b.conversions, convInVariable := a.convInVariable + b.convInVariable,
+    conversions := a.conversions + b.conversions,
     tooLarge := a.tooLarge + b.tooLarge, stepsIn := a.stepsIn + b.stepsIn, stepsOut := a.stepsOut + b.stepsOut,
     bytesIn := a.bytesIn + b.bytesIn, bytesOut := a.bytesOut + b.bytesOut, rejected := a.rejected + b.rejected,
     otherProofs := a.otherProofs + b.otherProofs, limited := a.limited + b.limited,
@@ -244,12 +219,11 @@ def replayOne (db : Db) (vc : Verify.Ctx) (index : Index Nat) (opts : ReplayOpti
       return ({ stats with replayed := 1, stepsIn := steps, stepsOut := tree.size,
                            bytesIn := s.stop - s.bodyStart, bytesOut := body.size }, some body, #[])
     | _, _ =>
-      let atVar := convInVariable result.env 0 skel
-      stats := { stats with failed := 1, convInVariable := if atVar then 1 else 0 }
+      stats := { stats with failed := 1 }
       if opts.verbose then
         let why := match result.ending with
           | .proved => "proved"
-          | .exhausted => if atVar then "an unfolding where the tree has a variable" else "the tree has no proof"
+          | .exhausted => "the tree has no proof"
           | .limit => "limit reached"
         lines := lines.push s!"not replayed: theorem {s.index} {name} ({steps} steps): {why}; \
           {c.props} assertion nodes, {c.tuples} tuples, {c.notUnified} not unified, {c.disjoint} disjointness, \
@@ -276,9 +250,11 @@ waiting for them, and without a budget chosen in advance. A theorem's statistics
 those of its last round.
 
 Only a theorem whose limit grows in the next round is tried again: the tuple budget
-stops at `tupleCap`, and a theorem stopped for the memory of the process was the
-largest of those running at once — when nothing else is left, the next round runs a
-quarter as many at once, down to one, where memory is the limit and the rounds end. -/
+stops at `tupleCap`. A theorem stopped for the memory of the process was stopped by
+what ran beside it (the largest of those running, or all of them when memory was very
+short): it waits, and when nothing else is left, a round with a quarter as many at
+once takes the waiting ones, down to one at once, where memory is the limit and the
+rounds end. -/
 def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
     IO (ReplayStats × Array (Option ByteArray)) := do
   let f := db.file
@@ -296,6 +272,8 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
   let mut limits := opts.limits
   let mut jobs := opts.jobs
   let mut rounds := 0
+  -- stopped for memory, to be tried again with fewer at once
+  let mut waiting : Array Nat := #[]
   while true do
     rounds := rounds + 1
     let roundStart ← IO.monoMsNow
@@ -331,12 +309,14 @@ def replay (db : Db) (opts : ReplayOptions) (log : String → IO Unit) :
       log s!"  round {rounds}: {limits.maxMs} ms, {limits.maxProps} nodes, {limits.maxTuples} tuples, \
         {limits.maxWork} work per theorem, {jobs} at once: {pending.size} theorems, {replayed} replayed, \
         {left} at a limit, {byMemory.size} of them by memory, in {now - roundStart} ms"
-    if left == 0 || deadline.all (now ≥ ·) then break
+    waiting := waiting ++ byMemory
+    if (left == 0 && waiting.isEmpty) || deadline.all (now ≥ ·) then break
     if growing.isEmpty then
-      -- memory is what stops everything left: fewer at once, or the end
-      if byMemory.isEmpty || jobs == 1 then break
+      -- memory is what stopped everything left: fewer at once, or the end
+      if waiting.isEmpty || jobs == 1 then break
       jobs := max 1 (jobs / 4)
-      pending := byMemory
+      pending := waiting
+      waiting := #[]
     else pending := growing
     limits := { limits with maxMs := limits.maxMs * opts.factor, maxProps := limits.maxProps * opts.factor,
                             maxTuples := nextTuples, maxWork := limits.maxWork * opts.factor }

@@ -30,7 +30,8 @@ def usage : String :=
                                  replay and search: [--jobs N] theorems at once (default: one per
                                  processor), [--max-mem GB] memory limit (default 32; above 80%
                                  the largest running theorem gives up, above 90% all running ones,
-                                 above the limit the process stops), [--quiet]
+                                 above the limit all do and the process stops if memory does not
+                                 come back within 15 s), [--quiet]
   prove db <file.mmb>            what the prover reads from a proof file
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
@@ -317,7 +318,7 @@ def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let (stats, bodies) ← Prove.replay db opts logLine
   let ms := (← IO.monoMsNow) - start
   IO.println s!"{path}: {stats.theorems} theorems, {stats.replayed} replayed, {stats.failed} not replayed\
-    {if stats.convInVariable == 0 then "" else s!" ({stats.convInVariable} with an unfolding where the tree has a variable)"}, \
+, \
     {stats.conversions} with a shared conversion and {stats.tooLarge} too large left out, in {ms} ms\
     {if total > 0 then s!" over {stats.rounds} rounds" else ""}"
   IO.println s!"  steps of the known proofs {stats.stepsIn}, of the reconstructed ones {stats.stepsOut}; \

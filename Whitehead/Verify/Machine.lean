@@ -13,8 +13,9 @@ The checking logic is kept plain. Speed comes from the representation:
   is no hashing and no structural comparison;
 - stack and heap elements are single numbers, so all arrays hold unboxed values and a
   command allocates nothing but array slots;
-- the loop over the commands of a proof (`run`) carries the store, the stack and the heap
-  as separate variables, each with a single owner, so that a push or a pop is done in
+- the loop over the commands of a proof (`run`) carries the store, the stack, the heap
+  and the unify stack and heap as separate variables, each with a single owner, so that
+  a push or a pop is done in
   place. The functions it calls read these arrays and return a number, or take one array
   and return it. The rest of the state is the record `Machine`, which the loop touches
   only for the rare commands (`stepOther`).

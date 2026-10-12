@@ -486,8 +486,6 @@ object here, but a tree to whoever walks it. -/
 inductive Skeleton where
   | hyp (i : Nat)
   | step (thm : Nat) (children : Array Skeleton)
-  /-- The statement is `child`'s with def `term` unfolded (or folded) at `path`. -/
-  | conv (term : Nat) (path : Array Nat) (unfold : Bool) (child : Skeleton)
   deriving Inhabited
 
 namespace Skeleton
@@ -502,7 +500,6 @@ partial def size (s : Skeleton) (cap : Nat := 1000000000) : Nat :=
     for c in children do
       if n < cap then n := n + c.size (cap - n)
     return n
-  | .conv _ _ _ child => 1 + child.size cap
 
 end Skeleton
 

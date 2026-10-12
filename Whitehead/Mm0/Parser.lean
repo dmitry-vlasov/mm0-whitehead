@@ -2,10 +2,11 @@
 The primary parser of `.mm0` files: the grammar of `mm0.md`, production by production,
 as a hand-written recursive descent with one token of lookahead.
 
-Math strings are returned as raw text. `mm0.md` is taken literally here; where `mm0-c`'s
-own parser accepts more or less than the grammar, that is listed in `docs/DESIGN.md`.
+Math strings are returned as raw text. `mm0.md` is taken literally here; where `mm0-rs`
+accepts more or less than the grammar, that is listed in `docs/DESIGN.md`.
 
-The parser state is the source and the current token. `parseStmt?` returns one statement
+The parser state is the source, the current token and where the token before it ended
+(for the end of a statement's span). `parseStmt?` returns one statement
 at a time, so a caller can process a large file without holding its whole syntax tree.
 -/
 import Whitehead.Mm0.Lexer

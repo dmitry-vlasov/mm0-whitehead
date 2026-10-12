@@ -22,8 +22,6 @@ partial def skeletonText (db : Db) : Skeleton → String
   | .step t children =>
     if children.isEmpty then db.asserts[t]!.name
     else s!"({db.asserts[t]!.name} {" ".intercalate (children.map (skeletonText db)).toList})"
-  | .conv t path unfold child =>
-    s!"({if unfold then "unfold" else "fold"} {db.terms[t]!.name}@{path} {skeletonText db child})"
 
 partial def proofText (db : Db) : ProofTree → String
   | .hyp i => s!"h{i}"
@@ -192,8 +190,8 @@ def engineTests : TestM Unit := do
     (rootProofs.size == 1 && (rootProofs.contains "(ax_mp (ax_mp h0 h2) h4)" || rootProofs.contains "(ax_mp (ax_mp h1 h3) h4)"))
     s!"{rootProofs}"
   -- and two proofs with the same substitution: B -> (A -> A) by a1i from A -> A, which
-  -- `id` proves and `dummy` proves, neither binding a variable of the tree. Nothing
-  -- shows that one can stand for the other, so both are kept.
+  -- `id` proves and `dummy` proves, neither binding a variable of the tree. They have
+  -- the same key (nothing bound, no condition), so one of them is kept.
   let sameTask : Task :=
     { limit := db.asserts.size, sorts := 2, terms := 3,
       consts := (Array.range 2).map fun _ => { ty := wffTy, names := #[] },
