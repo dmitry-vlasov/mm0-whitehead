@@ -59,7 +59,7 @@ def defsTests : TestM Unit := do
       (db.showExp r.concl #["ph", "ps"], r.hyps.map (db.showExp · #["ph", "ps"]))
       ("(wb (wa ph ps) (wn (wi v0 (wn v1))))", #["(wb (wa ph ps) (wa v0 v1))"])
   -- the expansion of the goal has both, each once
-  let env := ((expandHyp 0).run (Env.init db index task)).2
+  let env := (← (expandHyp 0).run (Env.init db index task)).2
   let convs := env.props.filterMap fun p =>
     match p.step with
     | .conv t pos unfold => some (db.terms[t]!.name, pos, unfold)
@@ -69,7 +69,7 @@ def defsTests : TestM Unit := do
   -- the unfolding node binds the def's arguments, the folding one its dummies too
   -- (a candidate keeps its raw unifier until it is expanded; `splitProp` splits it)
   let unfoldAt := (env.props.findIdx? fun p => p.step == .conv (term "wa") 1 true).getD 0
-  let split := ((splitProp unfoldAt).run env).2
+  let split := (← (splitProp unfoldAt).run env).2
   checkEq "defs: a candidate is split when it is expanded" (env.props[unfoldAt]!.unif.isSome, split.props[unfoldAt]!.unif.isSome)
     (true, false)
   let unfoldNode := split.props[unfoldAt]!

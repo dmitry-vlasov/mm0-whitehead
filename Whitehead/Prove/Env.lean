@@ -96,6 +96,8 @@ structure Env where
   tupleBudget : Nat := 0xFFFFFFFFFFFF
   /-- The largest work of the joins (`Counters.work`); past it, as past `tupleBudget`. -/
   workBudget : Nat := 0xFFFFFFFFFFFF
+  /-- When the search must stop, by the monotonic clock in milliseconds. -/
+  deadline : Nat := 0xFFFFFFFFFFFFFFFF
   overBudget : Bool := false
   deriving Inhabited
 
@@ -104,7 +106,13 @@ def Env.dropExpanded (env : Env) : Env :=
   let props := env.props
   { env with leafs := env.leafs.filter fun p => !props[p]!.expanded }
 
-abbrev ProverM := StateM Env
+/-- How short memory is (`watchMemory` in `Replay.lean`): 0 not at all, 1 the largest
+running search gives up, 2 every running search gives up. -/
+initialize memoryLevel : IO.Ref Nat ← IO.mkRef 0
+
+/-- The engine's monad: the state of the search, and the clock — a join can run long, and
+must stop when its theorem's time is up (`Env.deadline`). -/
+abbrev ProverM := StateT Env BaseIO
 
 /-- `ruInitProverEnv`, up to the first expansion of the root. The first fresh variables
 are the metavariables of the task. -/

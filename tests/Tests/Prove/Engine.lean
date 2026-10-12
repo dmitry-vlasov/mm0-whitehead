@@ -255,11 +255,11 @@ def engineTests : TestM Unit := do
   check "forward: no proof is made twice" (distinct (factProofs con1Forward.env) && distinct (factProofs fwdVariants.env))
     s!"{(factProofs con1Forward.env).size} and {(factProofs fwdVariants.env).size} facts"
   -- each use of a fact has its own variables
-  let seeded := ((seedForward 100).run (forwardEnv "id")).2
+  let seeded := (← (seedForward 100).run (forwardEnv "id")).2
   let schematic := (seeded.forward.map (·.front)).getD #[] |>.filter fun f => seeded.hyps[f]!.expr.hasVars
   check "forward: the axioms without hypotheses are seeded as facts with variables" (schematic.size ≥ 3)
-  let ((copy1, _, _), afterOne) := (freshCopy schematic[0]!).run seeded
-  let ((copy2, _, _), _) := (freshCopy schematic[0]!).run afterOne
+  let ((copy1, _, _), afterOne) ← (freshCopy schematic[0]!).run seeded
+  let ((copy2, _, _), _) ← (freshCopy schematic[0]!).run afterOne
   check "forward: two uses of a fact share no variable"
     (copy1.vars.all fun x => !copy2.vars.contains x)
   -- the condition on bound variables, on an application of ax_5 in the task of alimi,

@@ -219,6 +219,11 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     let env ← get
     pure (env.props[p]!.children.size == env.props[p]!.rule.hyps.size && !env.overBudget)
   if !ready then return
+  -- the theorem's time, and the memory of the process (`memoryLevel`): a join can be the
+  -- one step that runs long
+  if (← IO.monoMsNow) > (← get).deadline || (← memoryLevel.get) ≥ 2 then
+    modify fun env => { env with overBudget := true }
+    return
   -- in place: the state is the only holder of the node here
   modify fun env => catchUp env p
   let env ← get

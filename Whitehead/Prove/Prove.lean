@@ -362,9 +362,6 @@ def takeRootProofs (accept : Env → ProofTree → Array Cond → Except String 
 def over (env : Env) (limits : Limits) (now start : Nat) : Bool :=
   env.props.size > limits.maxProps || now - start > limits.maxMs || env.overBudget
 
-/-- How short memory is (`watchMemory` in `Replay.lean`): 0 not at all, 1 the largest
-running search gives up, 2 every running search gives up. -/
-initialize memoryLevel : IO.Ref Nat ← IO.mkRef 0
 
 /-- The searches that are running, by a number of their own, with the number of
 assertion nodes each has. -/
@@ -389,11 +386,11 @@ with, as long as the limits allow. -/
 def joinFacts (env : Env) (facts : Array Nat) (limits : Limits) (start : Nat) (sid : Nat) : IO Env := do
   let mut env := env
   for f in facts do
-    let (targets, env') := (joinRoot f).run env
+    let (targets, env') ← (joinRoot f).run env
     env := env'
     for h in targets do
       if ← overNow env limits start sid then return env
-      env := ((joinSubgoal f h).run env).2
+      env := ((← (joinSubgoal f h).run env)).2
   return env
 
 /-- `ruRunForwardWave`: every fact of the front is expanded, and the facts that this
@@ -408,7 +405,7 @@ def forwardWave (env : Env) (limits : Limits) (start : Nat) (sid : Nat) : IO (En
     for (id, pos) in forwardTriggers env f do
       if ← overNow env limits start sid then return (env, false)
       if ((env.forward.map (·.count)).getD 0) ≥ limits.maxFacts then break
-      let (made, env') := (applyForward f env.db.asserts[id]! pos limits.maxFacts).run env
+      let (made, env') ← (applyForward f env.db.asserts[id]! pos limits.maxFacts).run env
       env ← joinFacts env' made limits start sid
   return (env, !((env.forward.map (·.front.isEmpty)).getD true))
 
@@ -428,7 +425,8 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     if let .ok body := accept env (.hyp u.data) #[] then
       return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
                values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
-  let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork }
+  let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork,
+                             deadline := start + limits.maxMs }
   let mut rejected := 0
   let mut others := 0
   let mut rejection := ""
@@ -436,7 +434,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
   -- the forward front is seeded before the root is expanded (`ruSeedForwardFront`), and
   -- a seed may be the goal
   if strategy.forward then
-    let (seeds, env') := (seedForward limits.maxFacts).run env
+    let (seeds, env') ← (seedForward limits.maxFacts).run env
     env ← joinFacts env' seeds limits start sid
     let (found, r, env') := takeRootProofs accept env
     env := env'
@@ -444,7 +442,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     rejected := rejected + (r.filter (·.1 != anotherProof)).size
     if let some (tree, body, answer, values) := found then
       return { ending := .proved, proof := some tree, body := some body, answer := some answer, values, rejected, others, env }
-  env := ((expandHyp 0 strategy.root).run env).2
+  env := ((← (expandHyp 0 strategy.root).run env)).2
   let mut st := strategy.init
   -- a wave that leaves no front lets the strategy decide once more; two in a row end
   -- the search (`ruProveRec`)
@@ -481,7 +479,7 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
         if env.props[p]!.expanded then continue
         if ← overNow env limits start sid then
           return { ending := .limit, rejected, rejection, rejectedProof, others, env }
-        let (_, env') := (proveProp p only).run env
+        let (_, env') ← (proveProp p only).run env
         env := env'
         if !env.rootProofs.isEmpty then
           let (found, r, env') := takeRootProofs accept env
