@@ -38,6 +38,9 @@ structure Counters where
   duplicate : Nat := 0
   /-- The proofs that joins looked at: the work of `addProof`. -/
   work : Nat := 0
+  /-- Candidates whose bindings did not make a substitution (`splitProp`): never, unless
+  the walk of the index is wrong. -/
+  badCandidates : Nat := 0
   /-- Facts made by the forward direction, and joins of a fact with a subgoal or the
   root. -/
   facts : Nat := 0

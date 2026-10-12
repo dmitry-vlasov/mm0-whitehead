@@ -197,6 +197,8 @@ def fullReplayTests : TestM Unit := do
         s!"{stats.replayed} of {stats.theorems}"
       check s!"full replay {name}, {others.getD 0} other variants per node: no proof at the root is rejected"
         (stats.rejected == 0) s!"{stats.rejected} rejected"
+      check s!"full replay {name}, {others.getD 0} other variants per node: the bindings of every expanded candidate make a substitution"
+        (stats.counters.badCandidates == 0) s!"{stats.counters.badCandidates} did not"
       if others == none then
         check s!"full replay {name}, all variants: the joins are not trivial, and proofs with one key are merged"
           (stats.counters.tuples > stats.counters.notUnified + stats.replayed && stats.counters.notUnified > 0 &&

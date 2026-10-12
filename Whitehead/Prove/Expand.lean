@@ -19,7 +19,8 @@ rule's conclusion with the expression of the node. -/
 structure Candidate where
   step : Step
   rule : Assertion
-  sub : Subst
+  /-- The bindings that unify the rule's conclusion with the expression. -/
+  binds : Binds
 
 /-- The rule for unfolding (or folding) def `t` at node `pos` of `e`, as an assertion
 over variables of its own: the def's arguments `0 .. n-1`, its dummies `n .. n+m-1`, and
@@ -63,7 +64,7 @@ def convCandidates (env : Env) (e : Exp) (only : Option (Nat × Nat × Bool) := 
     let rule ← convRule db e t pos unfold
     -- the conclusion first: of two variables the later is kept, so the rule's are bound
     let sub ← unifyExps #[rule.concl, e] {}
-    return { step := .conv t pos unfold, rule, sub }
+    return { step := .conv t pos unfold, rule, binds := Binds.ofSubst sub }
   match only with
   | some (t, pos, unfold) => return (try_ t pos unfold).toArray
   | none =>
@@ -89,11 +90,12 @@ def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
   let e := env.hyps[h]!.expr
   match only with
   | none =>
-    (env.assertions.unify e {} (rankLimit env.task.limit)).map (fun u => { step := .assertion u.data, rule := env.db.asserts[u.data]!, sub := u.sub })
+    (env.assertions.unifyRaw e (rankLimit env.task.limit)).map (fun u =>
+      { step := .assertion u.data, rule := env.db.asserts[u.data]!, binds := u.binds })
       ++ convCandidates env e
   | some (.assertion id) =>
     match unifyExps #[e, env.db.asserts[id]!.concl] {} with
-    | some s => #[{ step := .assertion id, rule := env.db.asserts[id]!, sub := s }]
+    | some s => #[{ step := .assertion id, rule := env.db.asserts[id]!, binds := Binds.ofSubst s }]
     | none => #[]
   | some (.premise _) => #[]
   | some (.conv t path unfold) =>
@@ -107,25 +109,31 @@ def expandHyp (h : Nat) (only : Option Only := none) : ProverM Unit := do
   -- the candidates that bind more come first; among equals, the order of the index
   let found := candidates env h only
   -- a stable bucket sort by the number of bindings, the most first
-  let most := found.foldl (init := 0) fun m c => max m c.sub.size
+  let most := found.foldl (init := 0) fun m c => max m c.binds.size
   let mut buckets : Array (Array Candidate) := Array.replicate (most + 1) #[]
   for c in found do
-    buckets := buckets.modify (most - c.sub.size) (·.push c)
-  for unif in buckets.flatten do
-    -- a candidate keeps the raw unifier; it is split when it is expanded (`splitProp`)
-    let prop : PropNode := { step := unif.step, rule := unif.rule, parent := h, unif := some unif.sub }
-    modify fun env =>
-      let p := env.props.size
-      { env with props := env.props.push prop, leafs := env.leafs.push p,
-                 hyps := env.hyps.modify h fun hyp => { hyp with children := hyp.children.push p },
-                 counters := { env.counters with props := env.counters.props + 1 } }
+    buckets := buckets.modify (most - c.binds.size) (·.push c)
+  for bucket in buckets do
+    for unif in bucket do
+      -- a candidate keeps the bindings; they are split when it is expanded (`splitProp`)
+      let prop : PropNode := { step := unif.step, rule := unif.rule, parent := h, unif := some unif.binds }
+      modify fun env =>
+        let p := env.props.size
+        { env with props := env.props.push prop, leafs := env.leafs.push p,
+                   hyps := env.hyps.modify h fun hyp => { hyp with children := hyp.children.push p },
+                   counters := { env.counters with props := env.counters.props + 1 } }
 
 /-- The unifier of candidate `p` split into `sub` and `outer`, the variables of the rule
 that it leaves free being given fresh names. Done once, when the node is expanded. -/
 def splitProp (p : Nat) : ProverM Unit := do
   let env ← get
   let prop := env.props[p]!
-  let some u := prop.unif | return
+  let some bs := prop.unif | return
+  -- the bindings as one idempotent substitution; `none` cannot happen for the bindings
+  -- of a walk, which keeps cycles out, and is counted so that a test would see it
+  let some u := bs.toSubst
+    | set { env with props := env.props.modify p fun prop => { prop with unif := none },
+                     counters := { env.counters with badCandidates := env.counters.badCandidates + 1 } }
   let a := prop.rule
   let free := a.vars.filter fun v => !u.maps (Node.varId v)
   let base := env.fresh

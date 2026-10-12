@@ -52,8 +52,12 @@ structure IndexNode (α : Type) where
   /-- Children that are applications, and children that are variables. -/
   rules : Array Nat := #[]
   vars : Array Nat := #[]
-  /-- The nodes at which a subexpression that starts here ends. -/
+  /-- The nodes at which a subexpression that starts here ends; for each, the
+  subexpression itself, as it was put in (`subexpr` would read it back from the trie),
+  and whether it has no variable. -/
   ends : Array Nat := #[]
+  endExps : Array Exp := #[]
+  endClosed : Array Bool := #[]
   /-- The lengths (as in `Node.len`) of the subexpressions that end here. -/
   lens : Array Nat := #[]
   /-- What is stored for the expressions that end here, each with its rank. -/
@@ -118,7 +122,9 @@ def insert (ix : Index α) (key : Exp) (data : α) (rank : Nat := 0) : Index α 
       if !nodes[last]!.lens.contains len then
         nodes := nodes.modify last fun p => { p with lens := p.lens.push len }
         let first := path[i]!
-        nodes := nodes.modify first fun p => { p with ends := p.ends.push last }
+        let ex := key.sub i
+        nodes := nodes.modify first fun p =>
+          { p with ends := p.ends.push last, endExps := p.endExps.push ex, endClosed := p.endClosed.push !ex.hasVars }
   return { nodes, size := ix.size + 1 }
 
 /-- `ruIndexSubexpr`: the subexpression that starts at node `first` of the trie and ends
@@ -140,6 +146,117 @@ def subexpr (ix : Index α) (first last : Nat) : Exp := Id.run do
         out := out.set! start (Node.setLen out[start]! len)
   return ⟨out⟩
 
+end Index
+
+/-- The bindings that a walk of the trie has made, the newest first. A list, so that the
+branches of the walk share what they have in common and extend it without copying: a
+`Subst` is a hash map, and extending one that another branch holds copies it. An image
+is the subexpression of `src` at node `at_`, not copied out. The list is not idempotent
+as a `Subst` is — an image may mention a variable that is bound elsewhere in the list,
+and `lookup` follows the chain — and `toSubst` puts that right, once, for the candidates
+that are expanded: of the candidates the walk makes, next to none are. -/
+inductive Binds where
+  | nil
+  | cons (v : Nat) (src : Exp) (at_ : Nat) (rest : Binds)
+
+namespace Binds
+
+def size : Binds → Nat
+  | .nil => 0
+  | .cons _ _ _ rest => 1 + rest.size
+
+/-- The image of the variable with number `vid`, as an expression and the node where the
+image starts in it. -/
+def lookup (bs : Binds) (vid : Nat) : Option (Exp × Nat) :=
+  match bs with
+  | .nil => none
+  | .cons v src at_ rest => if Node.varId v == vid then some (src, at_) else rest.lookup vid
+
+/-- Does the variable `vid` occur in the subexpression of `src` at `at_`, through the
+bindings? `closed` says that the subexpression has no variable: then not. -/
+partial def occurs (bs : Binds) (vid : Nat) (src : Exp) (at_ : Nat) : Bool := Id.run do
+  let stop := at_ + 1 + Node.len src.nodes[at_]!
+  for i in [at_:stop] do
+    let n := src.nodes[i]!
+    if Node.isVar n then
+      if Node.varId n == vid then return true
+      if let some (src', at') := bs.lookup (Node.varId n) then
+        if bs.occurs vid src' at' then return true
+  return false
+
+/-- Binds the variable node `v` to the subexpression of `src` at `at_`, if the type
+fits and `v` does not occur in it; nothing to do if that is `v` itself. `closed`: the
+subexpression is known to have no variable. -/
+def bind (bs : Binds) (v : Nat) (src : Exp) (at_ : Nat) (closed : Bool := false) : Option Binds :=
+  let n := src.nodes[at_]!
+  if Node.isVar n && Node.varId n == Node.varId v then some bs
+  else if !Ty.fits (Node.ty v) (Node.ty n) then none
+  else if !closed && bs.occurs (Node.varId v) src at_ then none
+  else some (.cons v src at_ bs)
+
+/-- The subexpressions of `a` at `i` and of `b` at `j` unified under `bs`: the same
+decisions as `unifyExps` — a variable is bound to what fits it, of two variables the
+more general to the more special, the first to the second when both fit. -/
+partial def unify (bs : Binds) (a : Exp) (i : Nat) (b : Exp) (j : Nat) : Option Binds :=
+  let na := a.nodes[i]!
+  let nb := b.nodes[j]!
+  if Node.isVar na then
+    match bs.lookup (Node.varId na) with
+    | some (src, k) => bs.unify src k b j
+    | none =>
+      if Node.isVar nb then
+        match bs.lookup (Node.varId nb) with
+        | some (src, k) => bs.unify a i src k
+        | none =>
+          if Node.varId na == Node.varId nb then some bs
+          else if Ty.fits (Node.ty na) (Node.ty nb) then some (.cons na b j bs)
+          else if Ty.fits (Node.ty nb) (Node.ty na) then some (.cons nb a i bs)
+          else none
+      else bs.bind na b j
+  else if Node.isVar nb then
+    match bs.lookup (Node.varId nb) with
+    | some (src, k) => bs.unify a i src k
+    | none => bs.bind nb a i
+  else if Node.appId na != Node.appId nb then none
+  else Id.run do
+    -- the arguments in step: the same term, so the same number of them
+    let stop := i + 1 + Node.len na
+    let mut ka := i + 1
+    let mut kb := j + 1
+    let mut acc := bs
+    while ka < stop do
+      match acc.unify a ka b kb with
+      | some acc' => acc := acc'
+      | none => return none
+      ka := ka + 1 + Node.len a.nodes[ka]!
+      kb := kb + 1 + Node.len b.nodes[kb]!
+    return some acc
+
+/-- The bindings as a `Subst`, which is idempotent: each is added in the order it was
+made, and `Subst.add` applies it through. `none` only for a cycle, which `bind` keeps
+out. -/
+def toSubst (bs : Binds) : Option Subst :=
+  go bs (some {})
+where
+  go : Binds → Option Subst → Option Subst
+    | .nil, acc => acc
+    | .cons v src at_ rest, acc => (go rest acc).bind fun s => s.add v (src.sub at_)
+
+/-- A `Subst` as bindings. -/
+def ofSubst (s : Subst) : Binds :=
+  s.map.fold (init := .nil) fun bs _ x => .cons x.var x.exp 0 bs
+
+end Binds
+
+namespace Index
+
+variable {α : Type}
+
+/-- A stored datum with the bindings that unify its expression with the given one. -/
+structure RawUnified (α : Type) where
+  binds : Binds
+  data : α
+
 /-- `RuUnified`: a stored datum, the unifier of its expression with the given one, and
 the given expression under that unifier. -/
 structure Unified (α : Type) where
@@ -152,11 +269,35 @@ structure Unified (α : Type) where
 /-- The given expression under the unifier. -/
 def Unified.expr {α : Type} (u : Unified α) : Exp := u.instance_.get
 
+/-- The expression a walk is about, with what the walk asks of its subexpressions. -/
+structure Walk where
+  e : Exp
+  /-- For each node, whether a variable is below it. -/
+  open_ : Array Bool
+
+/-- `Walk` of `e`. -/
+def Walk.mk' (e : Exp) : Walk := Id.run do
+  let mut open_ : Array Bool := Array.replicate e.size false
+  for k in [0:e.size] do
+    let i := e.size - 1 - k
+    let n := e.nodes[i]!
+    if Node.isVar n then open_ := open_.set! i true
+    else
+      let stop := i + 1 + Node.len n
+      let mut j := i + 1
+      while j < stop do
+        if open_[j]! then
+          open_ := open_.set! i true
+          j := stop
+        else j := j + 1 + Node.len e.nodes[j]!
+  return { e, open_ }
+
 mutual
 
 /-- `ruDoUnifyIndex`: node `i` of `e` against the children of node `at_` of the trie. -/
-partial def unifyAt (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub : Subst)
-    (acc : Array (Unified α)) : Array (Unified α) := Id.run do
+partial def unifyAt (ix : Index α) (limit : Nat) (w : Walk) (i at_ : Nat) (bs : Binds)
+    (acc : Array (RawUnified α)) : Array (RawUnified α) := Id.run do
+  let e := w.e
   if i ≥ e.size then return acc
   let n := e.nodes[i]!
   let here := ix.nodes[at_]!
@@ -165,60 +306,68 @@ partial def unifyAt (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub :
     -- the same term in the trie
     if let some c := ix.findRule at_ (Node.appId n) then
       if ix.nodes[c]!.minRank < limit then
-        acc := unifyNode ix limit e i c sub acc
+        acc := unifyNode ix limit w i c bs acc
     -- a variable of the trie takes the whole subexpression
-    if !here.vars.isEmpty then
-      let ex := e.sub i
-      for c in here.vars do
-        if ix.nodes[c]!.minRank < limit then
-          acc := bindVar ix limit e (i + Node.len n) c ix.nodes[c]!.key ex sub acc
+    for c in here.vars do
+      if ix.nodes[c]!.minRank < limit then
+        acc := bindVar ix limit w (i + Node.len n) c ix.nodes[c]!.key e i (!w.open_[i]!) bs acc
   else
     -- the variable of `e` takes every subexpression that starts here
     for c in here.rules do
       if ix.nodes[c]!.minRank < limit then
-        for last in ix.nodes[c]!.ends do
+        let node := ix.nodes[c]!
+        for k in [0:node.ends.size] do
+          let last := node.ends[k]!
           if ix.nodes[last]!.minRank < limit then
-            acc := bindVar ix limit e i last n (ix.subexpr c last) sub acc
+            acc := bindVar ix limit w i last n node.endExps[k]! 0 node.endClosed[k]! bs acc
     for c in here.vars do
       if ix.nodes[c]!.minRank < limit then
-        acc := bindVar ix limit e i c ix.nodes[c]!.key (Exp.ofVar n) sub acc
+        acc := bindVar ix limit w i c ix.nodes[c]!.key e i false bs acc
   return acc
 
-/-- `unify_var` and `unify_step` of `ruDoUnifyIndex`: binds `v` to `ex`, or unifies `ex`
-with what `v` is bound to, and goes on after position `j`, from node `at_` of the trie. -/
-partial def bindVar (ix : Index α) (limit : Nat) (e : Exp) (j at_ : Nat) (v : Nat) (ex : Exp) (sub : Subst)
-    (acc : Array (Unified α)) : Array (Unified α) :=
-  -- which of the two is bound, if `ex` is a variable of a more general type
-  let (v, ex, ok) :=
-    if Ty.fits (Node.ty v) ex.ty then (v, ex, true)
-    else if ex.isVar && Ty.fits ex.ty (Node.ty v) then (ex.nodes[0]!, Exp.ofVar v, true)
-    else (v, ex, false)
+/-- `unify_var` and `unify_step` of `ruDoUnifyIndex`: binds `v` to the subexpression of
+`src` at `k` (`closed`: which has no variable), or unifies that with what `v` is bound
+to, and goes on after position `j`, from node `at_` of the trie. -/
+partial def bindVar (ix : Index α) (limit : Nat) (w : Walk) (j at_ : Nat) (v : Nat) (src : Exp) (k : Nat)
+    (closed : Bool) (bs : Binds) (acc : Array (RawUnified α)) : Array (RawUnified α) :=
+  -- which of the two is bound, if the image is a variable of a more general type
+  let m := src.nodes[k]!
+  let (v, src, k, ok) :=
+    if Ty.fits (Node.ty v) (Node.ty m) then (v, src, k, true)
+    else if Node.isVar m && Ty.fits (Node.ty m) (Node.ty v) then (m, Exp.ofVar v, 0, true)
+    else (v, src, k, false)
   if !ok then acc
   else
     let next :=
-      match sub.lookup v with
-      | some ex1 => unifyExps #[ex1, ex] sub
-      | none => sub.add v ex
+      match bs.lookup (Node.varId v) with
+      | some (src1, k1) => bs.unify src1 k1 src k
+      | none => bs.bind v src k closed
     match next with
-    | some s => unifyNode ix limit e j at_ s acc
+    | some bs => unifyNode ix limit w j at_ bs acc
     | none => acc
 
 /-- `ruDoUnifyIndexNode`: position `i` of `e` has been matched and led to node `at_`. -/
-partial def unifyNode (ix : Index α) (limit : Nat) (e : Exp) (i at_ : Nat) (sub : Subst)
-    (acc : Array (Unified α)) : Array (Unified α) :=
-  if i + 1 == e.size then
-    let instance_ : Thunk Exp := Thunk.mk fun _ => sub.apply e
+partial def unifyNode (ix : Index α) (limit : Nat) (w : Walk) (i at_ : Nat) (bs : Binds)
+    (acc : Array (RawUnified α)) : Array (RawUnified α) := Id.run do
+  if i + 1 == w.e.size then
     let node := ix.nodes[at_]!
-    (node.data.zip node.ranks).foldl (init := acc) fun acc (d, rank) =>
-      if rank < limit then acc.push ⟨sub, d, instance_⟩ else acc
-  else unifyAt ix limit e (i + 1) at_ sub acc
+    return (node.data.zip node.ranks).foldl (init := acc) fun acc (d, rank) =>
+      if rank < limit then acc.push ⟨bs, d⟩ else acc
+  else unifyAt ix limit w (i + 1) at_ bs acc
 
 end
 
-/-- `ruUnifyIndex`: everything stored under an expression that unifies with `e`, under
-an extension of `sub`; with `limit`, only what has a rank below it. -/
+/-- `ruUnifyIndex`, with the bindings as the walk made them: everything stored under an
+expression that unifies with `e`; with `limit`, only what has a rank below it. -/
+def unifyRaw (ix : Index α) (e : Exp) (limit : Nat := noRank) : Array (RawUnified α) :=
+  unifyAt ix limit (Walk.mk' e) 0 0 .nil #[]
+
+/-- `ruUnifyIndex`: as `unifyRaw`, each result with its unifier as a `Subst` and the
+instance of `e`. -/
 def unify (ix : Index α) (e : Exp) (sub : Subst := {}) (limit : Nat := noRank) : Array (Unified α) :=
-  unifyAt ix limit e 0 0 sub #[]
+  let start := if sub.size == 0 then Binds.nil else Binds.ofSubst sub
+  (unifyAt ix limit (Walk.mk' e) 0 0 start #[]).filterMap fun r =>
+    (r.binds.toSubst).map fun s => ⟨s, r.data, Thunk.mk fun _ => s.apply e⟩
 
 /-- `ruIndexValues` -/
 def values (ix : Index α) : Array α :=

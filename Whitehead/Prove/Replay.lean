@@ -90,6 +90,7 @@ def add (a b : Counters) : Counters :=
   { props := a.props + b.props, expanded := a.expanded + b.expanded, tuples := a.tuples + b.tuples,
     notUnified := a.notUnified + b.notUnified, disjoint := a.disjoint + b.disjoint,
     inconsistent := a.inconsistent + b.inconsistent, duplicate := a.duplicate + b.duplicate,
+    work := a.work + b.work, badCandidates := a.badCandidates + b.badCandidates,
     facts := a.facts + b.facts, joins := a.joins + b.joins }
 
 end Counters
