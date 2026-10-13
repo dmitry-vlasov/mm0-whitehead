@@ -15,7 +15,9 @@ chain miner (`prove chains`), is built, and its numbers are below.
 **The verification of the engine** (`THEORY.md`): started on 2026-10-13, before phase 4
 goes on — a reference engine in Lean with Mathlib, in the package `theory/`, and the
 proofs of its soundness and completeness for MM0, backward search; the production
-engine to be tested against it.
+engine to be tested against it. Milestone 1 reached the same day: the model, the
+engine and the theorem statements type-check, and the engine runs on the logic fixture
+with the production engine's answers. The proofs are the work ahead.
 
 ### Phase 1 acceptance
 

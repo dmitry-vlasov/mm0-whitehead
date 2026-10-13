@@ -4,3 +4,4 @@ import Theory.Unification
 import Theory.Deduction
 import Theory.Search
 import Theory.Theorems
+import Theory.Unify

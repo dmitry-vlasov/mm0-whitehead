@@ -78,6 +78,14 @@ What is formalized, in the draft's terms, specialized to MM0.
   for *dummies*: variables of a name type, distinct from each other and from the
   statement's names, which become the dummies of the MM0 proof.
 
+One correction to the draft's wording of Definition 4.2, found while writing the
+engine: the entry of an assertion node must join the children's answers *with the
+node's own unifier* `θ_a`, or the metavariables of the parent that `θ_a` binds are lost
+from the answer (a goal `?g` proved by `¬¬x' / x'`: the child's answer binds `x'`, and
+only `θ_a` says `?g ↦ ¬¬x'`). The 2017 paper's correctness proof has the witness
+`θ_0 ∘ η`, and Russell's `ruAddProof` composes `prop.sub` with the join. Recorded in
+`Search.lean`.
+
 ## The reference engine
 
 `Theory/Search.lean`: the PVT and the SPT sets of Definitions 4.1 and 4.2, computed
@@ -131,9 +139,17 @@ unifier's test against its reference unifier.
 ## Milestones
 
 1. The package: `theory/` with Mathlib, depending on the main package; the model
-   (`Terms`, `Subst`, `Unification`, `Deduction`), the reference engine (`Search`), and
+   (`Term`, `Subst`, `Unification`, `Deduction`), the reference engine (`Search`), and
    the three theorems stated, their proofs pending. Everything type-checks and the
-   engine runs on the logic fixture.
+   engine runs on the logic fixture. **Reached on 2026-10-13**: `cd theory && lake
+   build` (Mathlib v4.34.1, our toolchain; `lake exe cache get` for its oleans) builds
+   the model, the engine, the four theorem statements (`sorry`), and a first-order
+   unifier (`Unify`) whose postulate is carried with `sorry` until milestone 7.
+   `lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2` finds `(ax_mp h ax_1)`
+   as the production engine does; `mpcom` in 2 rounds gives `(com12 id)`, in 3 rounds
+   36 proofs at the root from 369 entries; `alrimi`, with conditions on a bound
+   variable, 1 proof in 2 rounds and 83 in 3. A converter (`Convert`) maps the
+   production database and task to the model.
 2. Substitutions and proof trees: composition, instance, the monotonicity lemma (3.5).
 3. The SPT lemma (4.3) for the backward engine: every entry's substitution is the most
    general unifier of its variant's equation system, and conversely.

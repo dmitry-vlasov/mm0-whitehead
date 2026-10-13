@@ -17,6 +17,12 @@ state is in [docs/STATUS.md](docs/STATUS.md).
 The Lean toolchain is pinned in `lean-toolchain`. There are no dependencies beyond core
 Lean.
 
+The verification of the prover's engine ([docs/THEORY.md](docs/THEORY.md)) is a separate
+Lake package with Mathlib, `theory/`, which depends on this one:
+
+    cd theory && lake exe cache get && lake build       # the model, the reference engine, the theorems
+    lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2   # the reference engine on a theorem
+
 ## Usage
 
     mm0-whitehead verify file.mm0 file.mmb   # the proof file is valid and proves the specification
