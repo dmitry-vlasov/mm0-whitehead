@@ -79,7 +79,7 @@ What is formalized, in the draft's terms, specialized to MM0.
   under union and instantiation, a most general unifier of every solvable problem,
   unique up to renaming, with the set of solutions its instances; decidable. First the
   theorems are proved relative to it; then it is discharged for sorted first-order
-  terms by a unifier of the package with its proof (milestone 7). The join of
+  terms by a unifier of the package with its proof (milestone 7, done). The join of
   substitutions is defined through it (Definition 2.6).
 - **Conditions.** For an assertion, the pairs `D(A)` of `DESIGN.md`: `(x, v)` with `x`
   bound, `v` another binder, unless `v` is regular and declares `x`. A substitution
@@ -217,7 +217,24 @@ unifier's test against its reference unifier.
    unifier mentions no variable outside its problem.
 5. The engine lemmas: restriction, key, settled.
 6. The differential test.
-7. The unification postulate discharged for sorted first-order terms.
+7. The unification postulate discharged for sorted first-order terms. **Reached on
+   2026-10-13** (`Unify.lean`): `Unify.postulate : Unification` with no `sorry`. The
+   unifier is Robinson's, one equation at a time, binding a variable to the other side
+   (`bind`, with the binding applied to the equations left, `bindIn`) when the types
+   fit, the variable does not occur, and a name type gets a name; it recurses on the
+   pair (number of variables, size of the problem), which a binding lowers in the
+   first component and dropping or decomposing an equation in the second. The proof
+   carries an invariant: the substitution so far is typed, its images avoid its
+   domain, its domain is apart from the equations left, and everything stays within
+   the variables of the original problem. Soundness (`go_sound`): the result solves
+   the equations, absorbs the substitution so far, and the invariant at the end gives
+   typing, idempotence (`idem_of_sep`), and the domain and range conditions.
+   Completeness (`go_complete`): a typed solution absorbing the substitution so far
+   solves the equations after a binding and absorbs the new substitution
+   (`bind_complete`), and the failing branches contradict such a solution — the
+   types by `Typed`, the occurs check by size (`size_lt_of_mem_vars_app`), the name
+   condition by `IsName`; so the result exists and the solution is its instance. The
+   theorems of milestone 4 are now unconditional.
 
 Later: the forward direction; the production engine; the verifier against `mm0.lean`;
 the fragment of Lean.

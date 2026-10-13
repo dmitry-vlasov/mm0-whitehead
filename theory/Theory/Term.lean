@@ -119,6 +119,9 @@ def IsName : Exp → Prop
   | const _ _ => True
   | app _ _ _ => False
 
+instance : DecidablePred IsName := fun e => by
+  cases e <;> simp only [IsName] <;> infer_instance
+
 mutual
 /-- The variables of an expression. -/
 def vars : Exp → Finset Var
