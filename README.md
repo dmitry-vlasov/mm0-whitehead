@@ -22,6 +22,7 @@ Lake package with Mathlib, `theory/`, which depends on this one:
 
     cd theory && lake exe cache get && lake build       # the model, the reference engine, the theorems
     lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2   # the reference engine on a theorem
+    lake exe diff-test ../tests/fixtures/prove/logic.mmb 3        # the production engine against it
 
 ## Usage
 

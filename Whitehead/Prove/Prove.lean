@@ -337,12 +337,13 @@ structure Result where
   stop : Option Stop := none
   env : Env
 
-/-- What a proof at the root puts for the metavariables of the task. -/
+/-- What a proof at the root puts for the metavariables of the task: what its
+substitution gives them. The substitution of a proof at the root carries the bindings
+of the metavariables (`restrict` in `Proofs.lean`), so this agrees with the goal as it
+is proved (`Proof.expr`); reading the bindings of all the steps instead could pick up
+a value from a step below that the steps above bound further. -/
 def metaValues (env : Env) (proof : Proof) : Array Exp :=
-  if env.task.metas.isEmpty then #[]
-  else
-    let all := allBindings proof
-    env.task.metas.map fun m => makeProofTree.resolve all (Exp.ofVar m)
+  env.task.metas.map fun m => proof.sub.apply (Exp.ofVar m)
 
 /-- The proofs that have reached the root: the first that the verifier accepts, as the
 proof, its body, the goal as it is proved, and the values of the metavariables. -/

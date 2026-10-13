@@ -23,8 +23,11 @@ discharged for a first-order unifier (milestone 7), and the engine lemmas that t
 production engine's restriction, key and settled conditions rest on proved about the
 reference engine's SPT sets (milestone 5). `cd theory && lake build` has no `sorry`.
 Milestone 5 found that the production engine's restriction dropped the bindings of the
-task's metavariables made at leaves; fixed in `Proofs.lean`. Ahead: the differential
-test against the production engine (milestone 6).
+task's metavariables made at leaves; fixed in `Proofs.lean`. The differential test
+(milestone 6, `theory/Diff.lean`, `lake exe diff-test`) agrees on the logic fixture for
+2 and 3 rounds, with and without metavariables, after two more fixes of the
+metavariable mode (`metaValues`, and the join of the node's unifier with the children's
+in `addProof`). All seven milestones of the first variant are reached.
 
 ### Phase 1 acceptance
 

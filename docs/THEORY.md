@@ -158,6 +158,22 @@ engine has at the root must be an instance of a reference entry, and each refere
 entry's key must be among the production engine's. This is the same method as the
 unifier's test against its reference unifier.
 
+`lake exe diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J]
+[--verbose] [--dump]` (`theory/Diff.lean`) runs it. The production engine is driven
+round by round there, since its search stops at the first proof accepted: the root is
+expanded, then each round expands every assertion node made before it. The production
+engine makes the children of an assertion node when it expands the node and matches
+them with the premises then, so after `n` such rounds its proofs at the root use the
+assertion nodes of depth up to `n` and hypotheses at expression nodes of depth up to
+`n`: the reference engine's entries after `n` rounds (the expression nodes agree in
+number, the production engine has one more level of assertion nodes not yet expanded).
+A proof is compared by its *shape* — the assertions of its steps and the hypotheses
+at its leaves — and its *answer* — the goal and the metavariables under its
+substitution, variables renamed by first occurrence, since a most general unifier is
+unique up to renaming only and the two engines name fresh variables differently.
+Proofs with a conversion step have no counterpart in the reference engine (decision 6)
+and are left out.
+
 ## Milestones
 
 1. The package: `theory/` with Mathlib, depending on the main package; the model
@@ -242,7 +258,22 @@ unifier's test against its reference unifier.
    join above would not notice. It now keeps the task's metavariables too
    (`Proofs.lean`, backward direction; the forward direction is left as it is,
    decision 4).
-6. The differential test.
+6. The differential test. **Reached on 2026-10-13** (`theory/Diff.lean`). On the logic
+   fixture the two engines agree on every theorem for 2 and 3 rounds, with the proofs
+   of the production engine among the reference entries and every reference answer
+   among the production engine's (for 3 rounds the reference engine has up to 2,079
+   entries at a root where the production engine keeps 4, one per key); and with
+   binder 0, 1 or 2 of each theorem as a metavariable, where the answers are not
+   trivial. The test found two faults of the production engine's metavariable mode,
+   both fixed: the values of the metavariables were read from the bindings of all the
+   steps (`metaValues`), which could pick up a value from a step below that the steps
+   above bound further — they are now read from the root proof's substitution, which
+   carries them since milestone 5; and `addProof` composed the node's unifier with the
+   children's join (`ruCompose(prop.sub, unif.sub)`), which is the join only when
+   nothing below binds what the unifier binds — true of the goal's variables, not of
+   a metavariable that a premise binds at a leaf: a proof of `com12` with `ps` a
+   metavariable bound it to `ph -> ?x` at the node and to `?x` at the leaf, and the
+   composition kept the first. With metavariables the two are now unified.
 7. The unification postulate discharged for sorted first-order terms. **Reached on
    2026-10-13** (`Unify.lean`): `Unify.postulate : Unification` with no `sorry`. The
    unifier is Robinson's, one equation at a time, binding a variable to the other side

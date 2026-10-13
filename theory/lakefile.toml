@@ -20,3 +20,7 @@ name = "Theory"
 [[lean_exe]]
 name = "ref-search"
 root = "Main"
+
+[[lean_exe]]
+name = "diff-test"
+root = "Diff"

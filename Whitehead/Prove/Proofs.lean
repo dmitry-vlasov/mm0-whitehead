@@ -149,14 +149,15 @@ so the proofs of the siblings cannot depend on them (`docs/THEORY.md`, the engin
 lemmas: the visible variables of a node are those of its expression and of the
 statement). A metavariable of the task may be bound at a leaf, by a premise that
 contains it, without occurring in the expressions between the leaf and the root; it is
-kept so that two leaves cannot bind it differently. -/
+kept so that two leaves cannot bind it differently. `metas` are variable nodes, as
+`Task.metas` has them. -/
 def restrict (theta : Subst) (e : Exp) (metas : Array Nat := #[]) : Subst :=
   let keep (m : Std.HashMap Nat SubExp) (v : Nat) : Std.HashMap Nat SubExp :=
     match theta.map[v]? with
     | some x => m.insert v x
     | none => m
   { map := metas.foldl (init := e.nodes.foldl (init := {}) fun m n =>
-      if Node.isVar n then keep m (Node.varId n) else m) keep }
+      if Node.isVar n then keep m (Node.varId n) else m) fun m v => keep m (Node.varId v) }
 
 /-- The key by which `addProof` keeps one proof of an assertion node: its substitution
 of the variables of the parent's expression `e` and of the metavariables of the task,
@@ -296,7 +297,12 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     if n % 4096 == 0 && (← memoryLevel.get) ≥ 2 then
       memoryStop := true
       break
-    match prop.sub.compose s with
+    -- `theta = ruCompose(prop.sub, unif.sub)`: the composition is the join of the two
+    -- when nothing below binds what `prop.sub` binds, which holds for the variables of
+    -- the goal — but not for a metavariable of the task, which a premise can bind at a
+    -- leaf; then the two are unified instead (`docs/THEORY.md`, the differential test)
+    let joined := if env.task.metas.isEmpty then prop.sub.compose s else unifySubs #[prop.sub, s]
+    match joined with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
     | some theta =>
       match openConds env prop theta (theta.apply hypExpr).varIds row with
