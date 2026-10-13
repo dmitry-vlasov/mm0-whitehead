@@ -59,6 +59,9 @@ structure State where
   anodes : Array ANode
   freshBase : ℕ
   stride : ℕ
+  /-- Every attempt made: the expression node, the assertion, and the base its binders
+  were renamed to. A record for the completeness proof; nothing reads it. -/
+  tried : List (ℕ × ℕ × ℕ)
 
 namespace State
 
@@ -72,6 +75,7 @@ def init (db : Database) (st : Statement) : State where
   anodes := #[]
   freshBase := (st.concl.vars ∪ (st.hyps.map Exp.vars).foldr (· ∪ ·) ∅).sup Var.id + 1
   stride := strideOf db
+  tried := []
 
 /-- The base of the variables of assertion node `j`. -/
 def baseOf (s : State) (j : ℕ) : ℕ := s.freshBase + j * s.stride
@@ -101,22 +105,30 @@ def addNode (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) : State where
       conds := nodeConds A (s.baseOf s.anodes.size) θ }
   freshBase := s.freshBase
   stride := s.stride
+  tried := s.tried
+
+/-- An attempt recorded, with the base it used. -/
+def recordAt (i a B : ℕ) (s : State) : State := { s with tried := (i, a, B) :: s.tried }
 
 /-- Tries one assertion at an expression node: an assertion node if the renamed
 conclusion unifies with the expression, with the hypotheses under the unifier as new
-expression nodes. -/
+expression nodes. The attempt is recorded either way. -/
 def tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) : State :=
   match db.asserts[a]? with
-  | none => s
+  | none => recordAt i a (s.baseOf s.anodes.size) s
   | some A =>
     match U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] with
-    | none => s
-    | some θ => addNode i a s A θ
+    | none => recordAt i a (s.baseOf s.anodes.size) s
+    | some θ => recordAt i a (s.baseOf s.anodes.size) (addNode i a s A θ)
 
-/-- Expands one expression node against every assertion of the database. -/
+/-- Marks an expression node expanded. -/
+def mark (i : ℕ) (s : State) : State :=
+  { s with enodes := s.enodes.modify i fun n => { n with expanded := true } }
+
+/-- Expands one expression node against every assertion of the database, and marks
+it. -/
 def expandNode (U : Unification) (db : Database) (i : ℕ) (s : State) : State :=
-  let s := { s with enodes := s.enodes.modify i fun n => { n with expanded := true } }
-  (List.range db.asserts.length).foldl (fun s a => tryAssertion U db i a s) s
+  mark i ((List.range db.asserts.length).foldl (fun s a => tryAssertion U db i a s) s)
 
 /-- One round of expansion: every expression node not yet expanded. The nodes made in
 the round wait for the next one, which is breadth first. -/

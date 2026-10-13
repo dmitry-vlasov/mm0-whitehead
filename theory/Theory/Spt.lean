@@ -70,7 +70,7 @@ theorem joinAll_typed (U : Unification) :
 /-- The tree of an entry sits at expression node `i` of the state: its nodes are
 nodes of the state, at the right places. -/
 inductive SptTree.At (s : State) : ℕ → SptTree → Prop
-  | leaf (i h : ℕ) : SptTree.At s i (.leaf i h)
+  | leaf (i h : ℕ) (hi : i < s.enodes.size) : SptTree.At s i (.leaf i h)
   | node (i j : ℕ) (cs : List SptTree) (hj : j < s.anodes.size) (hp : s.anodes[j]!.parent = i)
       (hlen : cs.length = s.anodes[j]!.children.length)
       (hcs : ∀ k, k < cs.length → SptTree.At s (s.anodes[j]!.children[k]!) cs[k]!) :
@@ -153,6 +153,8 @@ structure ANodeInv (U : Unification) (db : Database) (s : State) (a : ANode) (A 
     a.children[k]! < s.enodes.size ∧ s.enodes[a.children[k]!]!.expr = a.sub.apply (A.hyps[k]!.rename a.base)
   /-- The children are a block of expression nodes made after the parent. -/
   children_eq : ∃ n, a.parent < n ∧ a.children = (List.range A.hyps.length).map (n + ·)
+  /-- The parent's expression is below the node's variables. -/
+  parent_vars_lt : ∀ v ∈ s.enodes[a.parent]!.expr.vars, v.id < a.base
   conds : a.conds = nodeConds A a.base a.sub
 
 /-- The expression node above an expression node, through its parent assertion node. -/
@@ -177,6 +179,17 @@ structure StateInv (U : Unification) (db : Database) (st : Statement) (s : State
   up_lt : ∀ e p, up s e = some p → p < e
   up_children : ∀ j, j < s.anodes.size → ∀ k, k < s.anodes[j]!.children.length →
     up s s.anodes[j]!.children[k]! = some s.anodes[j]!.parent
+  /-- Every variable of an expression node is below the next base. -/
+  vars_lt : ∀ i, i < s.enodes.size → ∀ v ∈ s.enodes[i]!.expr.vars, v.id < s.baseOf s.anodes.size
+  /-- An attempt recorded has its node, or no unifier at the base it used; its base is
+  above the expression; and an expanded node has tried every assertion. -/
+  tried_spec : ∀ i a B, (i, a, B) ∈ s.tried → ∀ A, db.asserts[a]? = some A →
+    (∃ j, j < s.anodes.size ∧ s.anodes[j]!.parent = i ∧ s.anodes[j]!.assertion = a) ∨
+    U.mgu [(s.enodes[i]!.expr, A.concl.rename B)] = none
+  tried_fresh : ∀ i a B, (i, a, B) ∈ s.tried → ∀ v ∈ s.enodes[i]!.expr.vars, v.id < B
+  tried_lt : ∀ i a B, (i, a, B) ∈ s.tried → i < s.enodes.size
+  expanded_tried : ∀ i, i < s.enodes.size → s.enodes[i]!.expanded = true →
+    ∀ a, a < db.asserts.length → ∃ B, (i, a, B) ∈ s.tried
 
 /-! ### An entry's proof is valid -/
 

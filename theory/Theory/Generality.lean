@@ -725,7 +725,7 @@ theorem generality' {U : Unification} {db : Database} (hwf : db.WF) {st : Statem
       IsProof db (st.subst σ) π → π.Congruent (E.proof db (run U db st n)) →
       π.IsInstance db (E.proof db (run U db st n)) := by
   intro E hE σ hσ π hπ hcong
-  have hs := run_inv U db st n
+  have hs := run_inv U db hwf st n
   have hEinv := sptE_inv hs _ 0 hs.root_lt E hE
   have hm : Matches (run U db st n) π E.tree := matches_of_congruent db (run U db st n) E.sub E.tree π hcong
   have hnd : ((assign π E.tree).map Prod.fst).Nodup := by

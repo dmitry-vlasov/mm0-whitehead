@@ -28,7 +28,7 @@ theorem soundness_valid (U : Unification) (db : Database) (hwf : db.WF) (st : St
       Valid db (st.subst E.sub) (E.proof db (run U db st n)) ∧
       (E.proof db (run U db st n)).expr = E.sub.apply st.concl := by
   intro E hE
-  have hs := run_inv U db st n
+  have hs := run_inv U db hwf st n
   exact valid_of_inv hwf hs E (sptE_inv hs _ 0 hs.root_lt E hE)
 
 /-- Soundness: the closing of the proof of every entry at the root is a proof of the

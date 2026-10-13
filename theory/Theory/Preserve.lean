@@ -48,15 +48,20 @@ theorem ANodeInv.mono {U : Unification} {db : Database} {s s' : State} {a : ANod
   children := fun k hk =>
     ⟨lt_of_lt_of_le (h.children k hk).1 hsize, by rw [hsame _ (h.children k hk).1]; exact (h.children k hk).2⟩
   children_eq := h.children_eq
+  parent_vars_lt := by rw [hsame _ h.parent_lt]; exact h.parent_vars_lt
   conds := h.conds
 
 /-- A state invariant moves to a state with the same expression nodes (but for their
-marks), the same assertion nodes and the same numbering. -/
+marks), the same assertion nodes, the same numbering and the same attempts, when every
+node marked anew has tried every assertion. -/
 theorem StateInv.mono {U : Unification} {db : Database} {st : Statement} {s s' : State} (h : StateInv U db st s)
     (hsize : s'.enodes.size = s.enodes.size)
     (hsame : ∀ k : ℕ, s'.enodes[k]!.expr = s.enodes[k]!.expr)
     (hparent : ∀ k : ℕ, s'.enodes[k]!.parent = s.enodes[k]!.parent)
-    (hanodes : s'.anodes = s.anodes) (hbase : s'.freshBase = s.freshBase) (hstride : s'.stride = s.stride) :
+    (hanodes : s'.anodes = s.anodes) (hbase : s'.freshBase = s.freshBase) (hstride : s'.stride = s.stride)
+    (htried : s'.tried = s.tried)
+    (hexp : ∀ k : ℕ, s'.enodes[k]!.expanded = true → s.enodes[k]!.expanded = true ∨
+      ∀ a, a < db.asserts.length → ∃ B, (k, a, B) ∈ s.tried) :
     StateInv U db st s' where
   root_lt := by rw [hsize]; exact h.root_lt
   root_expr := by rw [hsame 0]; exact h.root_expr
@@ -87,6 +92,28 @@ theorem StateInv.mono {U : Unification} {db : Database} {st : Statement} {s s' :
     simp only [up] at this ⊢
     rw [hparent, hanodes]
     exact this
+  vars_lt := fun i hi v hv => by
+    rw [hsize] at hi
+    rw [hsame] at hv
+    simp only [baseOf, hbase, hstride, hanodes]
+    exact h.vars_lt i hi v hv
+  tried_spec := fun i a B hB A hA => by
+    rw [htried] at hB
+    rw [hanodes, hsame]
+    exact h.tried_spec i a B hB A hA
+  tried_fresh := fun i a B hB v hv => by
+    rw [htried] at hB
+    rw [hsame] at hv
+    exact h.tried_fresh i a B hB v hv
+  tried_lt := fun i a B hB => by
+    rw [htried] at hB
+    rw [hsize]
+    exact h.tried_lt i a B hB
+  expanded_tried := fun i hi hex a ha => by
+    rw [htried]
+    rcases hexp i hex with hex' | hall
+    · exact h.expanded_tried i (by rw [hsize] at hi; exact hi) hex' a ha
+    · exact hall a ha
 
 /-- Marking a node expanded changes no expression and no parent. -/
 theorem getElem!_modify (s : State) (i k : ℕ) :
@@ -170,8 +197,28 @@ theorem addNode_anode_new (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) :
   rw [getElem!_pos (addNode i a s A θ).anodes s.anodes.size hj']
   simp [addNode]
 
+/-- The variables of a renamed expression are the renamed variables. -/
+theorem mem_vars_rename (b : ℕ) : ∀ (q : Exp) (v : Var), v ∈ (q.rename b).vars ↔ ∃ x ∈ q.vars, v = renamed b x
+  | .var x, v => by simp [Exp.rename, Exp.vars, renamed]
+  | .const _ _, v => by simp [Exp.rename, Exp.vars]
+  | .app _ _ args, v => by
+    simp only [Exp.rename, Exp.vars]
+    exact mem_varsList_renameList b args v
+where
+  mem_varsList_renameList (b : ℕ) : ∀ (es : List Exp) (v : Var),
+      v ∈ Exp.varsList (Exp.renameList b es) ↔ ∃ x ∈ Exp.varsList es, v = renamed b x
+    | [], v => by simp [Exp.renameList, Exp.varsList]
+    | e :: es, v => by
+      simp only [Exp.renameList, Exp.varsList, Finset.mem_union, mem_vars_rename b e v,
+        mem_varsList_renameList b es v]
+      aesop
+
+theorem Problem.vars_single (p q : Exp) : Problem.vars [(p, q)] = p.vars ∪ q.vars := by
+  simp [Problem.vars]
+
 /-- The new assertion node has its invariant, when it unifies. -/
-theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s)
+theorem addNode_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s)
     {i a : ℕ} (hi : i < s.enodes.size) {A : Assertion} (hA : db.asserts[a]? = some A) {θ : Subst}
     (hθ : U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = some θ) :
     StateInv U db st (addNode i a s A θ) := by
@@ -180,9 +227,40 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
     fun k hk => by rw [addNode_enode_old _ _ _ _ _ k hk]
   have hparent : ∀ k, k < s.enodes.size → (addNode i a s A θ).enodes[k]!.parent = s.enodes[k]!.parent :=
     fun k hk => by rw [addNode_enode_old _ _ _ _ _ k hk]
-  have hbase : (addNode i a s A θ).freshBase = s.freshBase := rfl
-  have hstride : (addNode i a s A θ).stride = s.stride := rfl
+  have hexpanded : ∀ k, k < s.enodes.size → (addNode i a s A θ).enodes[k]!.expanded = s.enodes[k]!.expanded :=
+    fun k hk => by rw [addNode_enode_old _ _ _ _ _ k hk]
   have hbaseOf : ∀ j, (addNode i a s A θ).baseOf j = s.baseOf j := fun j => rfl
+  have hmemA : A ∈ db.asserts := List.mem_of_getElem? hA
+  have hwfA : A.WF := hwf A hmemA
+  have hB : ∀ v ∈ s.enodes[i]!.expr.vars, v.id < s.baseOf s.anodes.size := hs.vars_lt i hi
+  -- the variables of the new expressions
+  have hnewvars : ∀ k, k < A.hyps.length → ∀ v ∈ (addNode i a s A θ).enodes[s.enodes.size + k]!.expr.vars,
+      v.id < s.baseOf (s.anodes.size + 1) := by
+    intro k hk v hv
+    rw [addNode_enode_new _ _ _ _ _ k hk, Subst.vars_apply, Finset.mem_biUnion] at hv
+    obtain ⟨u, hu, hvu⟩ := hv
+    have hbound : ∀ w ∈ Problem.vars [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))],
+        w.id < s.baseOf (s.anodes.size + 1) := by
+      intro w hw
+      rw [Problem.vars_single, Finset.mem_union] at hw
+      rcases hw with hw | hw
+      · have := hB w hw
+        simp only [baseOf, Nat.succ_mul] at this ⊢
+        omega
+      · rw [mem_vars_rename] at hw
+        obtain ⟨x, hx, rfl⟩ := hw
+        have := hs.stride_gt A hmemA x (List.mem_toFinset.1 (hwfA.concl_vars hx))
+        simp only [renamed, baseOf, Nat.succ_mul]
+        omega
+    rcases U.range_sub _ _ hθ u v hvu with h | rfl
+    · exact hbound v h
+    · rw [mem_vars_rename] at hu
+      obtain ⟨x, hx, rfl⟩ := hu
+      have hxA : x ∈ A.vars := List.mem_toFinset.1 (hwfA.hyps_vars _ (by
+        rw [getElem!_pos A.hyps k hk]; exact List.getElem_mem hk) hx)
+      have := hs.stride_gt A hmemA x hxA
+      simp only [renamed, baseOf, Nat.succ_mul]
+      omega
   -- the new node's invariant
   have hnew : ANodeInv U db (addNode i a s A θ)
       { parent := i, assertion := a, base := s.baseOf s.anodes.size, sub := θ,
@@ -203,6 +281,7 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
         rw [getElem!_map_range _ _ k hk]
         exact ⟨by rw [addNode_enodes_size]; omega, addNode_enode_new i a s A θ k hk⟩
       children_eq := ⟨s.enodes.size, hi, rfl⟩
+      parent_vars_lt := by simp only; rw [hsame i hi]; exact hB
       conds := rfl }
   -- the old assertion nodes are unchanged, the new one is at the old size
   have hanode : ∀ j, j < (addNode i a s A θ).anodes.size →
@@ -272,7 +351,7 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
           rw [this, hup_new _ hk] at hp
           simp only [Option.some.injEq] at hp
           omega
-        · simp [up, addNode_enode_none _ _ _ _ _ e hes', ENode.default_parent] at hp
+        · simp [up, addNode_enode_none _ _ _ _ _ e hes'] at hp
     up_children := fun j hj k hk => by
       rcases hanode j hj with ⟨hjs, heq⟩ | ⟨_, heq⟩
       · rw [heq] at hk ⊢
@@ -282,56 +361,187 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
       · rw [heq] at hk ⊢
         simp only [List.length_map, List.length_range] at hk
         simp only
-        rw [getElem!_map_range _ _ k hk, hup_new k hk] }
+        rw [getElem!_map_range _ _ k hk, hup_new k hk]
+    vars_lt := fun e he v hv => by
+      rw [addNode_anodes_size, hbaseOf]
+      by_cases hes : e < s.enodes.size
+      · rw [hsame e hes] at hv
+        have := hs.vars_lt e hes v hv
+        simp only [baseOf, Nat.succ_mul] at this ⊢
+        omega
+      · rw [addNode_enodes_size] at he
+        have hk : e - s.enodes.size < A.hyps.length := by omega
+        have : e = s.enodes.size + (e - s.enodes.size) := by omega
+        rw [this] at hv
+        exact hnewvars _ hk v hv
+    tried_spec := fun i' a' B hB A' hA' => by
+      rcases hs.tried_spec i' a' B hB A' hA' with ⟨j, hj, hpj, haj⟩ | hnone
+      · left
+        refine ⟨j, by rw [addNode_anodes_size]; omega, ?_, ?_⟩ <;>
+          rw [addNode_anode_old _ _ _ _ _ j hj] <;> assumption
+      · right
+        rw [hsame i' (hs.tried_lt i' a' B hB)]
+        exact hnone
+    tried_fresh := fun i' a' B hB v hv => by
+      rw [hsame i' (hs.tried_lt i' a' B hB)] at hv
+      exact hs.tried_fresh i' a' B hB v hv
+    tried_lt := fun i' a' B hB => lt_of_lt_of_le (hs.tried_lt i' a' B hB) hsize
+    expanded_tried := fun e he hex a' ha' => by
+      by_cases hes : e < s.enodes.size
+      · rw [hexpanded e hes] at hex
+        exact hs.expanded_tried e hes hex a' ha'
+      · exfalso
+        rw [addNode_enodes_size] at he
+        have hk : e - s.enodes.size < A.hyps.length := by omega
+        have : e = s.enodes.size + (e - s.enodes.size) := by omega
+        rw [this] at hex
+        have hk' : s.enodes.size + (e - s.enodes.size) < (addNode i a s A θ).enodes.size := by
+          rw [addNode_enodes_size]; omega
+        rw [getElem!_pos (addNode i a s A θ).enodes _ hk'] at hex
+        simp only [addNode] at hex
+        rw [Array.getElem_append_right (by omega)] at hex
+        simp [newENodes, Nat.add_sub_cancel_left] at hex }
+
+/-- Recording an attempt keeps the invariant, when the attempt has its node or no
+unifier at its base, and the base is above the expression. -/
+theorem recordAt_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s)
+    {i a B : ℕ} (hi : i < s.enodes.size)
+    (hspec : ∀ A, db.asserts[a]? = some A →
+      (∃ j, j < s.anodes.size ∧ s.anodes[j]!.parent = i ∧ s.anodes[j]!.assertion = a) ∨
+      U.mgu [(s.enodes[i]!.expr, A.concl.rename B)] = none)
+    (hfresh : ∀ v ∈ s.enodes[i]!.expr.vars, v.id < B) :
+    StateInv U db st (recordAt i a B s) where
+  root_lt := by dsimp only [recordAt]; exact hs.root_lt
+  root_expr := by dsimp only [recordAt]; exact hs.root_expr
+  anodes := fun j hj => by
+    obtain ⟨A, hA⟩ := hs.anodes j hj
+    exact ⟨A, hA.mono (le_refl _) (fun k _ => rfl)⟩
+  base_eq := by dsimp only [recordAt, baseOf]; exact hs.base_eq
+  stride_pos := by dsimp only [recordAt]; exact hs.stride_pos
+  stride_gt := by dsimp only [recordAt]; exact hs.stride_gt
+  fresh_gt := by dsimp only [recordAt]; exact hs.fresh_gt
+  parent_lt := by dsimp only [recordAt]; exact hs.parent_lt
+  up_lt := by dsimp only [recordAt, up]; exact hs.up_lt
+  up_children := by dsimp only [recordAt, up]; exact hs.up_children
+  vars_lt := by dsimp only [recordAt, baseOf]; exact hs.vars_lt
+  tried_spec := fun i' a' B' hB A hA => by
+    simp only [recordAt, List.mem_cons, Prod.mk.injEq] at hB
+    rcases hB with ⟨rfl, rfl, rfl⟩ | hB
+    · exact hspec A hA
+    · exact hs.tried_spec i' a' B' hB A hA
+  tried_fresh := fun i' a' B' hB => by
+    simp only [recordAt, List.mem_cons, Prod.mk.injEq] at hB
+    rcases hB with ⟨rfl, rfl, rfl⟩ | hB
+    · exact hfresh
+    · exact hs.tried_fresh i' a' B' hB
+  tried_lt := fun i' a' B' hB => by
+    simp only [recordAt, List.mem_cons, Prod.mk.injEq] at hB
+    rcases hB with ⟨rfl, rfl, rfl⟩ | hB
+    · exact hi
+    · exact hs.tried_lt i' a' B' hB
+  expanded_tried := fun e he hex a' ha' => by
+    obtain ⟨B', hB'⟩ := hs.expanded_tried e he hex a' ha'
+    exact ⟨B', List.mem_cons_of_mem _ hB'⟩
 
 theorem tryAssertion_cases (U : Unification) (db : Database) (i a : ℕ) (s : State) :
-    tryAssertion U db i a s = s ∨
-      ∃ A θ, db.asserts[a]? = some A ∧
-        U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = some θ ∧
-        tryAssertion U db i a s = addNode i a s A θ := by
+    (tryAssertion U db i a s = recordAt i a (s.baseOf s.anodes.size) s ∧
+      (db.asserts[a]? = none ∨ ∃ A, db.asserts[a]? = some A ∧
+        U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = none)) ∨
+    ∃ A θ, db.asserts[a]? = some A ∧
+      U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = some θ ∧
+      tryAssertion U db i a s = recordAt i a (s.baseOf s.anodes.size) (addNode i a s A θ) := by
   unfold tryAssertion
   split
-  · left; rfl
+  · left; exact ⟨rfl, Or.inl (by assumption)⟩
   · split
-    · left; rfl
+    · left; exact ⟨rfl, Or.inr ⟨_, by assumption, by assumption⟩⟩
     · right; exact ⟨_, _, by assumption, by assumption, rfl⟩
 
 theorem size_le_tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) :
     s.enodes.size ≤ (tryAssertion U db i a s).enodes.size := by
-  rcases tryAssertion_cases U db i a s with h | ⟨A, θ, _, _, h⟩
-  · rw [h]
-  · rw [h, addNode_enodes_size]; omega
+  rcases tryAssertion_cases U db i a s with ⟨h, _⟩ | ⟨A, θ, _, _, h⟩
+  · rw [h]; exact le_refl _
+  · rw [h]; simp only [recordAt]; rw [addNode_enodes_size]; omega
 
-theorem tryAssertion_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s)
+theorem tried_le_tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) :
+    ∀ x ∈ s.tried, x ∈ (tryAssertion U db i a s).tried := by
+  intro x hx
+  rcases tryAssertion_cases U db i a s with ⟨h, _⟩ | ⟨A, θ, _, _, h⟩
+  · rw [h]; exact List.mem_cons_of_mem _ hx
+  · rw [h]; exact List.mem_cons_of_mem _ hx
+
+theorem tryAssertion_records (U : Unification) (db : Database) (i a : ℕ) (s : State) :
+    ∃ B, (i, a, B) ∈ (tryAssertion U db i a s).tried := by
+  rcases tryAssertion_cases U db i a s with ⟨h, _⟩ | ⟨A, θ, _, _, h⟩
+  · rw [h]; exact ⟨_, List.mem_cons_self⟩
+  · rw [h]; exact ⟨_, List.mem_cons_self⟩
+
+theorem tryAssertion_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s)
     {i : ℕ} (hi : i < s.enodes.size) (a : ℕ) : StateInv U db st (tryAssertion U db i a s) := by
-  rcases tryAssertion_cases U db i a s with h | ⟨A, θ, hA, hθ, h⟩
-  · rw [h]; exact hs
-  · rw [h]; exact addNode_inv hs hi hA hθ
+  have hfresh := hs.vars_lt i hi
+  rcases tryAssertion_cases U db i a s with ⟨h, hcase⟩ | ⟨A, θ, hA, hθ, h⟩
+  · rw [h]
+    refine recordAt_inv hs hi ?_ hfresh
+    intro A hA
+    rcases hcase with hnone | ⟨A', hA', hmgu⟩
+    · rw [hnone] at hA; exact absurd hA (by simp)
+    · rw [hA'] at hA
+      obtain rfl := Option.some.inj hA
+      exact Or.inr hmgu
+  · rw [h]
+    have hadd := addNode_inv hwf hs hi hA hθ
+    refine recordAt_inv hadd (lt_of_lt_of_le hi (by rw [addNode_enodes_size]; omega)) ?_ ?_
+    · intro A' _
+      left
+      refine ⟨s.anodes.size, by rw [addNode_anodes_size]; omega, ?_, ?_⟩ <;> rw [addNode_anode_new]
+    · intro v hv
+      rw [addNode_enode_old _ _ _ _ _ i hi] at hv
+      exact hfresh v hv
 
 /-! ### Expansion -/
 
-theorem expandNode_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s)
-    {i : ℕ} (hi : i < s.enodes.size) :
+theorem foldl_tried (U : Unification) (db : Database) (i : ℕ) :
+    ∀ (l : List ℕ) (s : State), ∀ a ∈ l, ∃ B, (i, a, B) ∈ (l.foldl (fun s a => tryAssertion U db i a s) s).tried
+  | [], _, _, ha => by simp at ha
+  | b :: l, s, a, ha => by
+    simp only [List.foldl_cons]
+    rcases List.mem_cons.1 ha with rfl | ha
+    · obtain ⟨B, hB⟩ := tryAssertion_records U db i a s
+      refine ⟨B, ?_⟩
+      exact foldl_inv (fun t : State => (i, a, B) ∈ t.tried) (fun t a => tryAssertion U db i a t) l
+        (fun t a' _ ht => tried_le_tryAssertion U db i a' t _ ht) _ hB
+    · exact foldl_tried U db i l _ a ha
+
+theorem mark_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s)
+    {i : ℕ} (hi : ∀ a, a < db.asserts.length → ∃ B, (i, a, B) ∈ s.tried) : StateInv U db st (mark i s) :=
+  hs.mono (by simp [mark]) (fun k => expr_modify s i k) (fun k => parent_modify s i k) rfl rfl rfl rfl
+    (fun k hk => by
+      simp only [mark, getElem!_modify] at hk
+      split_ifs at hk with h
+      · exact Or.inr (h.2 ▸ hi)
+      · exact Or.inl hk)
+
+theorem expandNode_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s) {i : ℕ} (hi : i < s.enodes.size) :
     StateInv U db st (expandNode U db i s) ∧ s.enodes.size ≤ (expandNode U db i s).enodes.size := by
   unfold expandNode
-  let s₁ : State := { s with enodes := s.enodes.modify i fun n => { n with expanded := true } }
-  have hs₁ : StateInv U db st s₁ :=
-    hs.mono (by simp [s₁]) (fun k => expr_modify s i k) (fun k => parent_modify s i k) rfl rfl rfl
-  have hi₁ : i < s₁.enodes.size := by simpa [s₁] using hi
-  have := foldl_inv (fun t : State => StateInv U db st t ∧ s₁.enodes.size ≤ t.enodes.size)
+  have := foldl_inv (fun t : State => StateInv U db st t ∧ s.enodes.size ≤ t.enodes.size)
     (fun t a => tryAssertion U db i a t) (List.range db.asserts.length)
-    (fun t a _ ⟨ht, hle⟩ => ⟨tryAssertion_inv ht (lt_of_lt_of_le hi₁ hle) a,
-      le_trans hle (size_le_tryAssertion U db i a t)⟩) s₁ ⟨hs₁, le_refl _⟩
-  exact ⟨this.1, by simpa [s₁] using this.2⟩
+    (fun t a _ ⟨ht, hle⟩ => ⟨tryAssertion_inv hwf ht (lt_of_lt_of_le hi hle) a,
+      le_trans hle (size_le_tryAssertion U db i a t)⟩) s ⟨hs, le_refl _⟩
+  refine ⟨mark_inv this.1 ?_, by simpa [mark] using this.2⟩
+  intro a ha
+  exact foldl_tried U db i _ s a (List.mem_range.2 ha)
 
-theorem expandAll_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv U db st s) :
-    StateInv U db st (expandAll U db s) := by
+theorem expandAll_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s) : StateInv U db st (expandAll U db s) := by
   unfold expandAll
   have := foldl_inv (fun t : State => StateInv U db st t ∧ s.enodes.size ≤ t.enodes.size)
     (fun t i => expandNode U db i t) ((List.range s.enodes.size).filter fun i => !s.enodes[i]!.expanded)
     (fun t i hi ⟨ht, hle⟩ => by
       have hi' : i < s.enodes.size := List.mem_range.1 (List.mem_of_mem_filter hi)
-      obtain ⟨h1, h2⟩ := expandNode_inv ht (lt_of_lt_of_le hi' hle)
+      obtain ⟨h1, h2⟩ := expandNode_inv hwf ht (lt_of_lt_of_le hi' hle)
       exact ⟨h1, le_trans hle h2⟩) s ⟨hs, le_refl _⟩
   exact this.1
 
@@ -392,10 +602,27 @@ theorem init_inv (U : Unification) (db : Database) (st : Statement) : StateInv U
       have hd : (init db st).enodes[e]! = default := getElem!_neg (init db st).enodes e hlt
       simp [up, hd] at hp
   up_children := fun j hj => by simp [init] at hj
+  vars_lt := fun i hi v hv => by
+    have : i = 0 := by simp [init] at hi; omega
+    subst this
+    have hv' : v ∈ st.concl.vars := by simpa [init] using hv
+    have h0 : (init db st).baseOf (init db st).anodes.size = (init db st).freshBase := by simp [init, baseOf]
+    rw [h0]
+    show v.id < (st.concl.vars ∪ (st.hyps.map Exp.vars).foldr (· ∪ ·) ∅).sup Var.id + 1
+    have := Finset.le_sup (f := Var.id) (Finset.mem_union_left ((st.hyps.map Exp.vars).foldr (· ∪ ·) ∅) hv')
+    omega
+  tried_spec := fun i a B hB => by simp [init] at hB
+  tried_fresh := fun i a B hB => by simp [init] at hB
+  tried_lt := fun i a B hB => by simp [init] at hB
+  expanded_tried := fun i hi hex => by
+    have : i = 0 := by simp [init] at hi; omega
+    subst this
+    simp [init] at hex
 
-theorem run_inv (U : Unification) (db : Database) (st : Statement) : ∀ n, StateInv U db st (run U db st n)
+theorem run_inv (U : Unification) (db : Database) (hwf : db.WF) (st : Statement) :
+    ∀ n, StateInv U db st (run U db st n)
   | 0 => init_inv U db st
-  | n + 1 => expandAll_inv (run_inv U db st n)
+  | n + 1 => expandAll_inv hwf (run_inv U db hwf st n)
 
 /-! ### The entries -/
 
@@ -494,7 +721,7 @@ theorem sptE_inv {U : Unification} {db : Database} {st : Statement} {s : State} 
     · simp only [leafEntries, List.mem_filterMap, List.mem_range, Option.map_eq_some_iff] at hE
       obtain ⟨h, hh, θ, hθ, rfl⟩ := hE
       exact {
-        at_ := SptTree.At.leaf i h
+        at_ := SptTree.At.leaf i h hi
         absorbs := Absorbs.leaf i h hh (U.solves _ _ hθ _ (List.mem_singleton_self _))
         typed := U.typed _ _ hθ
         idem := U.idem _ _ hθ
