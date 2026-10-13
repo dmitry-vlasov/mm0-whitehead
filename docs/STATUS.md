@@ -9,9 +9,13 @@ Last updated: 2026-10-13.
 **Phase 3 — prover**: done; accepted on 2026-10-13, with both acceptance tests passed
 (report below). Two known gaps are carried under "Next steps": shared conversions in
 the replay reader, and the checking of a proof found for a task with metavariables.
-**Phase 4 — pattern mining and ranking**: started on 2026-10-13. The design, with its
-questions, is in `DESIGN.md` ("Phase 4"); the first tool, the chain miner
-(`prove chains`), is built, and its numbers are below.
+**Phase 4 — pattern mining and ranking**: started on 2026-10-13, and paused the same
+day. The design, with its questions, is in `DESIGN.md` ("Phase 4"); the first tool, the
+chain miner (`prove chains`), is built, and its numbers are below.
+**The verification of the engine** (`THEORY.md`): started on 2026-10-13, before phase 4
+goes on — a reference engine in Lean with Mathlib, in the package `theory/`, and the
+proofs of its soundness and completeness for MM0, backward search; the production
+engine to be tested against it.
 
 ### Phase 1 acceptance
 

@@ -1,0 +1,18 @@
+name = "whitehead-theory"
+version = "0.1.0"
+defaultTargets = ["Theory"]
+
+[leanOptions]
+autoImplicit = false
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.34.1"
+
+[[require]]
+name = "mm0-whitehead"
+path = ".."
+
+[[lean_lib]]
+name = "Theory"
