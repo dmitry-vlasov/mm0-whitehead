@@ -18,6 +18,17 @@ def Solves (σ : Subst) (E : Problem) : Prop := ∀ p ∈ E, σ.apply p.1 = σ.a
 def Problem.vars (E : Problem) : Finset Var :=
   (E.map fun p => p.1.vars ∪ p.2.vars).foldr (· ∪ ·) ∅
 
+theorem Problem.vars_nil : Problem.vars [] = ∅ := rfl
+
+theorem Problem.vars_cons (p : Exp × Exp) (E : Problem) :
+    Problem.vars (p :: E) = p.1.vars ∪ p.2.vars ∪ Problem.vars E := by
+  simp [Problem.vars]
+
+theorem Problem.vars_append (E E' : Problem) : Problem.vars (E ++ E') = Problem.vars E ∪ Problem.vars E' := by
+  induction E with
+  | nil => simp [Problem.vars]
+  | cons p E ih => simp [Problem.vars_cons, ih, Finset.union_assoc]
+
 /-- A most general unifier (Postulate 2.5 for first-order terms, where every problem is
 in the class): `mgu E` is a typed idempotent solution of `E` of which every typed
 solution is an instance, and `none` only when there is no typed solution. -/

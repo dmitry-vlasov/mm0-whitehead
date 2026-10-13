@@ -215,7 +215,33 @@ unifier's test against its reference unifier.
    carry their hypothesis, step substitutions stay on the binders, bases follow node
    numbers, typed substitutions give names to name types, and the postulate says a
    unifier mentions no variable outside its problem.
-5. The engine lemmas: restriction, key, settled.
+5. The engine lemmas: restriction, key, settled. **Reached on 2026-10-13**
+   (`Engine.lean`). What a substitution *mentions* is what it moves and what it puts
+   there; a join mentions only what its members mention (`joinAll_mentions`). The
+   visible variables of an expression node are those of its expression and of the
+   statement (`visible`); what an entry moves outside them lies in the blocks of the
+   assertion nodes of its tree (`entry_mentions`), which come after the node
+   (`anode_lt_of_child`, by one more invariant of the state: nodes are made in order)
+   and are apart from the trees of the other children (`sibling_trees_disjoint`), so
+   no other member of the join at the node mentions them (`spt_join_hyps`). Then:
+   *restriction* (`spt_restrict`, from `joinAll_restrict_exists` and
+   `joinAll_restrict_instance`): the join exists with the entry's substitution
+   restricted to the visible variables exactly when with the whole one, and the two
+   answers are instances of each other on the visible variables — "the same up to
+   renaming", which is all the postulate fixes; *key* (`spt_key`): two entries of a
+   child with the same restriction give joins that exist together, agree on the
+   visible variables up to instance each way, and judge every condition on visible
+   variables alike (`holds_of_agree`, with the answer itself as the typed witness of
+   the instance); *settled* (`spt_settled`, from `settled` and `settled_joinAll`): a
+   condition whose name is a variable below the node that the entry does not mention
+   holds under the join exactly when it holds already, and the join does not mention
+   the variable either. A finding on the way: the production engine's `restrict` kept
+   the variables of the node's expression only, not the statement's metavariables,
+   which a premise can bind at a leaf without their occurring in the expressions
+   between the leaf and the root — two leaves could then bind one differently and the
+   join above would not notice. It now keeps the task's metavariables too
+   (`Proofs.lean`, backward direction; the forward direction is left as it is,
+   decision 4).
 6. The differential test.
 7. The unification postulate discharged for sorted first-order terms. **Reached on
    2026-10-13** (`Unify.lean`): `Unify.postulate : Unification` with no `sorry`. The
@@ -245,4 +271,8 @@ Answered on 2026-10-13: definitions are excluded (decision 6); metavariables sta
 (decision 7); closing is a separate step, and trivial where the sorts allow dummies
 (decision 8). The earlier form of the question had it wrong: MM0 does allow dummies of
 every sort that is neither `strict` nor `free`, so a variable left for an expression of
-such a sort becomes a dummy like a variable left for a bound variable. Nothing is open.
+such a sort becomes a dummy like a variable left for a bound variable.
+
+Open: the forward direction restricts a fact's substitution to its pattern
+(`Forward.lean`) without the task's metavariables; whether that matters waits for the
+forward direction's own model (decision 4).

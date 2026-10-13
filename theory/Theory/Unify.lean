@@ -20,17 +20,6 @@ namespace Theory
 /-- The size of a problem. -/
 def Problem.size (E : Problem) : ℕ := E.foldr (fun p n => p.1.size + p.2.size + n) 0
 
-theorem Problem.vars_nil : Problem.vars [] = ∅ := rfl
-
-theorem Problem.vars_cons (p : Exp × Exp) (E : Problem) :
-    Problem.vars (p :: E) = p.1.vars ∪ p.2.vars ∪ Problem.vars E := by
-  simp [Problem.vars]
-
-theorem Problem.vars_append (E E' : Problem) : Problem.vars (E ++ E') = Problem.vars E ∪ Problem.vars E' := by
-  induction E with
-  | nil => simp [Problem.vars]
-  | cons p E ih => simp [Problem.vars_cons, ih, Finset.union_assoc]
-
 theorem Problem.size_cons (p : Exp × Exp) (E : Problem) :
     Problem.size (p :: E) = p.1.size + p.2.size + Problem.size E := rfl
 

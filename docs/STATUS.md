@@ -19,9 +19,12 @@ engine to be tested against it. Reached the same day: the model, the engine and 
 theorem statements type-check, the engine runs on the logic fixture with the
 production engine's answers, and **soundness, generality and completeness are proved**
 for the reference engine (`THEORY.md`, milestones 1–4), with the unification postulate
-discharged for a first-order unifier (milestone 7). `cd theory && lake build` has no
-`sorry`. Ahead: the engine lemmas (milestone 5) and the differential test against the
-production engine (milestone 6).
+discharged for a first-order unifier (milestone 7), and the engine lemmas that the
+production engine's restriction, key and settled conditions rest on proved about the
+reference engine's SPT sets (milestone 5). `cd theory && lake build` has no `sorry`.
+Milestone 5 found that the production engine's restriction dropped the bindings of the
+task's metavariables made at leaves; fixed in `Proofs.lean`. Ahead: the differential
+test against the production engine (milestone 6).
 
 ### Phase 1 acceptance
 

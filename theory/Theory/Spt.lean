@@ -190,6 +190,10 @@ structure StateInv (U : Unification) (db : Database) (st : Statement) (s : State
   tried_lt : ∀ i a B, (i, a, B) ∈ s.tried → i < s.enodes.size
   expanded_tried : ∀ i, i < s.enodes.size → s.enodes[i]!.expanded = true →
     ∀ a, a < db.asserts.length → ∃ B, (i, a, B) ∈ s.tried
+  /-- Nodes are made in order: the children of an assertion node are above the parent
+  of every assertion node up to it. -/
+  parent_lt_children : ∀ j j', j ≤ j' → j' < s.anodes.size →
+    ∀ c ∈ s.anodes[j']!.children, s.anodes[j]!.parent < c
 
 /-! ### An entry's proof is valid -/
 

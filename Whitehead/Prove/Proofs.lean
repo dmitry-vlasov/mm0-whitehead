@@ -9,7 +9,9 @@ of the substitutions of the tuple, composed with the unifier of the assertion no
 What differs from Russell:
 
 - A proof of an expression node goes up with its substitution restricted to the
-  variables of the node's expression (`restrict`). Russell carries the whole
+  variables of the node's expression and the metavariables of the task (`restrict`;
+  the metavariables since 2026-10-13, when the engine lemmas of `docs/THEORY.md` showed
+  that a binding of one made at a leaf would otherwise be lost). Russell carries the whole
   substitution of the subtree to the root; it grows with the subtree, and a proof of
   thousands of steps is then composed again at every level. The restricted one has the
   same bindings for everything that the nodes above can see, so the same tuples unify,
@@ -140,22 +142,27 @@ def condsKey (conds : Array Cond) : Array Nat :=
       return a.size < b.size
     (rows.qsort less).foldl (init := #[conds.size]) (· ++ ·)
 
-/-- The bindings of `theta` for the variables of `e`. A proof of an expression node goes
-up the tree with these only: the other variables that its substitution binds were made
-below the node and occur nowhere else, so the proofs of the siblings cannot depend on
-them. -/
-def restrict (theta : Subst) (e : Exp) : Subst :=
-  { map := e.nodes.foldl (init := {}) fun m n =>
-      if Node.isVar n then
-        match theta.map[Node.varId n]? with
-        | some x => m.insert (Node.varId n) x
-        | none => m
-      else m }
+/-- The bindings of `theta` for the variables of `e` and for the metavariables of the
+task. A proof of an expression node goes up the tree with these only: the other
+variables that its substitution binds were made below the node and occur nowhere else,
+so the proofs of the siblings cannot depend on them (`docs/THEORY.md`, the engine
+lemmas: the visible variables of a node are those of its expression and of the
+statement). A metavariable of the task may be bound at a leaf, by a premise that
+contains it, without occurring in the expressions between the leaf and the root; it is
+kept so that two leaves cannot bind it differently. -/
+def restrict (theta : Subst) (e : Exp) (metas : Array Nat := #[]) : Subst :=
+  let keep (m : Std.HashMap Nat SubExp) (v : Nat) : Std.HashMap Nat SubExp :=
+    match theta.map[v]? with
+    | some x => m.insert v x
+    | none => m
+  { map := metas.foldl (init := e.nodes.foldl (init := {}) fun m n =>
+      if Node.isVar n then keep m (Node.varId n) else m) keep }
 
 /-- The key by which `addProof` keeps one proof of an assertion node: its substitution
-of the variables of the parent's expression `e`, and its open conditions. -/
-def proofKey (theta : Subst) (e : Exp) (conds : Array Cond) : Array Nat :=
-  (restrict theta e).key ++ condsKey conds
+of the variables of the parent's expression `e` and of the metavariables of the task,
+and its open conditions. -/
+def proofKey (theta : Subst) (e : Exp) (conds : Array Cond) (metas : Array Nat := #[]) : Array Nat :=
+  (restrict theta e metas).key ++ condsKey conds
 
 /-- No limit on the number of tuples. -/
 def noLimit : Nat := 0xFFFFFFFF
@@ -298,7 +305,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
         if !consistent prop theta row then
           counters := { counters with inconsistent := counters.inconsistent + 1 }
         else
-          let key := proofKey theta hypExpr conds
+          let key := proofKey theta hypExpr conds env.task.metas
           if keys.contains key || prop.keys.contains key then
             counters := { counters with duplicate := counters.duplicate + 1 }
           else
@@ -322,7 +329,7 @@ partial def buildPropProofs (p : Nat) (proofs : Array Proof) : ProverM Unit := d
   let expr := env.hyps[h]!.expr
   let parent := env.hyps[h]!.parent
   let added := proofs.map fun proof =>
-    Proof.stmt h (proof.sub.apply expr) (restrict proof.sub expr) proof
+    Proof.stmt h (proof.sub.apply expr) (restrict proof.sub expr env.task.metas) proof
   modify fun env => { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs ++ added } }
   match parent with
   | some _ => buildExpProofs h added

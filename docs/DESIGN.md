@@ -797,7 +797,10 @@ Each of these is also noted in the file it concerns.
    node goes up with the bindings of the variables of that node's expression only. The
    others are of variables made below the node, which occur nowhere else, so the same
    tuples unify with the same result on everything visible. The same proof takes
-   0.38 s.
+   0.38 s. Since 2026-10-13 the bindings of the task's metavariables go up too: a
+   premise with a metavariable can bind it at a leaf without its occurring in the
+   expressions between the leaf and the root, and without the binding two leaves could
+   bind it differently unnoticed (`docs/THEORY.md`, milestone 5).
 
    **Which proofs are kept** (decided 2026-10-05, refined 2026-10-11). `ruAddProof`
    keeps one proof of an assertion node per substitution (`ruProofSubKey`): of the

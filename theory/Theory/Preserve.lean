@@ -114,6 +114,9 @@ theorem StateInv.mono {U : Unification} {db : Database} {st : Statement} {s s' :
     rcases hexp i hex with hex' | hall
     · exact h.expanded_tried i (by rw [hsize] at hi; exact hi) hex' a ha
     · exact hall a ha
+  parent_lt_children := fun j j' hjj hj' c hc => by
+    rw [hanodes] at hj' hc ⊢
+    exact h.parent_lt_children j j' hjj hj' c hc
 
 /-- Marking a node expanded changes no expression and no parent. -/
 theorem getElem!_modify (s : State) (i k : ℕ) :
@@ -400,7 +403,26 @@ theorem addNode_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statem
         rw [getElem!_pos (addNode i a s A θ).enodes _ hk'] at hex
         simp only [addNode] at hex
         rw [Array.getElem_append_right (by omega)] at hex
-        simp [newENodes, Nat.add_sub_cancel_left] at hex }
+        simp [newENodes, Nat.add_sub_cancel_left] at hex
+    parent_lt_children := fun j j' hjj hj' c hc => by
+      rcases hanode j' hj' with ⟨hj's, heq⟩ | ⟨rfl, heq⟩
+      · rw [heq] at hc
+        have hjs : j < s.anodes.size := lt_of_le_of_lt hjj hj's
+        rw [addNode_anode_old _ _ _ _ _ j hjs]
+        exact hs.parent_lt_children j j' hjj hj's c hc
+      · rw [heq] at hc
+        simp only [List.mem_map, List.mem_range] at hc
+        obtain ⟨k, _, rfl⟩ := hc
+        by_cases hjs : j < s.anodes.size
+        · rw [addNode_anode_old _ _ _ _ _ j hjs]
+          obtain ⟨A', hA'⟩ := hs.anodes j hjs
+          have := hA'.parent_lt
+          omega
+        · have : j = s.anodes.size := by omega
+          subst this
+          rw [addNode_anode_new]
+          simp only
+          omega }
 
 /-- Recording an attempt keeps the invariant, when the attempt has its node or no
 unifier at its base, and the base is above the expression. -/
@@ -442,6 +464,7 @@ theorem recordAt_inv {U : Unification} {db : Database} {st : Statement} {s : Sta
   expanded_tried := fun e he hex a' ha' => by
     obtain ⟨B', hB'⟩ := hs.expanded_tried e he hex a' ha'
     exact ⟨B', List.mem_cons_of_mem _ hB'⟩
+  parent_lt_children := by dsimp only [recordAt]; exact hs.parent_lt_children
 
 theorem tryAssertion_cases (U : Unification) (db : Database) (i a : ℕ) (s : State) :
     (tryAssertion U db i a s = recordAt i a (s.baseOf s.anodes.size) s ∧
@@ -618,6 +641,7 @@ theorem init_inv (U : Unification) (db : Database) (st : Statement) : StateInv U
     have : i = 0 := by simp [init] at hi; omega
     subst this
     simp [init] at hex
+  parent_lt_children := fun j j' _ hj' => by simp [init] at hj'
 
 theorem run_inv (U : Unification) (db : Database) (hwf : db.WF) (st : Statement) :
     ∀ n, StateInv U db st (run U db st n)
