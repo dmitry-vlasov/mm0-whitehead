@@ -134,3 +134,52 @@ def restrict (θ : Subst) (s : Finset Var) : Subst where
 end Subst
 
 end Theory
+
+namespace Theory.Subst
+
+/-- A typed substitution keeps the type of an expression, up to `fits`. -/
+theorem ty_apply {θ : Subst} (hθ : θ.Typed) : ∀ e : Exp, e.ty.fits (θ.apply e).ty
+  | .var v => hθ v
+  | .const _ _ => Ty.fits_refl _
+  | .app _ t _ => by simp only [apply, Exp.ty]; exact Ty.fits_refl t
+
+theorem Typed.comp {θ η : Subst} (hθ : θ.Typed) (hη : η.Typed) : (θ.comp η).Typed :=
+  fun v => Ty.fits_trans (hη v) (ty_apply hθ (η.f v))
+
+mutual
+/-- The variables of an expression under a substitution: those of the images of its
+variables. -/
+theorem vars_apply (θ : Subst) : ∀ e : Exp, (θ.apply e).vars = e.vars.biUnion fun v => (θ.f v).vars
+  | .var v => by simp [apply, Exp.vars]
+  | .const _ _ => by simp [apply, Exp.vars]
+  | .app _ _ args => by simp only [apply, Exp.vars]; exact varsList_applyList θ args
+theorem varsList_applyList (θ : Subst) :
+    ∀ es : List Exp, Exp.varsList (θ.applyList es) = (Exp.varsList es).biUnion fun v => (θ.f v).vars
+  | [] => by simp [applyList, Exp.varsList]
+  | e :: es => by
+    simp only [applyList, Exp.varsList, vars_apply θ e, varsList_applyList θ es]
+    ext w
+    simp only [Finset.mem_union, Finset.mem_biUnion]
+    aesop
+end
+
+mutual
+/-- The constants of an expression under a substitution: its own and those of the
+images of its variables. -/
+theorem consts_apply (θ : Subst) :
+    ∀ e : Exp, (θ.apply e).consts = e.consts ∪ e.vars.biUnion fun v => (θ.f v).consts
+  | .var v => by simp [apply, Exp.vars, Exp.consts]
+  | .const _ _ => by simp [apply, Exp.vars, Exp.consts]
+  | .app _ _ args => by simp only [apply, Exp.vars, Exp.consts]; exact constsList_applyList θ args
+theorem constsList_applyList (θ : Subst) :
+    ∀ es : List Exp, Exp.constsList (θ.applyList es) =
+      Exp.constsList es ∪ (Exp.varsList es).biUnion fun v => (θ.f v).consts
+  | [] => by simp [applyList, Exp.varsList, Exp.constsList]
+  | e :: es => by
+    simp only [applyList, Exp.varsList, Exp.constsList, consts_apply θ e, constsList_applyList θ es]
+    ext w
+    simp only [Finset.mem_union, Finset.mem_biUnion]
+    aesop
+end
+
+end Theory.Subst

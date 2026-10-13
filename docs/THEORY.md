@@ -173,6 +173,16 @@ unifier's test against its reference unifier.
    variable, 1 proof in 2 rounds and 83 in 3. A converter (`Convert`) maps the
    production database and task to the model.
 2. Substitutions and proof trees: composition, instance, the monotonicity lemma (3.5).
+   **Reached on 2026-10-13**: `Subst.lean` has composition, typing (`ty_apply`,
+   `Typed.comp`), and what a substitution does to the variables and constants of an
+   expression (`vars_apply`, `consts_apply`); `Deduction.lean` has the monotonicity
+   lemma `Shape.subst`, and how the conditions and the expressions of a tree change
+   under a substitution; `Closing.lean` proves `close_isProof`: the closing of a valid
+   tree is a proof of the statement — a condition keeps holding under fresh distinct
+   dummies (`holds_closing`), and in a well-formed database every condition's name is
+   a name (`conds_name`). So `soundness` rests on `soundness_valid` alone. The closing
+   covers every variable of a tree, in its expressions and in its conditions
+   (`allVars`), and names the dummies by an injective code of the variable.
 3. The SPT lemma (4.3) for the backward engine: every entry's substitution is the most
    general unifier of its variant's equation system, and conversely.
 4. Soundness, then generality and completeness from the SPT lemma.

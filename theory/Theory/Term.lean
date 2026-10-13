@@ -9,6 +9,7 @@ import Mathlib.Data.Finset.Image
 import Mathlib.Data.Finset.Lattice.Fold
 import Mathlib.Data.Finset.Union
 import Mathlib.Data.Prod.Lex
+import Mathlib.Data.Nat.Pairing
 
 namespace Theory
 
@@ -36,6 +37,18 @@ structure Var where
   id : ℕ
   ty : Ty
   deriving DecidableEq, Repr, Inhabited
+
+/-- A number for a variable, distinct for distinct variables: the closing of a proof
+names its dummies by it. -/
+def Var.code (v : Var) : ℕ := Nat.pair v.id (Nat.pair v.ty.sort (if v.ty.name then 1 else 0))
+
+theorem Var.code_injective : Function.Injective Var.code := by
+  intro a b h
+  obtain ⟨i, s, n⟩ := a
+  obtain ⟨i', s', n'⟩ := b
+  simp only [Var.code, Nat.pair_eq_pair] at h
+  obtain ⟨rfl, rfl, h⟩ := h
+  cases n <;> cases n' <;> simp_all
 
 /-- Variables are ordered, by number, then sort, then the name bit: the domain of a
 substitution is listed in this order. -/
@@ -161,6 +174,18 @@ def Consts.names (c : Consts) (e : Exp) : Finset Exp :=
   (e.vars.filter (·.ty.name = true)).image Exp.var ∪
   (e.consts.filter (·.2.name = true)).image (fun p => Exp.const p.1 p.2) ∪
   e.consts.biUnion (fun p => (c.deps p.1).image (fun m => Exp.const m (c.ty m)))
+
+theorem Consts.mem_names (c : Consts) (x e : Exp) :
+    x ∈ c.names e ↔ (∃ v ∈ e.vars, v.ty.name = true ∧ x = .var v) ∨
+      (∃ p ∈ e.consts, p.2.name = true ∧ x = .const p.1 p.2) ∨
+      (∃ p ∈ e.consts, ∃ m ∈ c.deps p.1, x = .const m (c.ty m)) := by
+  simp only [Consts.names, Finset.mem_union, Finset.mem_image, Finset.mem_filter, Finset.mem_biUnion]
+  aesop
+
+/-- A name is a variable or a constant: an application never occurs as a name. -/
+theorem Consts.app_not_mem_names (c : Consts) (f : ℕ) (t : Ty) (args : List Exp) (e : Exp) :
+    Exp.app f t args ∉ c.names e := by
+  simp [Consts.mem_names]
 
 /-- Well-formed expressions of a signature: the argument types and the result sort of
 every term symbol. -/
