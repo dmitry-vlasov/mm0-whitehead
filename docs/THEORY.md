@@ -309,7 +309,11 @@ and are left out.
    the first 100 assertions 77 agree and 18 are over — nearly all agreeing that there
    is no proof, the database holding little that a later statement can use (2 and 1
    with proofs at the root). No disagreement anywhere; the per-theorem lines are what
-   `diff-test` prints. The corpus needed three changes to the test, all made the same
+   `diff-test` prints. Three rounds are beyond the corpus: with all the assertions
+   before a theorem every one of every 100th theorem of `peano` is over the tuple cap,
+   and with the first 60 assertions the production engine did not finish the first
+   theorem of the sample in half an hour — the driver gives it no work budget, and the
+   products of the third round are products of products. The corpus needed three changes to the test, all made the same
    day: the production engine's last round makes no assertion nodes (the next level,
    unexpanded, gives no proof, and on a corpus file it was a million nodes and minutes
    per theorem; the two engines now have the same nodes), the two caps and
