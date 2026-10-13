@@ -29,6 +29,11 @@ structure Statement where
   hyps : List Exp
   concl : Exp
 
+/-- The statement under a substitution: an instance of it. For a statement with
+metavariables, what a proof found proves; for one without, the statement itself. -/
+def Statement.subst (σ : Subst) (st : Statement) : Statement :=
+  { st with hyps := st.hyps.map σ.apply, concl := σ.apply st.concl }
+
 /-- A substitution satisfies a pair `(x, v)`: the name given for `x` does not occur in
 what is given for `v` (condition 2 of `DESIGN.md`, "Where MM0 differs"). -/
 def SatPair (c : Consts) (θ : Subst) (p : Var × Var) : Prop :=

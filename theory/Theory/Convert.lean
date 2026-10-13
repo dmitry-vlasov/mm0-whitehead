@@ -39,9 +39,12 @@ def assertion (a : Whitehead.Prove.Assertion) : Assertion :=
   { vars, pairs := a.disjs.toList.map fun (i, j) => (vars[i]!, vars[j]!),
     hyps := a.hyps.toList.map exp, concl := exp a.concl }
 
-/-- The assertions a task may use, as the database, with their names. -/
+/-- The assertions a task may use, as the database, with their names. The conversion
+rules of a file with defs (`pseudo`) are left out: the first variant of the theory has
+no definitions (`docs/THEORY.md`, decision 6). -/
 def database (db : Whitehead.Prove.Db) (task : Whitehead.Prove.Task) : Database × Array String :=
-  let usable := db.asserts.toList.filter fun a => a.rank < Whitehead.Prove.rankLimit task.limit
+  let usable := db.asserts.toList.filter fun a =>
+    a.rank < Whitehead.Prove.rankLimit task.limit && a.pseudo.isNone
   ({ asserts := usable.map assertion }, (usable.map (·.name)).toArray)
 
 def statement (task : Whitehead.Prove.Task) : Statement :=

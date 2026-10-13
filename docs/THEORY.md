@@ -15,6 +15,15 @@ record of the decisions; the formal development is the Lake package `theory/`.
    tested against it; a proof about the production engine itself is deferred.
 4. Backward search only. The forward direction is for later.
 5. Soundness as well as completeness; generality comes with them.
+6. (2026-10-13, later) Definitions are excluded from the first variant. They are to be
+   added afterwards with their original semantics — MM0's conversion judgment — rather
+   than only as assertions. The converter leaves the conversion rules out.
+7. (2026-10-13, later) The statement may have metavariables (free variables are
+   constants, metavariables are variables of the tree, as in `Db.task`). They do not
+   complicate the theory: the root is an expression node like any other, and every
+   theorem is about instances of the statement — what an entry proves is the statement
+   under its answer. A statement without metavariables is the case where every
+   instance is the statement itself.
 
 ## The documents
 
@@ -69,8 +78,7 @@ What is formalized, in the draft's terms, specialized to MM0.
   than scopes of rigid variables.
 - **The deductive system.** Assertions (binders, hypotheses, conclusion, pairs) in a
   database; the hypotheses of the statement as facts (premise-free local assertions);
-  no structural rules. Definitions enter as assertions too: the unfolding steps and the
-  conversion rules of "Unfolding as an inference step", a finite family per def.
+  no structural rules. No definitions in the first variant (decision 6).
 - **Proofs.** Proof trees as in the paper: e-nodes with expressions, a-nodes with
   `(a, θ)`, leaves e-nodes that are hypotheses; valid when every transition is the
   instance of its assertion under a typed substitution that satisfies the pairs. A
@@ -108,15 +116,18 @@ engine. The first three are stated as lemmas about the reference engine's SPT se
 
 ## The theorems
 
-For a database, a statement and the reference engine after `n` rounds:
+For a database, a statement and the reference engine after `n` rounds (`Theorems.lean`;
+"the statement" below means an instance of it under a substitution of its
+metavariables, decision 7):
 
-- **Soundness** (paper's Theorem 1, draft's 4.4): every entry at the root whose
-  conditions are satisfiable gives a valid proof of the statement, with distinct fresh
-  names for the variables it leaves open.
+- **Soundness** (paper's Theorem 1, draft's 4.4): the proof of every entry at the root
+  is valid for the statement under the answer and proves its conclusion; and it has an
+  instance that is a proof of the statement — the variables it leaves open given
+  distinct fresh names.
 - **Generality** (Theorem 2, 4.5): the proof of a root entry is more general than any
-  valid proof congruent to it.
-- **Completeness** (Theorem 3, 4.6): for every valid proof of the statement there is a
-  number of rounds after which the root has an entry of which the proof is an instance.
+  proof of the statement congruent to it.
+- **Completeness** (Theorem 3, 4.6): for every proof of the statement there is a number
+  of rounds after which the root has an entry of which the proof is an instance.
 - **The engine lemmas**: an entry's join depends only on its substitution restricted to
   the variables of its node's expression (restriction); two entries with the same
   restricted substitution and open conditions are interchangeable above (key); a
@@ -163,11 +174,25 @@ the fragment of Lean.
 
 ## Questions
 
-1. Definitions: in the model from the start (the unfolding steps and the conversion
-   rules as assertions), or excluded until the pure part is proved? The set.mm tests do
-   not touch them; the example files do.
-2. Dummies: a proof of the statement may use names that are not the statement's. The
-   model takes them as the variables of a name type that a root entry leaves open, made
-   distinct at the end. Is that your reading of MM0's dummies?
-3. The statement's metavariables (`prove search --meta`): in the model from the start,
-   as the draft's statement metavariables with scope, or later?
+Answered on 2026-10-13: definitions are excluded (decision 6); metavariables stay
+(decision 7). Open:
+
+2. **Variables that a proof leaves undetermined.** When the engine finds a proof, some
+   variables of the tree may be left that nothing in the proof determines. They are of
+   two kinds. (a) A variable standing for a *bound variable*: the `x` of `∀x ph → ph`
+   when it is used to prove `ph` from `∀x ph` and nothing else fixes `x`. MM0 lets a
+   proof introduce such a variable as a *dummy* (`Dummy` in the `.mmb`). (b) A variable
+   standing for an *expression*, such as a `wff` that occurs in a hypothesis of a lemma
+   but not in its conclusion, when the subproof of that hypothesis leaves it open. MM0
+   has no dummy of that kind: the proof must say what the expression is. The production
+   engine fills in (b) when it writes the proof, by a heuristic (`DESIGN.md`,
+   "Closing": a new bound variable of the sort if the sort has them, else a term
+   without arguments declared before the theorem, else a variable of the theorem; up to
+   four tries against the verifier). The model as written: the theorems are about
+   proofs *with* variables; a *proof of the statement* (`IsProof`) is one whose
+   remaining variables are all of kind (a), each a distinct new dummy; a tree with a
+   remaining variable of kind (b) is a valid schematic proof but not yet a proof of the
+   statement — it needs an instantiation, which the model takes as given from outside
+   (any instantiation keeps validity, by monotonicity, as long as the conditions hold).
+   Is that acceptable for the first variant, or should the closing rule for (b) be part
+   of the model?
