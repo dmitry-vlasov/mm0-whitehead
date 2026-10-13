@@ -478,7 +478,29 @@ judgment — rather than only as assertions". The second variant adds them so.
     `completeness` over the extended database.
 11. The converter maps the definitions and the rules; the production engine's
     (def, occurrence) steps get an off switch; the differential test on the files
-    with definitions (`defs.mmb`, `peano`, `hol`, `mm0`).
+    with definitions (`defs.mmb`, `peano`, `hol`, `mm0`). **Reached on 2026-10-13.**
+    `Convert.lean` gives the model the language of the file (`language`: its sorts
+    and which are provable, its terms before the judgment terms, the signature, and
+    the production engine's judgment sort), its definitions (`defs`), and the
+    database with the rules the file has; and it checks, once per file, that the
+    rules the model builds (`Rules.all`) are the file's rule for rule, the pairs in
+    any order (`rulesMismatch`), and that every definition is well-formed
+    (`defsFaults`, the conditions of `Def.WF`). The production engine runs in the
+    test without its (def, occurrence) steps (`Env.convSteps`, decision 12), so that
+    the two engines have the same steps. On the fixture with definitions
+    (`tests/fixtures/prove/defs.mmb`, 9 definitions, 26 theorems) the model's rules are
+    the file's, no definition has a fault, and the two engines agree on every theorem
+    for 2 and 3 rounds, with the same nodes — at 3 rounds the proofs go through
+    `conv_s`, `unfold'_f` and `refl_s`, which no earlier run could reach without the
+    rules on both sides. On the corpus, 2 rounds, with the first 300 assertions of the
+    file as the database: every 25th theorem of `peano` (108; 158 definitions), every
+    100th of `mm0` (49; 412) and every 200th of `x86` (38; 536) agree, and so does every
+    3rd theorem of `hol` (34; 20 definitions) with its whole database; on each file the
+    model's rules are the file's and no definition has a fault. The check found one
+    difference on the way: the number of the rule's variable for the other side of an
+    unfolding, which the production engine takes as the number of the definition's
+    binders — the model now does the same, with the largest binder plus one as the
+    meaning that its proofs need.
 
 ## Questions
 

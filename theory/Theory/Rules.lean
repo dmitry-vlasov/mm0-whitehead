@@ -103,10 +103,14 @@ def congRule (L : Language) (t : ℕ) (strictAt : Option ℕ) : Assertion :=
 def regularArgs (tys : List Ty) : List ℕ :=
   (List.range tys.length).filter fun k => !(tys[k]!).name
 
-/-- The variable for the other side of an unfolding or folding: above the binders of
-the definition, of its sort. -/
+/-- The variable for the other side of an unfolding or folding: above every binder of
+the definition — the largest binder number plus one, and `0` when there is none —
+which is the number of binders when they are numbered from zero, as the production
+engine numbers them. -/
 def other (D : Def) : Var :=
-  ⟨(D.args ++ D.dummies).foldl (fun m x => max m x.id) 0 + 1, ⟨D.ty.sort, false⟩⟩
+  ⟨match D.args ++ D.dummies with
+    | [] => 0
+    | l => l.foldl (fun m x => max m x.id) 0 + 1, ⟨D.ty.sort, false⟩⟩
 
 /-- The pairs `(y, y')` of each dummy with every later one. -/
 def laterPairs : List Var → List (Var × Var)

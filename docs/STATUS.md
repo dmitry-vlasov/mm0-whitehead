@@ -43,7 +43,11 @@ translating an MM0 proof whose certificates are those of the `.mmb` format into 
 proof over the extended database (`OfD.lean`, `completeness_defs`). A finding on the
 way (decision 14): the primary specification's certificates have transitivity, with
 which two unfoldings rename a dummy, which no `.mmb` proof can express. Milestone 11,
-the converter and the differential test on the files with definitions, is next.
+the converter and the differential test on the files with definitions, reached the
+same day: the model's rules are the file's, rule for rule, on `defs.mmb`, `peano`,
+`hol`, `mm0` and `x86`, and the two engines agree on every sampled theorem of each,
+with the production engine's (def, occurrence) steps off (`Env.convSteps`). All
+eleven milestones are reached; `cd theory && lake build` has no `sorry`.
 
 ### Phase 1 acceptance
 

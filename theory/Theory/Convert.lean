@@ -6,6 +6,7 @@ database, the task becomes the statement. For the driver and the differential te
 -/
 import Whitehead.Prove.Db
 import Theory.Search
+import Theory.Rules
 
 namespace Theory.Convert
 
@@ -39,13 +40,65 @@ def assertion (a : Whitehead.Prove.Assertion) : Assertion :=
   { vars, pairs := a.disjs.toList.map fun (i, j) => (vars[i]!, vars[j]!),
     hyps := a.hyps.toList.map exp, concl := exp a.concl }
 
-/-- The assertions a task may use, as the database, with their names. The conversion
-rules of a file with defs (`pseudo`) are left out: the first variant of the theory has
-no definitions (`docs/THEORY.md`, decision 6). -/
+/-- The language of the file: its sorts and which are provable; its terms — those of
+the file, before the judgment terms a file with definitions has — with their
+signature; and the production engine's judgment sort (`judgmentTy`). -/
+def language (db : Whitehead.Prove.Db) : Language :=
+  { sorts := db.file.sorts.size,
+    provable := fun s => match db.file.sorts[s]? with | some d => d.isProvable | none => false,
+    terms := if db.defs.isEmpty then db.terms.size else db.conv.base,
+    sig := { args := fun f => match db.terms[f]? with | some info => info.args.toList.map ty | none => [],
+             sort := fun f => match db.terms[f]? with | some info => Whitehead.Prove.Ty.sort info.ty | none => 0 },
+    judg := Whitehead.Prove.Ty.sort Whitehead.Prove.judgmentTy }
+
+/-- The definitions of the file, in the order of the terms. -/
+def defs (db : Whitehead.Prove.Db) : List Def :=
+  db.defs.toList.filterMap fun t =>
+    match db.terms[t]? with
+    | some info =>
+      match info.value with
+      | some v =>
+        some { term := t, ty := ty info.ty,
+               args := (List.range info.args.size).map fun k => ⟨k, ty info.args[k]!⟩,
+               dummies := v.dummies.toList.map var, value := exp v.expr }
+      | none => none
+    | none => none
+
+/-- The assertions a task may use, as the database, with their names: the file's and,
+for a file with definitions, the rules of the conversion judgment (`pseudo`), which
+the production engine lays out as the model does (`Rules.all`; checked by
+`rulesMismatch`); and the definitions. -/
 def database (db : Whitehead.Prove.Db) (task : Whitehead.Prove.Task) : Database × Array String :=
-  let usable := db.asserts.toList.filter fun a =>
-    a.rank < Whitehead.Prove.rankLimit task.limit && a.pseudo.isNone
-  ({ asserts := usable.map assertion }, (usable.map (·.name)).toArray)
+  let usable := db.asserts.toList.filter fun a => a.rank < Whitehead.Prove.rankLimit task.limit
+  ({ asserts := usable.map assertion, defs := defs db }, (usable.map (·.name)).toArray)
+
+/-- Two assertions, the pairs in any order. -/
+def assertionEqv (A B : Assertion) : Bool :=
+  A.vars == B.vars && A.hyps == B.hyps && A.concl == B.concl && A.pairs.isPerm B.pairs
+
+/-- The rules the model builds for the file against the rules the file has: `none` when
+they agree rule for rule, else the first difference. -/
+def rulesMismatch (db : Whitehead.Prove.Db) : Option String :=
+  let model := Rules.all (language db) (defs db)
+  let file := db.asserts.toList.filter (·.pseudo.isSome)
+  if model.length != file.length then some s!"{model.length} rules in the model, {file.length} in the file"
+  else (model.zip file).findSome? fun ((k, A), a) =>
+    if assertionEqv A (assertion a) then none
+    else some s!"rule {a.name} ({repr k}) differs: model vars {A.vars.length}, pairs {A.pairs.length}, \
+      file vars {(assertion a).vars.length}, pairs {(assertion a).pairs.length}"
+
+/-- What keeps a definition of the file from being well-formed (`Def.WF`); nothing, as
+a rule. -/
+def defsFaults (db : Whitehead.Prove.Db) : List String :=
+  (defs db).filterMap fun D =>
+    let name := (db.terms[D.term]?.map (·.name)).getD s!"t{D.term}"
+    if !(D.value.vars ⊆ (D.args ++ D.dummies).toFinset) then some s!"{name}: the value has a variable that is no binder"
+    else if D.dummies.any (fun y => !(y ∈ D.value.vars)) then some s!"{name}: a dummy does not occur in the value"
+    else if D.dummies.any (fun y => !y.ty.name) then some s!"{name}: a dummy is not of a name type"
+    else if D.ty.name then some s!"{name}: the result is of a name type"
+    else if D.value.ty.sort != D.ty.sort then some s!"{name}: the value is not of the result's sort"
+    else if !(D.args ++ D.dummies).Nodup then some s!"{name}: two binders are the same"
+    else none
 
 /-- The task as the statement. A sort allows dummies unless it is `strict` or `free`
 (the sort table of the proof file). -/

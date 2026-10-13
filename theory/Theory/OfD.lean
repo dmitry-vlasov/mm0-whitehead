@@ -640,9 +640,14 @@ theorem foldl_max_ge : ∀ (l : List Var) (m : ℕ),
 
 theorem Rules.other_not_mem (D : Def) : Rules.other D ∉ D.args ++ D.dummies := by
   intro h
-  have := (foldl_max_ge (D.args ++ D.dummies) 0).2 _ h
-  simp only [Rules.other] at this
-  omega
+  unfold Rules.other at h
+  generalize hl : D.args ++ D.dummies = l at h
+  cases l with
+  | nil => simp at h
+  | cons y l =>
+    have h1 := (foldl_max_ge (y :: l) 0).2 _ h
+    simp only [] at h1
+    omega
 
 theorem laterPairs_getElem : ∀ (ys : List Var) (p : Var × Var), p ∈ Rules.laterPairs ys →
     ∃ (j j' : ℕ), j < j' ∧ ys[j]? = some p.1 ∧ ys[j']? = some p.2

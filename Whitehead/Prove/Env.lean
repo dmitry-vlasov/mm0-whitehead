@@ -94,6 +94,10 @@ structure Env where
   /-- `RuProverEnv.admitJoin`: whether a new fact (first) is joined with a subgoal
   (second) that it unifies with. A strategy sets it; the engine only asks. -/
   admitJoin : Exp → Exp → Bool := fun _ _ => true
+  /-- Whether an expression node is also expanded by the (def, occurrence) steps
+  (`convCandidates`). Off in the differential test against the reference engine, which
+  has the conversion judgment as assertions only (`docs/THEORY.md`, decision 12). -/
+  convSteps : Bool := true
   /-- The number of the next fresh variable. -/
   fresh : Nat := freshBase
   /-- The proofs that reached the root and have not been taken by the driver yet. -/

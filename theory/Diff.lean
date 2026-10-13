@@ -103,7 +103,9 @@ def runProduction (db : Whitehead.Prove.Db) (index : Whitehead.Prove.Index ℕ) 
   let env := Whitehead.Prove.Env.init db index task
   -- the goal as a premise: the reference engine's leaf entries at the root
   let direct := (env.premises.unify env.task.goal).map fun u => (u.expr, u.data, u.sub)
-  let env := { env with tupleBudget := cap, workBudget := 0xFFFFFFFFFFFF, deadline := 0xFFFFFFFFFFFF }
+  -- no (def, occurrence) steps: the reference engine has the judgment as assertions only
+  let env := { env with tupleBudget := cap, workBudget := 0xFFFFFFFFFFFF, deadline := 0xFFFFFFFFFFFF,
+                        convSteps := false }
   let mut env := (← (Whitehead.Prove.expandHyp 0 none).run env).2
   for k in [0:n] do
     if k + 1 == n then env := { env with assertions := {} }
@@ -286,6 +288,11 @@ def main (args : List String) : IO UInt32 := do
         maxTuples := Diff.numOption rest "--max-tuples" 1000000, maxNodes := Diff.numOption rest "--max-nodes" 2000000,
         assertions := Diff.numOption rest "--assertions" 1000000000,
         verbose := rest.contains "--verbose", dump := rest.contains "--dump" }
+    if !db.defs.isEmpty then
+      match Convert.rulesMismatch db with
+      | none => IO.println s!"{path}: {db.defs.size} definitions; the model's rules are the file's"
+      | some m => IO.println s!"{path}: the model's rules are not the file's: {m}"
+      for f in Convert.defsFaults db do IO.println s!"{path}: {f}"
     let index := db.index
     let mut total := 0
     let mut agreed := 0

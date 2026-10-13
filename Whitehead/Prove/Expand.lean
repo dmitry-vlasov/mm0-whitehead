@@ -89,7 +89,7 @@ def candidates (env : Env) (h : Nat) (only : Option Only) : Array Candidate :=
   | none =>
     (env.assertions.unifyRaw e (rankLimit env.task.limit)).map (fun u =>
       { step := .assertion u.data, rule := env.db.asserts[u.data]!, binds := u.binds })
-      ++ convCandidates env e
+      ++ (if env.convSteps then convCandidates env e else #[])
   | some (.assertion id) =>
     match unifyExps #[e, env.db.asserts[id]!.concl] {} with
     | some s => #[{ step := .assertion id, rule := env.db.asserts[id]!, binds := Binds.ofSubst s }]
