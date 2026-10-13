@@ -42,24 +42,26 @@ structure IndexesRet where
   deriving Inhabited
 
 /-- The first `cap + 1` tuples of `sets` (all, if there are fewer), made one at a time in
-the order of `tuples`: a product can be far too large to be made whole. -/
-def tuplesUpTo {α : Type} [Inhabited α] (sets : Array (Array α)) (cap : Nat) : Array (Array α) := Id.run do
-  if sets.any (·.isEmpty) then return #[]
-  let mut picks : Array Nat := Array.replicate sets.size 0
-  let mut out : Array (Array α) := #[]
-  while out.size ≤ cap do
-    out := out.push ((Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
-    -- the next tuple: the last place moves fastest
-    let mut i := sets.size
-    let mut carry := true
-    while carry && i > 0 do
-      i := i - 1
-      if picks[i]! + 1 < sets[i]!.size then
-        picks := picks.set! i (picks[i]! + 1)
-        carry := false
-      else picks := picks.set! i 0
-    if carry then break
-  return out
+the order of `tuples`: a product can be far too large to be made whole. Written as
+recursion on a count, which the compiler makes a loop of: as nested `while` loops in
+`Id` it ran one closure call deeper per tuple, and a budget in the millions
+(`diff-test --max-tuples 30000000` on set.mm) overflowed the stack. -/
+def tuplesUpTo {α : Type} [Inhabited α] (sets : Array (Array α)) (cap : Nat) : Array (Array α) :=
+  if sets.any (·.isEmpty) then #[] else go (cap + 1) (Array.replicate sets.size 0) #[]
+where
+  /-- The tuple after `picks`, the last place moving fastest; `none` after the last. -/
+  next (picks : Array Nat) : Nat → Option (Array Nat)
+    | 0 => none
+    | i + 1 =>
+      if picks[i]! + 1 < sets[i]!.size then some (picks.set! i (picks[i]! + 1))
+      else next (picks.set! i 0) i
+  go : Nat → Array Nat → Array (Array α) → Array (Array α)
+    | 0, _, out => out
+    | left + 1, picks, out =>
+      let out := out.push ((Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
+      match next picks sets.size with
+      | some picks => go left picks out
+      | none => out
 
 /-- All ways to take one element from each of the arrays. -/
 def tuples {α : Type} [Inhabited α] (sets : Array (Array α)) : Array (Array α) :=

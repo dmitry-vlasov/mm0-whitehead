@@ -27,7 +27,13 @@ task's metavariables made at leaves; fixed in `Proofs.lean`. The differential te
 (milestone 6, `theory/Diff.lean`, `lake exe diff-test`) agrees on the logic fixture for
 2 and 3 rounds, with and without metavariables, after two more fixes of the
 metavariable mode (`metaValues`, and the join of the node's unifier with the children's
-in `addProof`). All seven milestones of the first variant are reached.
+in `addProof`); and on the corpus: with the first 300 assertions of a file as the
+database, every sampled theorem of `peano`, `mm0` and `x86` agrees, and of set.mm 50
+of 95 (77 with the first 100), the rest over the test's tuple cap; with all the
+assertions before a theorem, the early theorems of `peano` and set.mm agree and the
+later ones are beyond the reference engine's enumeration, which builds every tuple of
+a join (`THEORY.md`, milestone 6). No disagreement. All seven milestones of the first
+variant are reached.
 
 ### Phase 1 acceptance
 
@@ -282,7 +288,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 900 checks, 0 failures, in 18 seconds:
+corpus of `scripts/build-corpus.sh` built — 921 checks, 0 failures, in 18 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -302,7 +308,8 @@ corpus of `scripts/build-corpus.sh` built — 900 checks, 0 failures, in 18 seco
 - Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.
 - Prover, hand-written and random: expressions and substitutions; unification and the
   index, also compared with a reference unifier on 27,000 random inputs; the product
-  unifier against trying every tuple on 3,000 random products; the engine on the logic
+  unifier against trying every tuple on 3,000 random products, and the tuples of a
+  product one at a time; the engine on the logic
   fixture (database, replay of its 16 proofs, breadth-first search, the forward
   direction and both in turn, conditions on bound variables, one proof per key kept in
   the tree and in the forward front and none made twice, variables marked as

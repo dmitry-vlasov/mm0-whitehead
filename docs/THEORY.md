@@ -159,14 +159,33 @@ entry's key must be among the production engine's. This is the same method as th
 unifier's test against its reference unifier.
 
 `lake exe diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J]
-[--verbose] [--dump]` (`theory/Diff.lean`) runs it. The production engine is driven
-round by round there, since its search stops at the first proof accepted: the root is
-expanded, then each round expands every assertion node made before it. The production
-engine makes the children of an assertion node when it expands the node and matches
-them with the premises then, so after `n` such rounds its proofs at the root use the
+[--max-tuples N] [--max-nodes N] [--assertions K] [--verbose] [--dump]`
+(`theory/Diff.lean`) runs it.
+The production engine is driven round by round there, since its search stops at the
+first proof accepted: the root is expanded, then each round expands every assertion
+node made before it. The production engine makes the children of an assertion node
+when it expands the node, matches them with the premises then, and expands them
+against the assertions; so after `n` such rounds its proofs at the root use the
 assertion nodes of depth up to `n` and hypotheses at expression nodes of depth up to
-`n`: the reference engine's entries after `n` rounds (the expression nodes agree in
-number, the production engine has one more level of assertion nodes not yet expanded).
+`n`: the reference engine's entries after `n` rounds. The assertion nodes of depth
+`n + 1` are not expanded within the `n` rounds and give no proof, and on a corpus file
+they are the bulk of the work — a premise that is a bare variable unifies with
+thousands of assertions — so the last round sees no assertions and makes none of them;
+the two engines then have the same nodes. The products of such premises are beyond
+memory in either engine, so a theorem is left out, reported and not counted as a
+disagreement, when the joins of either engine would visit more tuples of proofs than
+`--max-tuples` (1,000,000 unless given) — the production engine's count of the sizes
+of the products it joins, and the same sum over the reference engine's enumeration,
+checked before each product is built (`sptEC`, the recursion of `sptE` with the
+guard) — or the production engine makes more assertion nodes than `--max-nodes`
+(2,000,000). The tuples of a theorem late in a file grow with the square of the
+assertions before it — on set.mm they pass a billion from the 900th theorem on —
+past what the reference engine can enumerate; `--assertions K` gives every theorem
+the first `K` assertions of the file as its database instead (the task's limit, which
+both engines follow), so that the statement of every theorem of a file can be tested.
+The production engine runs first, being the quicker; the reference engine's time is
+measured around a call that is not inlined, since a pure value is otherwise computed
+where it is first used.
 A proof is compared by its *shape* — the assertions of its steps and the hypotheses
 at its leaves — and its *answer* — the goal and the metavariables under its
 substitution, variables renamed by first occurrence, since a most general unifier is
@@ -274,6 +293,34 @@ and are left out.
    a metavariable that a premise binds at a leaf: a proof of `com12` with `ps` a
    metavariable bound it to `ph -> ?x` at the node and to `?x` at the leaf, and the
    composition kept the first. With metavariables the two are now unified.
+   On the corpus (2 rounds), with all the assertions before a theorem as its database:
+   of every 25th theorem of `peano`, the first 28 of the sample agree (17 with proofs
+   at the root; two proofs with a conversion step left out) and from `eqthed` on, past
+   the 700th theorem, every one is over the tuple cap — the product at a node grows
+   with the square of the assertions that a bare-variable premise unifies with; of
+   every 100th of the first 1,500 theorems of set.mm, `T0` to `T400` agree, `T500`
+   agrees with the cap raised to 30 million tuples (the reference engine visits 5.0
+   million, 71 s, 0.9 GB), and from `T600` the reference engine's enumeration passes
+   30 million, while the production engine's products pass a billion from `T900` and
+   it joins them through its index. With the first 300 assertions of the file as every
+   theorem's database: all 108 of the `peano` sample agree (11 with proofs at the
+   root), all 49 of every 100th theorem of `mm0`, all 38 of every 200th of `x86`; of
+   every 500th theorem of set.mm (95), 50 agree and 45 are over the tuple cap, and with
+   the first 100 assertions 77 agree and 18 are over — nearly all agreeing that there
+   is no proof, the database holding little that a later statement can use (2 and 1
+   with proofs at the root). No disagreement anywhere; the per-theorem lines are what
+   `diff-test` prints. The corpus needed three changes to the test, all made the same
+   day: the production engine's last round makes no assertion nodes (the next level,
+   unexpanded, gives no proof, and on a corpus file it was a million nodes and minutes
+   per theorem; the two engines now have the same nodes), the two caps and
+   `--assertions`, and the reference engine's time measured around a call that is not
+   inlined (it read 0 ms before). The first corpus runs, without caps, took the memory
+   of the machine. A run with the cap at 30 million found a crash of the production
+   engine: `tuplesUpTo` (`Prod.lean`), the enumeration of the tuples of a join one at
+   a time, was two nested `while` loops in `Id`, which the compiler made a closure call
+   deeper per tuple, and `T1200` of set.mm overflowed the stack; it is now recursion
+   on a count, which compiles to a loop, and the same run goes on to the memory the
+   budget asks for (13 GB).
 7. The unification postulate discharged for sorted first-order terms. **Reached on
    2026-10-13** (`Unify.lean`): `Unify.postulate : Unification` with no `sorry`. The
    unifier is Robinson's, one equation at a time, binding a variable to the other side

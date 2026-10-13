@@ -21,6 +21,16 @@ def lessTuple (a b : Array Nat) : Bool := Id.run do
   return a.size < b.size
 
 def prodTests : TestM Unit := do
+  -- the tuples one at a time: the order of `tuples`, `cap + 1` of them at most
+  let small : Array (Array Nat) := #[#[1, 2, 3], #[4, 5]]
+  checkEq "tuples up to: all, in the order of `tuples`" (tuplesUpTo small 100) (tuples small)
+  checkEq "tuples up to: the first cap + 1" (tuplesUpTo small 3) ((tuples small).extract 0 4)
+  checkEq "tuples up to: one with a cap of 0" (tuplesUpTo small 0) #[#[1, 4]]
+  checkEq "tuples up to: none when a set is empty" (tuplesUpTo #[#[1], (#[] : Array Nat)] 5) #[]
+  checkEq "tuples up to: the empty tuple of no sets" (tuplesUpTo (#[] : Array (Array Nat)) 5) #[#[]]
+  let big : Array (Array Nat) := #[Array.range 100, Array.range 100, Array.range 100]
+  checkEq "tuples up to: a quarter of a million of a million" (tuplesUpTo big 250000).size 250001
+  checkEq "tuples up to: the last of them" (tuplesUpTo big 250000).back! #[25, 0, 0]
   let g := sig
   -- several indexes at once
   let index (keys : List String) : Index Nat :=
