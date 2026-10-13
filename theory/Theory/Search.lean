@@ -50,20 +50,31 @@ structure Entry where
   conds : List Cond
   deriving Inhabited
 
-/-- The proof variant tree: its nodes, and the number of the next fresh variable. -/
+/-- The proof variant tree: its nodes, and how its fresh variables are numbered. The
+assertion node `j` renames the binders of its assertion to `freshBase + j * stride + x`:
+`freshBase` is above every variable of the statement and `stride` above every binder,
+so the variables of distinct nodes never meet. -/
 structure State where
   enodes : Array ENode
   anodes : Array ANode
-  fresh : ℕ
+  freshBase : ℕ
+  stride : ℕ
 
 namespace State
 
-/-- The tree with the statement's conclusion at the root. The fresh variables start
-above every variable of the statement. -/
-def init (st : Statement) : State where
+/-- A stride above every binder of the database. -/
+def strideOf (db : Database) : ℕ :=
+  (db.asserts.map fun A => (A.vars.map (·.id)).foldl max 0).foldl max 0 + 1
+
+/-- The tree with the statement's conclusion at the root. -/
+def init (db : Database) (st : Statement) : State where
   enodes := #[{ expr := st.concl, parent := none, expanded := false }]
   anodes := #[]
-  fresh := (st.concl.vars ∪ (st.hyps.map Exp.vars).foldr (· ∪ ·) ∅).sup Var.id + 1
+  freshBase := (st.concl.vars ∪ (st.hyps.map Exp.vars).foldr (· ∪ ·) ∅).sup Var.id + 1
+  stride := strideOf db
+
+/-- The base of the variables of assertion node `j`. -/
+def baseOf (s : State) (j : ℕ) : ℕ := s.freshBase + j * s.stride
 
 /-- The renamed variable of an assertion node. -/
 def renamed (base : ℕ) (x : Var) : Var := ⟨base + x.id, x.ty⟩
@@ -77,16 +88,19 @@ def nodeConds (A : Assertion) (b : ℕ) (θ : Subst) : List Cond :=
 renamed, under the unifier. -/
 def newENodes (s : State) (A : Assertion) (θ : Subst) : List ENode :=
   (List.range A.hyps.length).map fun k =>
-    { expr := θ.apply (A.hyps[k]!.rename s.fresh), parent := some (s.anodes.size, k), expanded := false }
+    { expr := θ.apply (A.hyps[k]!.rename (s.baseOf s.anodes.size)), parent := some (s.anodes.size, k),
+      expanded := false }
 
 /-- Adds an assertion node at expression node `i` for assertion `a` (which is `A`) with
 unifier `θ`, and its children. -/
 def addNode (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) : State where
   enodes := s.enodes ++ (newENodes s A θ).toArray
   anodes := s.anodes.push
-    { parent := i, assertion := a, base := s.fresh, sub := θ,
-      children := (List.range A.hyps.length).map (s.enodes.size + ·), conds := nodeConds A s.fresh θ }
-  fresh := s.fresh + (A.vars.map (·.id)).foldl max 0 + 1
+    { parent := i, assertion := a, base := s.baseOf s.anodes.size, sub := θ,
+      children := (List.range A.hyps.length).map (s.enodes.size + ·),
+      conds := nodeConds A (s.baseOf s.anodes.size) θ }
+  freshBase := s.freshBase
+  stride := s.stride
 
 /-- Tries one assertion at an expression node: an assertion node if the renamed
 conclusion unifies with the expression, with the hypotheses under the unifier as new
@@ -95,7 +109,7 @@ def tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) : Sta
   match db.asserts[a]? with
   | none => s
   | some A =>
-    match U.mgu [(s.enodes[i]!.expr, A.concl.rename s.fresh)] with
+    match U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] with
     | none => s
     | some θ => addNode i a s A θ
 
@@ -112,7 +126,7 @@ def expandAll (U : Unification) (db : Database) (s : State) : State :=
 
 /-- The state after `n` rounds. -/
 def run (U : Unification) (db : Database) (st : Statement) : ℕ → State
-  | 0 => init st
+  | 0 => init db st
   | n + 1 => expandAll U db (run U db st n)
 
 /-- The leaf entries of an expression node: the hypotheses of the statement that it
@@ -173,7 +187,7 @@ mutual
 /-- The proof that an entry stands for: its tree with every expression under the
 answer (the draft's `v(T)[θ]`). -/
 def proofOf (db : Database) (s : State) (θ : Subst) : SptTree → PTree
-  | .leaf i _ => .hyp (θ.apply s.enodes[i]!.expr)
+  | .leaf i h => .hyp h (θ.apply s.enodes[i]!.expr)
   | .node j cs =>
     let a := s.anodes[j]!
     .step (θ.apply s.enodes[a.parent]!.expr) a.assertion (stepSub db a θ) (proofsOf db s θ cs)

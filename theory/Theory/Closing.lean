@@ -22,9 +22,9 @@ theorem closing_typed (db : Database) (T : PTree) : (T.closing db).Typed := by
   intro v
   by_cases h : v ∈ T.allVars db
   · rw [closing_f_of_mem h]
-    exact ⟨rfl, fun _ => rfl⟩
+    exact ⟨⟨rfl, fun _ => rfl⟩, fun _ => trivial⟩
   · rw [closing_f_of_not_mem h]
-    exact Ty.fits_refl _
+    exact ⟨Ty.fits_refl _, fun _ => trivial⟩
 
 /-- Under the closing, an expression of the tree has the dummies of its variables. -/
 theorem vars_closing_apply {db : Database} {T : PTree} {e : Exp} (he : e.vars ⊆ T.allVars db) :
@@ -90,10 +90,10 @@ theorem holds_closing (db : Database) (T : PTree) (c : Consts) (k : Cond)
     exact Consts.app_not_mem_names c f t _ _
 
 /-- The variables of the closed tree: the dummies of the tree's variables. -/
-theorem allVars_close (db : Database) (T : PTree) :
+theorem allVars_close (db : Database) (hwf : db.WF) (T : PTree) :
     (T.close db).allVars db = (T.allVars db).image Var.dummy := by
   ext v
-  simp only [PTree.close, mem_allVars, exprs_subst, List.mem_map, Finset.mem_image]
+  simp only [PTree.close, mem_allVars, exprs_subst db hwf, List.mem_map, Finset.mem_image]
   constructor
   · rintro ⟨_, ⟨e, he, rfl⟩, hv⟩
     have hsub : e.vars ⊆ T.allVars db := fun w hw => (mem_allVars db T w).2 ⟨e, he, hw⟩
@@ -112,8 +112,8 @@ the first binder of a pair is bound, and the substitution is typed. -/
 theorem conds_name {db : Database} (hwf : db.WF) {st : Statement} {T : PTree} (h : Shape db st T) :
     ∀ k ∈ T.conds db, k.1.ty.name = true := by
   induction h with
-  | hyp e _ => simp [PTree.conds]
-  | step e a θ cs A hA hθ _ _ _ ih =>
+  | hyp _ _ _ _ => simp [PTree.conds]
+  | step e a θ cs A hA hθ _ _ _ _ ih =>
     intro k hk
     simp only [PTree.conds, List.mem_append] at hk
     rcases hk with hk | hk
@@ -121,7 +121,7 @@ theorem conds_name {db : Database} (hwf : db.WF) {st : Statement} {T : PTree} (h
       rw [hA] at hk
       simp only [List.mem_map] at hk
       obtain ⟨p, hp, rfl⟩ := hk
-      exact (hθ p.1).2 ((hwf A (List.mem_of_getElem? hA)).pairs_bound p hp)
+      exact (hθ p.1).1.2 ((hwf A (List.mem_of_getElem? hA)).pairs_bound p hp)
     · rw [PTree.mem_condsList] at hk
       obtain ⟨c, hc, hk⟩ := hk
       exact ih c hc k hk
@@ -136,9 +136,9 @@ theorem close_isProof (db : Database) (hwf : db.WF) (st : Statement) (θ : Subst
   obtain ⟨hshape, hconds⟩ := hv
   refine ⟨⟨?_, ?_⟩, ?_, ?_⟩
   · rw [← Statement.subst_subst]
-    exact hshape.subst (closing_typed db T)
+    exact hshape.subst hwf (closing_typed db T)
   · intro k hk
-    rw [PTree.close, conds_subst, List.mem_map] at hk
+    rw [PTree.close, conds_subst db hwf, List.mem_map] at hk
     obtain ⟨k', hk', rfl⟩ := hk
     obtain ⟨h1, h2⟩ := cond_mem_exprs db T k' hk'
     have hsub1 : k'.1.vars ⊆ T.allVars db := fun w hw => (mem_allVars db T w).2 ⟨_, h1, hw⟩
@@ -147,7 +147,7 @@ theorem close_isProof (db : Database) (hwf : db.WF) (st : Statement) (θ : Subst
   · rw [PTree.close, expr_subst, he, ← Subst.apply_comp]
     rfl
   · intro v hv
-    rw [allVars_close, Finset.mem_image] at hv
+    rw [allVars_close db hwf, Finset.mem_image] at hv
     obtain ⟨u, hu, rfl⟩ := hv
     exact ⟨rfl, hd u hu⟩
 

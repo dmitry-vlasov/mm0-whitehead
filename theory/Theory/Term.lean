@@ -113,6 +113,12 @@ def ty : Exp → Ty
   | const _ t => t
   | app _ t _ => t
 
+/-- A name: a variable or a constant, what a name type may be given. -/
+def IsName : Exp → Prop
+  | var _ => True
+  | const _ _ => True
+  | app _ _ _ => False
+
 mutual
 /-- The variables of an expression. -/
 def vars : Exp → Finset Var

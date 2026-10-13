@@ -88,7 +88,8 @@ theorem addNode_enode_old (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) (
   rw [Array.getElem_append_left hk]
 
 theorem addNode_enode_new (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) (k : ℕ) (hk : k < A.hyps.length) :
-    (addNode i a s A θ).enodes[s.enodes.size + k]!.expr = θ.apply (A.hyps[k]!.rename s.fresh) := by
+    (addNode i a s A θ).enodes[s.enodes.size + k]!.expr =
+      θ.apply (A.hyps[k]!.rename (s.baseOf s.anodes.size)) := by
   have hk' : s.enodes.size + k < (addNode i a s A θ).enodes.size := by rw [addNode_enodes_size]; omega
   rw [getElem!_pos (addNode i a s A θ).enodes (s.enodes.size + k) hk']
   simp only [addNode]
@@ -104,8 +105,9 @@ theorem addNode_anode_old (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) (
 
 theorem addNode_anode_new (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) :
     (addNode i a s A θ).anodes[s.anodes.size]! =
-      { parent := i, assertion := a, base := s.fresh, sub := θ,
-        children := (List.range A.hyps.length).map (s.enodes.size + ·), conds := nodeConds A s.fresh θ } := by
+      { parent := i, assertion := a, base := s.baseOf s.anodes.size, sub := θ,
+        children := (List.range A.hyps.length).map (s.enodes.size + ·),
+        conds := nodeConds A (s.baseOf s.anodes.size) θ } := by
   have hj' : s.anodes.size < (addNode i a s A θ).anodes.size := by rw [addNode_anodes_size]; omega
   rw [getElem!_pos (addNode i a s A θ).anodes s.anodes.size hj']
   simp [addNode]
@@ -113,7 +115,7 @@ theorem addNode_anode_new (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) :
 /-- The new assertion node has its invariant, when it unifies. -/
 theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : State} (hs : StateInv db st s)
     {i a : ℕ} (hi : i < s.enodes.size) {A : Assertion} (hA : db.asserts[a]? = some A) {θ : Subst}
-    (hθ : U.mgu [(s.enodes[i]!.expr, A.concl.rename s.fresh)] = some θ) :
+    (hθ : U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = some θ) :
     StateInv db st (addNode i a s A θ) := by
   have hsize : s.enodes.size ≤ (addNode i a s A θ).enodes.size := by rw [addNode_enodes_size]; omega
   have hsame : ∀ k, k < s.enodes.size → (addNode i a s A θ).enodes[k]!.expr = s.enodes[k]!.expr :=
@@ -129,7 +131,8 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
     subst hj'
     rw [addNode_anode_new]
     refine ⟨A, ?_⟩
-    have hsolves := U.solves _ _ hθ (s.enodes[i]!.expr, A.concl.rename s.fresh) (List.mem_singleton_self _)
+    have hsolves := U.solves _ _ hθ (s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))
+      (List.mem_singleton_self _)
     exact {
       parent_lt := lt_of_lt_of_le hi hsize
       assertion := hA
@@ -144,7 +147,8 @@ theorem addNode_inv {U : Unification} {db : Database} {st : Statement} {s : Stat
 
 theorem tryAssertion_cases (U : Unification) (db : Database) (i a : ℕ) (s : State) :
     tryAssertion U db i a s = s ∨
-      ∃ A θ, db.asserts[a]? = some A ∧ U.mgu [(s.enodes[i]!.expr, A.concl.rename s.fresh)] = some θ ∧
+      ∃ A θ, db.asserts[a]? = some A ∧
+        U.mgu [(s.enodes[i]!.expr, A.concl.rename (s.baseOf s.anodes.size))] = some θ ∧
         tryAssertion U db i a s = addNode i a s A θ := by
   unfold tryAssertion
   split
@@ -192,7 +196,7 @@ theorem expandAll_inv {U : Unification} {db : Database} {st : Statement} {s : St
       exact ⟨h1, le_trans hle h2⟩) s ⟨hs, le_refl _⟩
   exact this.1
 
-theorem init_inv (db : Database) (st : Statement) : StateInv db st (init st) where
+theorem init_inv (db : Database) (st : Statement) : StateInv db st (init db st) where
   root_lt := by simp [init]
   root_expr := by simp [init]
   anodes := fun j hj => by simp [init] at hj

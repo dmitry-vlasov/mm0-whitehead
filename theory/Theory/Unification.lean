@@ -14,6 +14,10 @@ abbrev Problem := List (Exp × Exp)
 /-- `σ` solves the problem: it makes the two sides of every equation equal. -/
 def Solves (σ : Subst) (E : Problem) : Prop := ∀ p ∈ E, σ.apply p.1 = σ.apply p.2
 
+/-- The variables of a problem. -/
+def Problem.vars (E : Problem) : Finset Var :=
+  (E.map fun p => p.1.vars ∪ p.2.vars).foldr (· ∪ ·) ∅
+
 /-- A most general unifier (Postulate 2.5 for first-order terms, where every problem is
 in the class): `mgu E` is a typed idempotent solution of `E` of which every typed
 solution is an instance, and `none` only when there is no typed solution. -/
@@ -23,6 +27,9 @@ structure Unification where
   idem : ∀ E θ, mgu E = some θ → θ.Idem
   solves : ∀ E θ, mgu E = some θ → Solves θ E
   mostGeneral : ∀ E σ, σ.Typed → Solves σ E → ∃ θ, mgu E = some θ ∧ σ.IsInstance θ
+  /-- A unifier mentions no variable outside its problem. -/
+  dom_sub : ∀ E θ, mgu E = some θ → ∀ v ∈ θ.dom, v ∈ E.vars
+  range_sub : ∀ E θ, mgu E = some θ → ∀ v, ∀ w ∈ (θ.f v).vars, w ∈ E.vars ∨ w = v
 
 namespace Unification
 

@@ -47,7 +47,7 @@ an instance of the statement that is congruent to it. -/
 theorem generality (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
     ∀ E ∈ (run U db st n).rootEntries U st, ∀ (σ : Subst) (π : PTree),
       IsProof db (st.subst σ) π → π.Congruent (E.proof db (run U db st n)) →
-      π.IsInstance (E.proof db (run U db st n)) := by
+      π.IsInstance db (E.proof db (run U db st n)) := by
   sorry
 
 /-- Completeness: every proof of an instance of the statement is, after enough rounds,
@@ -55,7 +55,7 @@ an instance of the proof of an entry at the root congruent to it. -/
 theorem completeness (U : Unification) (db : Database) (st : Statement) (σ : Subst) (π : PTree)
     (hπ : IsProof db (st.subst σ) π) :
     ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st,
-      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance (E.proof db (run U db st n)) := by
+      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) := by
   sorry
 
 end Theory

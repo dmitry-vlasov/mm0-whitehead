@@ -59,7 +59,7 @@ theorem joinAll_typed (U : Unification) :
   | [], θ, h => by
     simp only [Unification.joinAll, Option.some.injEq] at h
     subst h
-    exact fun v => Ty.fits_refl _
+    exact Subst.Typed.id
   | _ :: _, θ, h => by
     simp only [Unification.joinAll, Option.bind_eq_some_iff] at h
     obtain ⟨_, _, hjoin⟩ := h
@@ -189,8 +189,9 @@ theorem stepSub_typed {db : Database} {a : ANode} {θ : Subst} (hθ : θ.Typed) 
   simp only [stepSub, Subst.ofFun]
   split_ifs with hx
   · rw [Subst.apply_var]
-    exact Ty.fits_trans (ha (renamed a.base x)) (Subst.ty_apply hθ _)
-  · exact Ty.fits_refl _
+    refine ⟨Ty.fits_trans (ha (renamed a.base x)).1 (Subst.ty_apply hθ _), fun hn => ?_⟩
+    exact Subst.apply_isName hθ _ ((ha (renamed a.base x)).2 hn) ((ha (renamed a.base x)).1.2 hn)
+  · exact ⟨Ty.fits_refl _, fun _ => trivial⟩
 
 theorem proofsOf_eq_map (db : Database) (s : State) (θ : Subst) :
     ∀ cs : List SptTree, proofsOf db s θ cs = cs.map (proofOf db s θ)
@@ -216,12 +217,10 @@ theorem shape_of_inv {db : Database} (hwf : db.WF) {st : Statement} {s : State} 
     | leaf _ _ hh heq =>
       refine ⟨?_, rfl⟩
       simp only [proofOf]
-      refine Shape.hyp _ ?_
+      refine Shape.hyp h _ (by simp [Statement.subst, hh]) ?_
       rw [heq]
-      simp only [Statement.subst, List.mem_map]
-      refine ⟨st.hyps[h]!, ?_, rfl⟩
-      rw [getElem!_pos st.hyps h hh]
-      exact List.getElem_mem hh
+      simp only [Statement.subst]
+      rw [getElem!_map' _ _ h hh]
   | node i j cs hj hp hlen hcs ih =>
     cases habs with
     | node _ _ hab hcsabs =>
@@ -235,7 +234,10 @@ theorem shape_of_inv {db : Database} (hwf : db.WF) {st : Statement} {s : State} 
         rw [(ih k hk (hcsabs _ hmem)).2, (hinv.children k (hlen ▸ hk)).2]
       refine ⟨?_, by simp only [proofOf, PTree.expr, hp]⟩
       simp only [proofOf]
-      refine Shape.step _ _ _ _ A hinv.assertion (stepSub_typed hθ hinv.typed) ?_ ?_ ?_
+      refine Shape.step _ _ _ _ A hinv.assertion (stepSub_typed hθ hinv.typed) ?_ ?_ ?_ ?_
+      · intro x hx
+        simp only [stepSub, Subst.ofFun, hA!, Finset.mem_filter] at hx
+        exact hx.1
       · rw [stepSub_apply A hA! A.concl hwfA.concl_vars, ← hinv.unifies, ← Subst.apply_comp, hab]
       · rw [proofsOf_eq_map, List.map_map]
         apply List.ext_getElem

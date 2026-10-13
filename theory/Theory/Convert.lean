@@ -65,7 +65,7 @@ partial def expText (terms : Array String) : Exp → String
 
 /-- A proof tree for a reader: `(name children)`, a leaf as its hypothesis. -/
 partial def proofText (names terms : Array String) : PTree → String
-  | .hyp e => s!"[{expText terms e}]"
+  | .hyp h e => s!"[h{h}: {expText terms e}]"
   | .step _ a _ [] => names[a]?.getD s!"a{a}"
   | .step _ a _ cs => s!"({names[a]?.getD s!"a{a}"} {" ".intercalate (cs.map (proofText names terms))})"
 

@@ -108,8 +108,10 @@ theorem applyList_id : ∀ es, Subst.id.applyList es = es
   | e :: es => by simp [applyList, apply_id e, applyList_id es]
 end
 
-/-- Typed: every variable gets an expression that fits its type. -/
-def Typed (θ : Subst) : Prop := ∀ v : Var, v.ty.fits (θ.f v).ty
+/-- Typed: every variable gets an expression that fits its type, and a variable of a
+name type gets a name. -/
+def Typed (θ : Subst) : Prop :=
+  ∀ v : Var, v.ty.fits (θ.f v).ty ∧ (v.ty.name = true → (θ.f v).IsName)
 
 /-- `σ` is an instance of `θ`: `σ = δ ∘ θ` for some `δ`. The draft writes `θ ≼ σ`. -/
 def IsInstance (σ θ : Subst) : Prop := ∃ δ : Subst, σ = δ.comp θ
@@ -139,12 +141,57 @@ namespace Theory.Subst
 
 /-- A typed substitution keeps the type of an expression, up to `fits`. -/
 theorem ty_apply {θ : Subst} (hθ : θ.Typed) : ∀ e : Exp, e.ty.fits (θ.apply e).ty
-  | .var v => hθ v
+  | .var v => (hθ v).1
   | .const _ _ => Ty.fits_refl _
   | .app _ t _ => by simp only [apply, Exp.ty]; exact Ty.fits_refl t
 
+/-- A typed substitution keeps a name of a name type a name. -/
+theorem apply_isName {θ : Subst} (hθ : θ.Typed) : ∀ e : Exp, e.IsName → e.ty.name = true → (θ.apply e).IsName
+  | .var v, _, hn => (hθ v).2 hn
+  | .const _ _, _, _ => trivial
+  | .app _ _ _, h, _ => h.elim
+
 theorem Typed.comp {θ η : Subst} (hθ : θ.Typed) (hη : η.Typed) : (θ.comp η).Typed :=
-  fun v => Ty.fits_trans (hη v) (ty_apply hθ (η.f v))
+  fun v => ⟨Ty.fits_trans (hη v).1 (ty_apply hθ (η.f v)),
+    fun hn => apply_isName hθ _ ((hη v).2 hn) ((hη v).1.2 hn)⟩
+
+theorem Typed.id : Subst.id.Typed := fun _ => ⟨Ty.fits_refl _, fun _ => trivial⟩
+
+theorem Typed.restrict {θ : Subst} (hθ : θ.Typed) (s : Finset Var) : (θ.restrict s).Typed := by
+  intro v
+  simp only [Subst.restrict]
+  split_ifs
+  · exact hθ v
+  · exact ⟨Ty.fits_refl _, fun _ => trivial⟩
+
+theorem restrict_dom_subset (θ : Subst) (s : Finset Var) : (θ.restrict s).dom ⊆ s := by
+  intro v hv
+  simp only [Subst.restrict, Finset.mem_filter] at hv
+  exact hv.2
+
+theorem restrict_f_of_mem {θ : Subst} {s : Finset Var} {v : Var} (h : v ∈ s) : (θ.restrict s).f v = θ.f v := by
+  simp [Subst.restrict, h]
+
+mutual
+/-- A substitution restricted to the variables of an expression acts on it as the
+substitution does. -/
+theorem restrict_apply {θ : Subst} {s : Finset Var} : ∀ e : Exp, e.vars ⊆ s → (θ.restrict s).apply e = θ.apply e
+  | .var v, h => by
+    simp only [apply_var]
+    exact restrict_f_of_mem (h (by simp [Exp.vars]))
+  | .const _ _, _ => by simp [apply]
+  | .app _ _ args, h => by
+    simp only [apply]
+    congr 1
+    exact restrict_applyList args (by simpa [Exp.vars] using h)
+theorem restrict_applyList {θ : Subst} {s : Finset Var} :
+    ∀ es : List Exp, Exp.varsList es ⊆ s → (θ.restrict s).applyList es = θ.applyList es
+  | [], _ => rfl
+  | e :: es, h => by
+    simp only [applyList]
+    rw [restrict_apply e (fun v hv => h (by simp [Exp.varsList, hv])),
+      restrict_applyList es (fun v hv => h (by simp [Exp.varsList, hv]))]
+end
 
 mutual
 /-- The variables of an expression under a substitution: those of the images of its

@@ -63,5 +63,7 @@ def Unify.postulate : Unification where
   idem := by sorry
   solves := by sorry
   mostGeneral := by sorry
+  dom_sub := by sorry
+  range_sub := by sorry
 
 end Theory

@@ -78,64 +78,88 @@ theorem stepConds_comp (db : Database) (a : ℕ) (θ δ : Subst) :
   cases db.asserts[a]? <;> simp [Cond.apply, Subst.comp, List.map_map, Function.comp_def]
 
 /-- A proof tree (the 2017 paper, section 2.3): an expression node with the assertion
-node below it, or a leaf, which is a hypothesis of the statement. A step carries the
-substitution for the binders of its assertion. -/
+node below it, or a leaf, which is a hypothesis of the statement, by its number and
+with its expression. A step carries the substitution for the binders of its assertion,
+and nothing else: `Shape` asks its domain to be among the binders. -/
 inductive PTree where
-  | hyp (e : Exp)
+  | hyp (h : ℕ) (e : Exp)
   | step (e : Exp) (a : ℕ) (θ : Subst) (children : List PTree)
 
 namespace PTree
 
 /-- The expression at the root. -/
 def expr : PTree → Exp
-  | hyp e => e
+  | hyp _ e => e
   | step e _ _ _ => e
+
+/-- The binders of an assertion, as a set. -/
+def binders (db : Database) (a : ℕ) : Finset Var := db.asserts[a]!.vars.toFinset
 
 mutual
 /-- The tree under a substitution: every expression, and every step's substitution
-composed with it (component-wise, as the paper says). -/
-def subst (δ : Subst) : PTree → PTree
-  | hyp e => hyp (δ.apply e)
-  | step e a θ cs => step (δ.apply e) a (δ.comp θ) (substList δ cs)
-def substList (δ : Subst) : List PTree → List PTree
+composed with it (component-wise, as the paper says), kept on the binders. -/
+def subst (db : Database) (δ : Subst) : PTree → PTree
+  | hyp h e => hyp h (δ.apply e)
+  | step e a θ cs => step (δ.apply e) a ((δ.comp θ).restrict (binders db a)) (substList db δ cs)
+def substList (db : Database) (δ : Subst) : List PTree → List PTree
   | [] => []
-  | t :: ts => subst δ t :: substList δ ts
+  | t :: ts => subst db δ t :: substList db δ ts
 end
 
-theorem substList_eq_map (δ : Subst) : ∀ cs : List PTree, substList δ cs = cs.map (subst δ)
+theorem substList_eq_map (db : Database) (δ : Subst) :
+    ∀ cs : List PTree, substList db δ cs = cs.map (subst db δ)
   | [] => rfl
-  | t :: ts => by simp [substList, substList_eq_map δ ts]
+  | t :: ts => by simp [substList, substList_eq_map db δ ts]
 
-theorem expr_subst (δ : Subst) (T : PTree) : (T.subst δ).expr = δ.apply T.expr := by
+theorem expr_subst (db : Database) (δ : Subst) (T : PTree) : (T.subst db δ).expr = δ.apply T.expr := by
   cases T <;> simp [subst, expr]
 
 mutual
 /-- The conditions of a tree: the pairs of every step under its substitution. -/
 def conds (db : Database) : PTree → List Cond
-  | hyp _ => []
+  | hyp _ _ => []
   | step _ a θ cs => stepConds db a θ ++ condsList db cs
 def condsList (db : Database) : List PTree → List Cond
   | [] => []
   | t :: ts => conds db t ++ condsList db ts
 end
 
+/-- The conditions of a step depend on the substitution at the binders only, in a
+well-formed database. -/
+theorem stepConds_restrict (db : Database) (hwf : db.WF) (a : ℕ) (θ : Subst) :
+    stepConds db a (θ.restrict (binders db a)) = stepConds db a θ := by
+  unfold stepConds
+  cases hA : db.asserts[a]? with
+  | none => rfl
+  | some A =>
+    have hA! : db.asserts[a]! = A := by
+      obtain ⟨hi, rfl⟩ := List.getElem?_eq_some_iff.1 hA
+      exact getElem!_pos db.asserts a hi
+    have hwfA := hwf A (List.mem_of_getElem? hA)
+    apply List.map_congr_left
+    intro p hp
+    simp only [binders, hA!]
+    rw [Subst.restrict_f_of_mem (List.mem_toFinset.2 (hwfA.pairs_vars p hp).1),
+      Subst.restrict_f_of_mem (List.mem_toFinset.2 (hwfA.pairs_vars p hp).2)]
+
 mutual
-theorem conds_subst (db : Database) (δ : Subst) :
-    ∀ T : PTree, (T.subst δ).conds db = (T.conds db).map (Cond.apply δ)
-  | hyp _ => by simp [subst, conds]
+theorem conds_subst (db : Database) (hwf : db.WF) (δ : Subst) :
+    ∀ T : PTree, (T.subst db δ).conds db = (T.conds db).map (Cond.apply δ)
+  | hyp _ _ => by simp [subst, conds]
   | step _ a θ cs => by
-    simp only [subst, conds, stepConds_comp, condsList_substList db δ cs, List.map_append]
-theorem condsList_substList (db : Database) (δ : Subst) :
-    ∀ cs : List PTree, condsList db (substList δ cs) = (condsList db cs).map (Cond.apply δ)
+    simp only [subst, conds, stepConds_restrict db hwf, stepConds_comp, condsList_substList db hwf δ cs,
+      List.map_append]
+theorem condsList_substList (db : Database) (hwf : db.WF) (δ : Subst) :
+    ∀ cs : List PTree, condsList db (substList db δ cs) = (condsList db cs).map (Cond.apply δ)
   | [] => by simp [substList, condsList]
   | t :: ts => by
-    simp only [substList, condsList, conds_subst db δ t, condsList_substList db δ ts, List.map_append]
+    simp only [substList, condsList, conds_subst db hwf δ t, condsList_substList db hwf δ ts, List.map_append]
 end
 
 mutual
 /-- Every expression of a tree: at its nodes and in its conditions. -/
 def exprs (db : Database) : PTree → List Exp
-  | hyp e => [e]
+  | hyp _ e => [e]
   | step e a θ cs => e :: (((stepConds db a θ).flatMap fun k => [k.1, k.2]) ++ exprsList db cs)
 def exprsList (db : Database) : List PTree → List Exp
   | [] => []
@@ -143,18 +167,18 @@ def exprsList (db : Database) : List PTree → List Exp
 end
 
 mutual
-theorem exprs_subst (db : Database) (δ : Subst) :
-    ∀ T : PTree, (T.subst δ).exprs db = (T.exprs db).map δ.apply
-  | hyp _ => by simp [subst, exprs]
+theorem exprs_subst (db : Database) (hwf : db.WF) (δ : Subst) :
+    ∀ T : PTree, (T.subst db δ).exprs db = (T.exprs db).map δ.apply
+  | hyp _ _ => by simp [subst, exprs]
   | step _ a θ cs => by
-    simp only [subst, exprs, stepConds_comp, exprsList_substList db δ cs, List.map_cons, List.map_append,
-      List.flatMap_map, List.map_flatMap]
+    simp only [subst, exprs, stepConds_restrict db hwf, stepConds_comp, exprsList_substList db hwf δ cs,
+      List.map_cons, List.map_append, List.flatMap_map, List.map_flatMap]
     simp [Cond.apply]
-theorem exprsList_substList (db : Database) (δ : Subst) :
-    ∀ cs : List PTree, exprsList db (substList δ cs) = (exprsList db cs).map δ.apply
+theorem exprsList_substList (db : Database) (hwf : db.WF) (δ : Subst) :
+    ∀ cs : List PTree, exprsList db (substList db δ cs) = (exprsList db cs).map δ.apply
   | [] => by simp [substList, exprsList]
   | t :: ts => by
-    simp only [substList, exprsList, exprs_subst db δ t, exprsList_substList db δ ts, List.map_append]
+    simp only [substList, exprsList, exprs_subst db hwf δ t, exprsList_substList db hwf δ ts, List.map_append]
 end
 
 theorem expr_mem_exprs (db : Database) (T : PTree) : T.expr ∈ T.exprs db := by
@@ -175,7 +199,7 @@ theorem mem_condsList (db : Database) :
 mutual
 theorem cond_mem_exprs (db : Database) :
     ∀ T : PTree, ∀ k ∈ T.conds db, k.1 ∈ T.exprs db ∧ k.2 ∈ T.exprs db
-  | hyp _ => by simp [conds]
+  | hyp _ _ => by simp [conds]
   | step _ a θ cs => by
     intro k hk
     simp only [conds, List.mem_append] at hk
@@ -212,7 +236,7 @@ theorem mem_allVars (db : Database) (T : PTree) (v : Var) :
 mutual
 /-- The number of steps. -/
 def size : PTree → ℕ
-  | hyp _ => 0
+  | hyp _ _ => 0
   | step _ _ _ cs => sizeList cs + 1
 def sizeList : List PTree → ℕ
   | [] => 0
@@ -227,29 +251,45 @@ the instances of the hypotheses in order. The paper's "proof"; the conditions on
 variables are judged apart (`CondsHold`), so that monotonicity (Lemma 1) is about this
 part alone. -/
 inductive Shape (db : Database) (st : Statement) : PTree → Prop
-  | hyp (e : Exp) (h : e ∈ st.hyps) : Shape db st (.hyp e)
+  | hyp (h : ℕ) (e : Exp) (hh : h < st.hyps.length) (he : e = st.hyps[h]!) : Shape db st (.hyp h e)
   | step (e : Exp) (a : ℕ) (θ : Subst) (cs : List PTree) (A : Assertion)
-      (hA : db.asserts[a]? = some A) (hθ : θ.Typed) (he : e = θ.apply A.concl)
+      (hA : db.asserts[a]? = some A) (hθ : θ.Typed) (hdom : θ.dom ⊆ A.vars.toFinset)
+      (he : e = θ.apply A.concl)
       (hcs : cs.map PTree.expr = A.hyps.map θ.apply)
       (hall : ∀ c ∈ cs, Shape db st c) :
       Shape db st (.step e a θ cs)
 
+theorem getElem!_map' {α β : Type} [Inhabited α] [Inhabited β] (f : α → β) (l : List α) (k : ℕ)
+    (hk : k < l.length) : (l.map f)[k]! = f l[k]! := by
+  rw [getElem!_pos (l.map f) k (by simp [hk]), getElem!_pos l k hk]
+  simp
+
 /-- Monotonicity (the 2017 paper's Lemma 1): the shape is kept under a typed
-substitution, applied to the tree and to the statement. -/
-theorem Shape.subst {db : Database} {st : Statement} {T : PTree} (h : Shape db st T)
-    {δ : Subst} (hδ : δ.Typed) : Shape db (st.subst δ) (T.subst δ) := by
+substitution, applied to the tree and to the statement, in a well-formed database. -/
+theorem Shape.subst {db : Database} (hwf : db.WF) {st : Statement} {T : PTree} (h : Shape db st T)
+    {δ : Subst} (hδ : δ.Typed) : Shape db (st.subst δ) (T.subst db δ) := by
   induction h with
-  | hyp e he => exact Shape.hyp _ (List.mem_map_of_mem he)
-  | step e a θ cs A hA hθ he hcs _ ih =>
-    refine Shape.step _ a (δ.comp θ) _ A hA (Subst.Typed.comp hδ hθ) ?_ ?_ ?_
-    · rw [he, Subst.apply_comp]
+  | hyp h e hh he =>
+    refine Shape.hyp h _ (by simp [Statement.subst, hh]) ?_
+    simp only [Statement.subst]
+    rw [getElem!_map' _ _ h hh, he]
+  | step e a θ cs A hA hθ _ he hcs _ ih =>
+    have hwfA := hwf A (List.mem_of_getElem? hA)
+    have hA! : db.asserts[a]! = A := by
+      obtain ⟨hi, rfl⟩ := List.getElem?_eq_some_iff.1 hA
+      exact getElem!_pos db.asserts a hi
+    have hb : PTree.binders db a = A.vars.toFinset := by simp [PTree.binders, hA!]
+    refine Shape.step _ a _ _ A hA ((Subst.Typed.comp hδ hθ).restrict _) ?_ ?_ ?_ ?_
+    · rw [hb]; exact Subst.restrict_dom_subset _ _
+    · rw [he, hb, Subst.restrict_apply A.concl hwfA.concl_vars, Subst.apply_comp]
     · rw [PTree.substList_eq_map, List.map_map]
-      have h1 : PTree.expr ∘ PTree.subst δ = δ.apply ∘ PTree.expr := by
+      have h1 : PTree.expr ∘ PTree.subst db δ = δ.apply ∘ PTree.expr := by
         funext c; simp [PTree.expr_subst]
       rw [h1, ← List.map_map, hcs, List.map_map]
-      congr 1
-      funext x
-      simp [Subst.apply_comp]
+      apply List.map_congr_left
+      intro x hx
+      simp only [Function.comp]
+      rw [hb, Subst.restrict_apply x (hwfA.hyps_vars x hx), Subst.apply_comp]
     · intro c hc
       rw [PTree.substList_eq_map, List.mem_map] at hc
       obtain ⟨c', hc', rfl⟩ := hc
@@ -283,15 +323,16 @@ def PTree.closing (db : Database) (T : PTree) : Subst :=
   Subst.ofFun (T.allVars db) (fun v => if v ∈ T.allVars db then .var v.dummy else .var v)
     (fun v hv => by simp [hv])
 
-def PTree.close (db : Database) (T : PTree) : PTree := T.subst (T.closing db)
+def PTree.close (db : Database) (T : PTree) : PTree := T.subst db (T.closing db)
 
 /-- `T'` is an instance of `T`: `T' = δ(T)` (the paper's `T ≽ T'`). -/
-def PTree.IsInstance (T' T : PTree) : Prop := ∃ δ : Subst, T' = T.subst δ
+def PTree.IsInstance (db : Database) (T' T : PTree) : Prop := ∃ δ : Subst, T' = T.subst db δ
 
 mutual
-/-- Congruent: the same shape with the same assertions (the paper, section 2.3). -/
+/-- Congruent: the same shape with the same assertions and the same hypotheses at the
+leaves (the paper, section 2.3; the draft, Proposition 3.7). -/
 def PTree.Congruent : PTree → PTree → Prop
-  | .hyp _, .hyp _ => True
+  | .hyp h _, .hyp h' _ => h = h'
   | .step _ a _ cs, .step _ a' _ cs' => a = a' ∧ PTree.CongruentList cs cs'
   | _, _ => False
 def PTree.CongruentList : List PTree → List PTree → Prop
