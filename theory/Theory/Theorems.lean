@@ -15,6 +15,7 @@ import Theory.Closing
 import Theory.Preserve
 import Theory.Generality
 import Theory.Completeness
+import Theory.ToD
 
 namespace Theory
 
@@ -59,5 +60,26 @@ theorem completeness (U : Unification) (db : Database) (hwf : db.WF) (st : State
     ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st,
       π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) :=
   completeness' hwf hσ hπ
+
+
+/-- Soundness with definitions (`docs/THEORY.md`, "Definitions", milestone 9): over
+the database extended by the rules of the conversion judgment, the closing of the
+proof of every entry at the root stands for an MM0 proof — with conversion steps —
+of the statement under the answer and the closing. -/
+theorem soundness_defs (U : Unification) (L : Language) (db : Database) (hwf : db.WF) (hdefs : db.DefsWF)
+    (st : Statement) (hL : L.WF db st) (n : ℕ) :
+    ∀ E ∈ (run U (db.withConv L) st n).rootEntries U st,
+      (∀ v ∈ (E.proof (db.withConv L) (run U (db.withConv L) st n)).allVars (db.withConv L),
+        st.dummies v.ty.sort = true) →
+      IsProofD db L.sig
+        (st.subst (((E.proof (db.withConv L) (run U (db.withConv L) st n)).closing (db.withConv L)).comp E.sub))
+        (((E.proof (db.withConv L) (run U (db.withConv L) st n)).close (db.withConv L)).toD L db) := by
+  intro E hE hd
+  have hwf' := Database.withConv_WF (L := L) db hwf hdefs
+  have hs := run_inv U (db.withConv L) hwf' st n
+  have hinv := sptE_inv hs _ 0 hs.root_lt E hE
+  have hσ : (((E.proof (db.withConv L) (run U (db.withConv L) st n)).closing (db.withConv L)).comp E.sub).Typed :=
+    Subst.Typed.comp (closing_typed _ _) hinv.typed
+  exact toD_isProof (hL.subst hσ) hdefs (soundness U (db.withConv L) hwf' st n E hE hd)
 
 end Theory

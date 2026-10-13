@@ -11,10 +11,13 @@ import Theory.Deduction
 
 namespace Theory
 
-/-- A well-formed definition: its value is over its arguments and dummies, the dummies
-are name-typed, the result is not a name type, and no two binders are the same. -/
+/-- A well-formed definition: its value is over its arguments and dummies, every dummy
+occurs in the value (a dummy that did not would be a name an unfolding must choose and
+no expression of a proof shows), the dummies are name-typed, the result is not a name
+type, and no two binders are the same. -/
 structure Def.WF (D : Def) : Prop where
   value_vars : D.value.vars ⊆ (D.args ++ D.dummies).toFinset
+  dummies_used : ∀ y ∈ D.dummies, y ∈ D.value.vars
   dummies_name : ∀ y ∈ D.dummies, y.ty.name = true
   ty_name : D.ty.name = false
   nodup : (D.args ++ D.dummies).Nodup

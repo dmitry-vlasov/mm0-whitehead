@@ -416,7 +416,26 @@ judgment — rather than only as assertions". The second variant adds them so.
    `Database.ruleAt`, `PTree.toC`, `PTree.toD`), their theorem is next.
 9. The extended database (`Database.withConv`), its well-formedness, and the
    translation from proofs over it to MM0 proofs with its theorem (`toD_isProof`);
-   `soundness_defs`.
+   `soundness_defs`. **Reached on 2026-10-13** (`ToD.lean`, `Theorems.lean`). The
+   rules are looked up by index (`ruleAt`, `mem_all_spec`: what a rule of each kind
+   is, by the construction of the list). A valid rule tree whose expression is a
+   judgment stands for a valid certificate (`cert_valid`): the arguments of a
+   congruence by one lemma over the argument types with the two counters, of
+   variables and of positions (`congList_valid`); an unfolding by the instance of
+   the definition under the step's substitution, which is that substitution on the
+   value (`Def.inst_apply`), its conditions from the step's pairs — apart from every
+   argument, and distinct by the pairs of each dummy with every later one
+   (`nodup_map_of_laterPairs`). A valid tree whose expression is no judgment stands
+   for a valid MM0 proof (`proof_valid`): which steps can occur at which level is
+   decided by the sort at the root, a judgment's being the judgment sort, which no
+   sort of the file is (`Language.WF`). The conditions of the MM0 proof are among the
+   tree's (`conds_toD`) and so are its variables (`proof_vars`, `cert_vars`), the
+   latter because every dummy of a definition occurs in its value (`Def.WF`,
+   `dummies_used`: a dummy that did not would be a name the proof shows nowhere).
+   The extended database is well-formed when the file's assertions and definitions
+   are (`withConv_WF`). Then `soundness_defs` is `soundness` over the extended
+   database followed by `toD_isProof`, the language fitting the instance of the
+   statement since the answer and the closing are typed.
 10. The translation from MM0 proofs to proofs over the extended database
     (`ofD_isProof`), with the lemmas of decision 11; `completeness_defs`.
 11. The converter maps the definitions and the rules; the production engine's
