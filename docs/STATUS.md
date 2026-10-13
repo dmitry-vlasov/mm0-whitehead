@@ -57,8 +57,13 @@ and complete for the reference engine, node by node, for databases without condi
 on bound variables (`KeyedCorr.lean`, `keyed_sound_np`, `keyed_complete_np`;
 `Theorems.lean`, `keyed_soundness_np`, `keyed_completeness_np`; milestones 13 and 14),
 the answers agreeing on the visible variables up to instance each way rather than
-exactly. Open: the conditions (milestone 16, a theory of renamings) and the structural
-differential test (milestone 15). `cd theory && lake build` has no `sorry`.
+exactly. The structural differential test (`diff-test --nodes`, milestone 15) compares
+the keys at every node of the production engine's tree with the keyed engine's; it
+found that the two unifiers oriented a binding between a metavariable and a fresh
+variable differently — both now bind the fresher variable — and a production fault
+in premise matching with two metavariables swapped (`Binds.bind`), fixed; the keys
+agree at every node of both fixtures in every metavariable mode. Open: the conditions
+(milestone 16, a theory of renamings). `cd theory && lake build` has no `sorry`.
 
 ### Phase 1 acceptance
 

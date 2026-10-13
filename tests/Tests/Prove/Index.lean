@@ -37,6 +37,10 @@ def indexTests : TestM Unit := do
     (found g ix "(wi p p)") ["(wi a a)", "(wi ph a)", "a"]
   checkEq "index: variables on both sides"
     (found g ix "(wi (wn p) q)") ["(wi (wn a) (wi a b))", "(wi a (wi b a))", "(wi a a)", "a"]
+  -- the given expression shares its variables with a stored one and has them swapped:
+  -- `b` bound to `a` and then `a` to `b` is nothing to do, not a cycle (`Binds.bind`)
+  checkEq "index: a stored expression with its variables swapped"
+    (found g ix "(wi b (wi a b))") ["(wi (wn a) (wi a b))", "(wi a (wi b a))"]
   checkEq "index: a name constant for a stored name"
     (found g ix "(wal X ph)") ["a"]
   checkEq "index: a name constant for a stored name, the body fitting"

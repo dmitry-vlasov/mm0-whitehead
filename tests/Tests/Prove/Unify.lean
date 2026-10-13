@@ -34,7 +34,9 @@ def compareOnce (g : Sig) (e1 e2 : Exp) : Option String :=
 
 def unifyTests : TestM Unit := do
   let g := sig
-  checkEq "unify: variables on both sides" (unified g ["(wi a b)", "(wi (wn c) c)"]) "a := (wn c), b := c"
+  -- of two variables that fit each other, the fresher is bound: among an assertion's,
+  -- the one with the larger number (`fresher`)
+  checkEq "unify: variables on both sides" (unified g ["(wi a b)", "(wi (wn c) c)"]) "a := (wn b), c := b"
   checkEq "unify: one expression" (unified g ["(wi a b)"]) ""
   checkEq "unify: equal expressions" (unified g ["(wi a ph)", "(wi a ph)"]) ""
   checkEq "unify: different terms" (unified g ["(wi a b)", "(wn c)"]) "none"
@@ -54,7 +56,7 @@ def unifyTests : TestM Unit := do
   checkEq "unify: under a substitution that contradicts"
     (g.showOpt (unifyExps #[g.exp "a", g.exp "(wi b b)"] (g.sub [("a", "(wn ph)")]))) "none"
   -- names
-  checkEq "unify: two names" (unified g ["(wal x a)", "(wal y b)"]) "a := b, x := y"
+  checkEq "unify: two names" (unified g ["(wal x a)", "(wal y b)"]) "b := a, y := x"
   checkEq "unify: a name and a name constant" (unified g ["(wal x a)", "(wal X ph)"]) "a := ph, x := X"
   checkEq "unify: a regular variable and a name: the regular one is bound"
     (unified g ["(cv u)", "(cv x)"]) "u := x"

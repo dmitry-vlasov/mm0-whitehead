@@ -229,4 +229,23 @@ where
 
 end Exp
 
+/-- The first number of the variables made by the prover: the task's metavariables,
+then the fresh variables of every expansion. A statement has fewer than 2^16 binders,
+so the variables of the file's assertions are below it. -/
+def freshBase : Nat := 0x10000
+
+/-- Of two variables that fit each other's type, which one is bound to the other: the
+fresher one, `v` here when this holds. A variable of an assertion (below `freshBase`;
+it is renamed to a fresh variable when its node is expanded) is fresher than every
+variable of the goal; among the goal's, the one with the larger number — so that a
+metavariable, which has the first numbers from `freshBase`, is never bound to a
+variable made later, and a variable made earlier stands for the ones made after it.
+The reference engine's unifier (`theory/Theory/Unify.lean`, `go`) binds the larger
+number, and with the same rule in every place a variable is bound to a variable here
+(`unifyStepVar`, `Binds.unify`, `Index.bindVar`) the two engines' trees agree node by
+node (`diff-test --nodes`). -/
+def fresher (v w : Nat) : Bool :=
+  if v < freshBase then w ≥ freshBase || w < v
+  else w ≥ freshBase && w < v
+
 end Whitehead.Prove

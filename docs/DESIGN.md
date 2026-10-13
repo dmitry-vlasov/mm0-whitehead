@@ -775,7 +775,18 @@ Each of these is also noted in the file it concerns.
    `ruAdd2Subst1` has them. With explicit coercion nodes in Russell's expressions the
    case may never arise there. Here a variable is bound to what fits it, and of two
    variables the more general is bound to the more special (a regular variable to a
-   name), as `ruUnifyStepVar` does in `exps.flow`.
+   name), as `ruUnifyStepVar` does in `exps.flow`. Of two that fit each other, since
+   2026-10-13 the *fresher* is bound (`fresher`, `Exp.lean`): an assertion's variable
+   before any of the goal's, then the one with the larger number, so that a
+   metavariable is never bound to a variable made later. Russell and the port before
+   that took the later one by position, which bound a metavariable to a fresh variable
+   at a2i's node of `a2d` with two metavariables; both are most general unifiers, but
+   the node-by-node test against the keyed engine (`docs/THEORY.md`, milestone 15)
+   needs the two engines to agree on it, and the reference engine's unifier binds the
+   larger number. The same test found `Binds.bind` reporting a cycle where the
+   variable to bind is already what the target is bound to — a premise with two
+   metavariables against the node that has them swapped — which lost the proof;
+   `bind` now resolves the target's chain of variables first (`Index.lean`).
 3. **The disjointness check looks through `outer`, and remembers** (`Proofs.lean`).
    `ruAddProof` calls `ruCheckDisjs(theta, prop.assertion.infer.vars.disjs)`. `theta`
    binds variables of the tree; the pairs are over variables of the assertion, which

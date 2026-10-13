@@ -162,14 +162,19 @@ theorem measure_zip (f f' : ℕ) (t t' : Ty) (args args' : List Exp) (E : Proble
     have := Problem.size_zip_le args args'
     omega
 
-/-- The algorithm, on equations whose sides are already under the substitution so far. -/
+/-- The algorithm, on equations whose sides are already under the substitution so far.
+Of two variables that fit each other, the one with the larger id is bound — the
+fresher one, so that the statement's variables and the metavariables are kept, as the
+production engine keeps the goal's variables over a rule's (`unifyStepVar`): the
+reference state is then the production engine's tree up to the renaming of fresh
+variables, which the node-by-node differential test (`diff-test --nodes`) needs. -/
 def go : Problem → Subst → Option Subst
   | [], θ => some θ
   | (s, t) :: E, θ =>
     match s, t with
     | .var v, .var w =>
       if v = w then go E θ
-      else if v.ty.fits w.ty then go (bindIn v (.var w) E) (bind v (.var w) θ)
+      else if v.ty.fits w.ty ∧ (w.id < v.id ∨ ¬ w.ty.fits v.ty) then go (bindIn v (.var w) E) (bind v (.var w) θ)
       else if w.ty.fits v.ty then go (bindIn w (.var v) E) (bind w (.var v) θ)
       else none
     | .var v, .const k t =>
@@ -498,7 +503,7 @@ theorem go_sound (V : Finset Var) : ∀ (E : Problem) (θ : Subst), Inv V E θ �
     rw [go, ite_eq_right hvw, ite_eq_left hfit] at hgo
     have hv : v ∈ Problem.vars ((Exp.var v, Exp.var w) :: E) := by simp [Problem.vars_cons, Exp.vars]
     obtain ⟨h1, h2, h3⟩ := ih (hinv.bind hv (by simp [Problem.vars_cons, Exp.vars]) (by simp [Exp.vars, hvw])
-      hfit (fun hn => trivial)) θ' hgo
+      hfit.1 (fun hn => trivial)) θ' hgo
     have hθv : θ.f v = .var v := Subst.f_eq_of_not_mem (fun hd => hinv.apart v hd hv)
     obtain ⟨h4, h5⟩ := bind_sound (Or.inl ⟨rfl, rfl⟩) hθv (by simp [Ne.symm hvw]) h1 h2
     exact ⟨h4, h5, h3⟩
@@ -642,7 +647,7 @@ theorem go_complete (V : Finset Var) : ∀ (E : Problem) (θ : Subst), Inv V E �
     have hv : v ∈ Problem.vars ((Exp.var v, Exp.var w) :: E) := by simp [Problem.vars_cons, Exp.vars]
     obtain ⟨hS', hA'⟩ := bind_complete (Or.inl ⟨rfl, rfl⟩) (by simp [Ne.symm hvw]) hS hA
     obtain ⟨θ', hgo, hi⟩ := ih (hinv.bind hv (by simp [Problem.vars_cons, Exp.vars]) (by simp [Exp.vars, hvw])
-      hfit (fun _ => trivial)) ρ hρ hS' hA'
+      hfit.1 (fun _ => trivial)) ρ hρ hS' hA'
     exact ⟨θ', by rw [go, ite_eq_right hvw, ite_eq_left hfit]; exact hgo, hi⟩
   | case4 E θ v w hvw hfit hfit' ih =>
     intro hinv ρ hρ hS hA
@@ -659,7 +664,9 @@ theorem go_complete (V : Finset Var) : ∀ (E : Problem) (θ : Subst), Inv V E �
     have h1 := (hρ v).1
     have h2 := (hρ w).1
     rw [heq] at h1
-    simp only [Ty.fits] at h1 h2 hfit hfit'
+    have hfit0 : ¬ v.ty.fits w.ty := fun h => hfit ⟨h, Or.inr hfit'⟩
+    clear hfit
+    simp only [Ty.fits] at h1 h2 hfit0 hfit'
     have hsort : v.ty.sort = w.ty.sort := h1.1.trans h2.1.symm
     cases hvn : v.ty.name <;> cases hwn : w.ty.name <;> simp_all
   | case6 E θ v k t hfit ih =>

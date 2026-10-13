@@ -17,10 +17,6 @@ namespace Whitehead.Prove
 
 open Whitehead.Mmb
 
-/-- The first number of the variables made by the prover. A statement has fewer than
-2^16 binders. -/
-def freshBase : Nat := 0x10000
-
 /-- The value of a `def f (xs) {.ys}: s = B`: `B` over the arguments, which are the
 variables `0 .. n-1` as in an assertion, and the dummies, which are the variables
 `n, n+1, ...`, names of their sorts. -/

@@ -617,6 +617,31 @@ its proofs, not its nodes.
 15. The structural differential test: `diff-test --nodes` compares, after each round,
     the keys at every node of the production engine's tree with the keyed engine's,
     on the fixtures and the corpus samples; what it finds is fixed or recorded.
+    **Reached on 2026-10-13.** The two trees are walked together from the root, an
+    assertion node of the production engine matched with the reference state's at the
+    same expression node applying the same assertion and their children in order, and
+    at every expression node and every assertion node the sets of keys up to renaming
+    are compared (`Diff.lean`, `compareNodes`). It found three things, all about
+    which of two variables a unifier binds — a choice the theorems leave open and the
+    keys up to renaming absorb at the root, but not at the nodes below, where a
+    binding made at one node of one engine is made at another node of the other.
+    First, the reference engine's unifier bound a metavariable to an assertion's
+    renamed variable at the root, so that below the root the metavariable was not in
+    play and the production engine's keys, which carry its binding everywhere, had no
+    counterpart: the theory's unifier now binds the fresher variable, the one with
+    the larger number (`Unify.lean`, `go`; the proofs were untouched but for the
+    branch's condition). Second, the production engine did the converse at an inner
+    node, binding a metavariable to a fresh variable because the fresh one came later
+    in the array of expressions (`unifyStepVar`): it now binds the fresher too, an
+    assertion's variable counting as freshest (`fresher`, `Whitehead/Prove/Exp.lean`,
+    in its three places). Third, a production fault: a premise with two
+    metavariables against a node that has them swapped found no match, the occurs
+    check reporting a cycle for a variable to be bound to what is already bound to
+    it; `Binds.bind` resolves the chain first, and the proof — the two metavariables
+    identified, a legitimate answer that completeness requires — is found. After the
+    three changes the keys agree at every node of both fixtures, with no, one and two
+    metavariables, at 3 and 2 rounds; the main test suite passes with the two unifier
+    tests that encoded the positional choice updated.
 16. The conditions: milestones 13 and 14 for databases with pairs. What is missing is
     a theory of renamings: two answers that are instances of each other on a set of
     variables differ there by an injective renaming, and `Cond.Holds` is invariant

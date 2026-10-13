@@ -60,12 +60,14 @@ def unifyStep (es : Array Exp) (inds : Array Nat) (sub : Subst) : UnifyStep := I
   return st
 
 /-- `ruUnifyStepVar`: the variable that the others are bound to, when all the
-expressions have a variable: one of the most special type, so that it fits them all. -/
+expressions have a variable: one of the most special type, so that it fits them all;
+of two that fit each other, the older (`fresher`). -/
 def unifyStepVar (vars : Array Nat) : Option Nat := Id.run do
   let mut t := vars[0]!
   for i in [1:vars.size] do
     let v := vars[i]!
-    if Ty.fits (Node.ty t) (Node.ty v) then t := v
+    if Ty.fits (Node.ty t) (Node.ty v) then
+      if !(Ty.fits (Node.ty v) (Node.ty t) && fresher (Node.varId v) (Node.varId t)) then t := v
     else if Ty.fits (Node.ty v) (Node.ty t) then pure ()
     else return none
   return some t

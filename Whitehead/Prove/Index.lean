@@ -184,10 +184,24 @@ partial def occurs (bs : Binds) (vid : Nat) (src : Exp) (at_ : Nat) : Bool := Id
         if bs.occurs vid src' at' then return true
   return false
 
+/-- The end of the chain of variables bound to variables from node `at_` of `src`. -/
+partial def resolve (bs : Binds) (src : Exp) (at_ : Nat) : Exp × Nat :=
+  let n := src.nodes[at_]!
+  if Node.isVar n then
+    match bs.lookup (Node.varId n) with
+    | some (src', at') => bs.resolve src' at'
+    | none => (src, at_)
+  else (src, at_)
+
 /-- Binds the variable node `v` to the subexpression of `src` at `at_`, if the type
 fits and `v` does not occur in it; nothing to do if that is `v` itself. `closed`: the
-subexpression is known to have no variable. -/
+subexpression is known to have no variable. A variable bound to a variable is taken
+to the end of its chain first: so `v` bound to a variable that is bound to `v` — a
+premise with two metavariables against the node that has them swapped — is nothing
+to do, which the occurs check would otherwise report as a cycle (found by
+`diff-test --nodes` on 2026-10-13). -/
 def bind (bs : Binds) (v : Nat) (src : Exp) (at_ : Nat) (closed : Bool := false) : Option Binds :=
+  let (src, at_) := bs.resolve src at_
   let n := src.nodes[at_]!
   if Node.isVar n && Node.varId n == Node.varId v then some bs
   else if !Ty.fits (Node.ty v) (Node.ty n) then none
@@ -196,7 +210,7 @@ def bind (bs : Binds) (v : Nat) (src : Exp) (at_ : Nat) (closed : Bool := false)
 
 /-- The subexpressions of `a` at `i` and of `b` at `j` unified under `bs`: the same
 decisions as `unifyExps` — a variable is bound to what fits it, of two variables the
-more general to the more special, the first to the second when both fit. -/
+more general to the more special, the fresher to the older when both fit (`fresher`). -/
 partial def unify (bs : Binds) (a : Exp) (i : Nat) (b : Exp) (j : Nat) : Option Binds :=
   let na := a.nodes[i]!
   let nb := b.nodes[j]!
@@ -209,7 +223,9 @@ partial def unify (bs : Binds) (a : Exp) (i : Nat) (b : Exp) (j : Nat) : Option 
         | some (src, k) => bs.unify a i src k
         | none =>
           if Node.varId na == Node.varId nb then some bs
-          else if Ty.fits (Node.ty na) (Node.ty nb) then some (.cons na b j bs)
+          else if Ty.fits (Node.ty na) (Node.ty nb) &&
+              !(Ty.fits (Node.ty nb) (Node.ty na) && fresher (Node.varId nb) (Node.varId na)) then
+            some (.cons na b j bs)
           else if Ty.fits (Node.ty nb) (Node.ty na) then some (.cons nb a i bs)
           else none
       else bs.bind na b j
@@ -330,10 +346,13 @@ partial def unifyAt (ix : Index α) (limit : Nat) (w : Walk) (i at_ : Nat) (bs :
 to, and goes on after position `j`, from node `at_` of the trie. -/
 partial def bindVar (ix : Index α) (limit : Nat) (w : Walk) (j at_ : Nat) (v : Nat) (src : Exp) (k : Nat)
     (closed : Bool) (bs : Binds) (acc : Array (RawUnified α)) : Array (RawUnified α) :=
-  -- which of the two is bound, if the image is a variable of a more general type
+  -- which of the two is bound, if the image is a variable: the one of the more general
+  -- type, the fresher when both fit (`fresher`)
   let m := src.nodes[k]!
   let (v, src, k, ok) :=
-    if Ty.fits (Node.ty v) (Node.ty m) then (v, src, k, true)
+    if Ty.fits (Node.ty v) (Node.ty m) &&
+        !(Node.isVar m && Ty.fits (Node.ty m) (Node.ty v) && fresher (Node.varId m) (Node.varId v)) then
+      (v, src, k, true)
     else if Node.isVar m && Ty.fits (Node.ty m) (Node.ty v) then (m, Exp.ofVar v, 0, true)
     else (v, src, k, false)
   if !ok then acc
