@@ -12,18 +12,23 @@ statement itself.
 -/
 import Theory.Search
 import Theory.Closing
+import Theory.Preserve
 
 namespace Theory
 
 open State
 
 /-- Soundness, the schematic form: the proof of an entry at the root is valid for the
-statement under the answer, and proves its conclusion. -/
-theorem soundness_valid (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
+statement under the answer, and proves its conclusion. The state after any number of
+rounds has the invariants (`run_inv`), every entry of its SPT sets has the entry
+invariant (`sptE_inv`), and an entry with it is a valid proof (`valid_of_inv`). -/
+theorem soundness_valid (U : Unification) (db : Database) (hwf : db.WF) (st : Statement) (n : ℕ) :
     ∀ E ∈ (run U db st n).rootEntries U st,
       Valid db (st.subst E.sub) (E.proof db (run U db st n)) ∧
       (E.proof db (run U db st n)).expr = E.sub.apply st.concl := by
-  sorry
+  intro E hE
+  have hs := run_inv U db st n
+  exact valid_of_inv hwf hs E (sptE_inv hs _ 0 hs.root_lt E hE)
 
 /-- Soundness: the closing of the proof of every entry at the root is a proof of the
 statement under the answer and the closing, when the sorts of the variables left allow
@@ -34,7 +39,7 @@ theorem soundness (U : Unification) (db : Database) (hwf : db.WF) (st : Statemen
       IsProof db (st.subst (((E.proof db (run U db st n)).closing db).comp E.sub))
         ((E.proof db (run U db st n)).close db) := by
   intro E hE hd
-  obtain ⟨hv, he⟩ := soundness_valid U db st n E hE
+  obtain ⟨hv, he⟩ := soundness_valid U db hwf st n E hE
   exact close_isProof db hwf st E.sub _ hv he hd
 
 /-- Generality: the proof of an entry at the root is more general than every proof of

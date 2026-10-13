@@ -184,8 +184,18 @@ unifier's test against its reference unifier.
    covers every variable of a tree, in its expressions and in its conditions
    (`allVars`), and names the dummies by an injective code of the variable.
 3. The SPT lemma (4.3) for the backward engine: every entry's substitution is the most
-   general unifier of its variant's equation system, and conversely.
-4. Soundness, then generality and completeness from the SPT lemma.
+   general unifier of its variant's equation system, and conversely. **The soundness
+   half reached on 2026-10-13** (`Spt.lean`, `Preserve.lean`): an answer solves the
+   equational form of a unifier exactly when it absorbs it (`θ ∘ σ = θ`), and the join
+   of a list absorbs each member; the invariants — the tree sits in the graph, the
+   answer absorbs every unifier on it, the carried conditions are the tree's under the
+   answer and hold — give a valid proof (`valid_of_inv`), and the engine keeps them
+   (`run_inv`, `sptE_inv`). The engine was rewritten as folds and recursions for this,
+   with the SPT sets a recursive function of the depth. The converse, that the answer
+   is *most general*, is what generality and completeness need and is still to do.
+4. Soundness, then generality and completeness from the SPT lemma. **Soundness
+   reached on 2026-10-13**: `soundness_valid` and `soundness` are proved, relative to
+   the unification postulate. Generality and completeness are pending.
 5. The engine lemmas: restriction, key, settled.
 6. The differential test.
 7. The unification postulate discharged for sorted first-order terms.

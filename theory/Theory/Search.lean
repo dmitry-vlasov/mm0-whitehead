@@ -73,6 +73,21 @@ its unifier. -/
 def nodeConds (A : Assertion) (b : ℕ) (θ : Subst) : List Cond :=
   A.pairs.map fun p => (θ.apply (.var (renamed b p.1)), θ.apply (.var (renamed b p.2)))
 
+/-- The new expression nodes of an assertion node: the hypotheses of its assertion,
+renamed, under the unifier. -/
+def newENodes (s : State) (A : Assertion) (θ : Subst) : List ENode :=
+  (List.range A.hyps.length).map fun k =>
+    { expr := θ.apply (A.hyps[k]!.rename s.fresh), parent := some (s.anodes.size, k), expanded := false }
+
+/-- Adds an assertion node at expression node `i` for assertion `a` (which is `A`) with
+unifier `θ`, and its children. -/
+def addNode (i a : ℕ) (s : State) (A : Assertion) (θ : Subst) : State where
+  enodes := s.enodes ++ (newENodes s A θ).toArray
+  anodes := s.anodes.push
+    { parent := i, assertion := a, base := s.fresh, sub := θ,
+      children := (List.range A.hyps.length).map (s.enodes.size + ·), conds := nodeConds A s.fresh θ }
+  fresh := s.fresh + (A.vars.map (·.id)).foldl max 0 + 1
+
 /-- Tries one assertion at an expression node: an assertion node if the renamed
 conclusion unifies with the expression, with the hypotheses under the unifier as new
 expression nodes. -/
@@ -80,19 +95,9 @@ def tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) : Sta
   match db.asserts[a]? with
   | none => s
   | some A =>
-    let b := s.fresh
-    match U.mgu [(s.enodes[i]!.expr, A.concl.rename b)] with
+    match U.mgu [(s.enodes[i]!.expr, A.concl.rename s.fresh)] with
     | none => s
-    | some θ =>
-      let j := s.anodes.size
-      let n := s.enodes.size
-      let newE : List ENode := (List.range A.hyps.length).map fun k =>
-        { expr := θ.apply (A.hyps[k]!.rename b), parent := some (j, k), expanded := false }
-      { enodes := s.enodes ++ newE.toArray,
-        anodes := s.anodes.push
-          { parent := i, assertion := a, base := b, sub := θ,
-            children := (List.range A.hyps.length).map (n + ·), conds := nodeConds A b θ },
-        fresh := b + (A.vars.map (·.id)).foldl max 0 + 1 }
+    | some θ => addNode i a s A θ
 
 /-- Expands one expression node against every assertion of the database. -/
 def expandNode (U : Unification) (db : Database) (i : ℕ) (s : State) : State :=

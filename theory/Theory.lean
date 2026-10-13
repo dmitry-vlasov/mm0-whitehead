@@ -5,5 +5,6 @@ import Theory.Deduction
 import Theory.Closing
 import Theory.Search
 import Theory.Spt
+import Theory.Preserve
 import Theory.Theorems
 import Theory.Unify
