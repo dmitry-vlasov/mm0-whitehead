@@ -5,6 +5,7 @@ import Theory.Deduction
 import Theory.Defs
 import Theory.Rules
 import Theory.ToD
+import Theory.OfD
 import Theory.Closing
 import Theory.Search
 import Theory.Spt

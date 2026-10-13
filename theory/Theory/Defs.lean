@@ -20,6 +20,8 @@ structure Def.WF (D : Def) : Prop where
   dummies_used : ∀ y ∈ D.dummies, y ∈ D.value.vars
   dummies_name : ∀ y ∈ D.dummies, y.ty.name = true
   ty_name : D.ty.name = false
+  /-- The value is of the sort of the result, and is no name. -/
+  value_sort : D.value.ty.sort = D.ty.sort
   nodup : (D.args ++ D.dummies).Nodup
 
 def Database.DefsWF (db : Database) : Prop := ∀ D ∈ db.defs, D.WF

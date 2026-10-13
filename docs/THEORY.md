@@ -393,6 +393,18 @@ judgment — rather than only as assertions". The second variant adds them so.
 13. **Generality** stays within the extended system (a proof congruent to an entry
     uses the same rules); the two theorems restated for MM0 are soundness and
     completeness.
+14. **Completeness is for the certificates of the `.mmb` format**, which have no
+    transitivity (2026-10-13, found while writing the translation). `mm0.mm0` has
+    `CTrans`, and with it `CTrans (CSymm (CUnfold f es [y])) (CUnfold f es [y'])`
+    converts `B[y]` to `B[y']`: two unfoldings of one occurrence with different
+    dummies rename a bound variable. The `.mmb` format cannot express this — its
+    conversion proofs are `Refl`, `Sym`, `Cong` and `Unfold` at the head of an
+    obligation, with no cut — and neither can the rules, which unfold at the head on
+    either side and compare the rest syntactically (`DESIGN.md`, "Unfolding inside a
+    variable"). So the model's judgment keeps `CTrans` and soundness is proved for the
+    whole of it, while completeness assumes certificates without it (`CTree.NoTrans`),
+    which is what any `.mmb` proof has. Whether the engine should also rename dummies
+    is a question for the production engine, not the theory.
 
 ### The model (`Theory/Defs.lean`)
 
@@ -406,6 +418,14 @@ judgment — rather than only as assertions". The second variant adds them so.
 - An MM0 proof (`DTree`): a hypothesis, an assertion step, or a conversion `conv e k t`
   proving `e` from `t` by `k : t.expr = e`; its shape, conditions, variables; a proof of
   the statement (`IsProofD`) as `IsProof` with conversions.
+- What the translations assume beyond validity: the language fits the database and
+  the statement (`Language.WF`: the judgment sort is none of the file's, no assertion
+  or hypothesis is a judgment at its root); every dummy of a definition occurs in its
+  value, and the value is of the result's sort (`Def.WF`); the bound variables of the
+  statement depend on nothing (`Consts.NameDeps`); and, for an MM0 proof to be
+  translated, that it fits the language (`DTree.Fits`): every expression is over the
+  file's sorts and terms with their declared types, every conclusion has a provable
+  sort, and every certificate is of the `.mmb` format.
 
 ### Milestones
 
@@ -437,7 +457,25 @@ judgment — rather than only as assertions". The second variant adds them so.
    database followed by `toD_isProof`, the language fitting the instance of the
    statement since the answer and the closing are typed.
 10. The translation from MM0 proofs to proofs over the extended database
-    (`ofD_isProof`), with the lemmas of decision 11; `completeness_defs`.
+    (`ofD_isProof`), with the lemmas of decision 11; `completeness_defs`. **Reached on
+    2026-10-13** (`OfD.lean`, `Theorems.lean`; the translation is `DTree.toP`, with
+    `CTree.toTree` and `CTree.toTreeR` for a certificate in the two directions). The
+    lemmas of decision 11 came out simpler than planned: with transitivity excluded
+    (decision 14) there is no composition of rule trees, and symmetry needs no
+    swapping of a built tree but a second builder that reads the certificate
+    backwards, the two defined together with the children of a congruence. A
+    congruence step gets its substitution from an association list over the rule's
+    variables (`Subst.ofAssoc`, `Build.congAssoc`), and is strict at the first argument
+    where the sides differ (`Build.firstDiff`); when the sides are equal the step is
+    reflexivity, and a conversion of an expression to itself is dropped with its step
+    (`DTree.toP`). An unfolding step gets the arguments, the dummies and the other side
+    (`Build.unfoldAssoc`), its conditions from the distinctness of the dummies, which
+    are names and have no dependencies (`Consts.names_of_name`). The validity of the
+    built trees (`CTree.toTree_valid` and its three companions, over the shared step
+    lemmas `congStep_ok` and `unfoldStep_ok`) comes with the bound on their variables
+    needed for the dummies: within the two sides and the certificate. Then
+    `DTree.toP_valid` and `DTree.toP_isProof`, and `completeness_defs` is
+    `completeness` over the extended database.
 11. The converter maps the definitions and the rules; the production engine's
     (def, occurrence) steps get an off switch; the differential test on the files
     with definitions (`defs.mmb`, `peano`, `hol`, `mm0`).

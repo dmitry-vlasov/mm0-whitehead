@@ -33,7 +33,17 @@ of 95 (77 with the first 100), the rest over the test's tuple cap; with all the
 assertions before a theorem, the early theorems of `peano` and set.mm agree and the
 later ones are beyond the reference engine's enumeration, which builds every tuple of
 a join (`THEORY.md`, milestone 6). No disagreement. All seven milestones of the first
-variant are reached.
+variant are reached. **The second variant, definitions** (`THEORY.md`,
+"Definitions"): started and reached its milestones 8 to 10 the same day — the model
+of MM0's conversion judgment and of proofs with conversion steps (`Defs.lean`); the
+judgment as assertions, exactly the production engine's rules, over which the engine
+runs unchanged (`Rules.lean`); soundness, by translating a proof over the extended
+database into an MM0 proof (`ToD.lean`, `soundness_defs`); completeness, by
+translating an MM0 proof whose certificates are those of the `.mmb` format into a
+proof over the extended database (`OfD.lean`, `completeness_defs`). A finding on the
+way (decision 14): the primary specification's certificates have transitivity, with
+which two unfoldings rename a dummy, which no `.mmb` proof can express. Milestone 11,
+the converter and the differential test on the files with definitions, is next.
 
 ### Phase 1 acceptance
 
