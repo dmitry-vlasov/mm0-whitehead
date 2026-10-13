@@ -85,6 +85,8 @@ inductive PTree where
   | hyp (h : ℕ) (e : Exp)
   | step (e : Exp) (a : ℕ) (θ : Subst) (children : List PTree)
 
+instance : Inhabited PTree := ⟨.hyp 0 default⟩
+
 namespace PTree
 
 /-- The expression at the root. -/

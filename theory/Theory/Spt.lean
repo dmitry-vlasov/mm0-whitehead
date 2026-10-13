@@ -118,31 +118,65 @@ theorem SptTree.condsList_eq_flatMap (s : State) :
   | [] => rfl
   | t :: ts => by simp [SptTree.condsList, condsList_eq_flatMap s ts]
 
+theorem joinAll_idem (U : Unification) :
+    ∀ (θs : List Subst) (θ : Subst), U.joinAll θs = some θ → θ.Idem
+  | [], θ, h => by
+    simp only [Unification.joinAll, Option.some.injEq] at h
+    subst h
+    exact Subst.comp_id _
+  | _ :: _, θ, h => by
+    simp only [Unification.joinAll, Option.bind_eq_some_iff] at h
+    obtain ⟨_, _, hjoin⟩ := h
+    exact U.idem _ _ hjoin
+
 /-- The invariant of an entry at expression node `i`. -/
 structure EntryInv (s : State) (st : Statement) (i : ℕ) (E : Entry) : Prop where
   at_ : E.tree.At s i
   absorbs : Absorbs s st E.sub E.tree
   typed : E.sub.Typed
+  idem : E.sub.Idem
   conds : E.conds = (E.tree.conds s).map (Cond.apply E.sub)
   holds : ∀ k ∈ E.conds, k.Holds st.consts
 
 /-- The invariant of an assertion node, for its assertion `A`: as `tryAssertion` makes
 it. -/
-structure ANodeInv (db : Database) (s : State) (a : ANode) (A : Assertion) : Prop where
+structure ANodeInv (U : Unification) (db : Database) (s : State) (a : ANode) (A : Assertion) : Prop where
   parent_lt : a.parent < s.enodes.size
   assertion : db.asserts[a.assertion]? = some A
   typed : a.sub.Typed
+  idem : a.sub.Idem
+  /-- The unifier is the one the postulate gives for the node's equation. -/
+  is_mgu : U.mgu [(s.enodes[a.parent]!.expr, A.concl.rename a.base)] = some a.sub
   unifies : a.sub.apply s.enodes[a.parent]!.expr = a.sub.apply (A.concl.rename a.base)
   children_len : a.children.length = A.hyps.length
   children : ∀ k, k < a.children.length →
     a.children[k]! < s.enodes.size ∧ s.enodes[a.children[k]!]!.expr = a.sub.apply (A.hyps[k]!.rename a.base)
+  /-- The children are a block of expression nodes made after the parent. -/
+  children_eq : ∃ n, a.parent < n ∧ a.children = (List.range A.hyps.length).map (n + ·)
   conds : a.conds = nodeConds A a.base a.sub
 
+/-- The expression node above an expression node, through its parent assertion node. -/
+def up (s : State) (e : ℕ) : Option ℕ :=
+  s.enodes[e]!.parent.map fun p => s.anodes[p.1]!.parent
+
 /-- The invariant of a state. -/
-structure StateInv (db : Database) (st : Statement) (s : State) : Prop where
+structure StateInv (U : Unification) (db : Database) (st : Statement) (s : State) : Prop where
   root_lt : 0 < s.enodes.size
   root_expr : s.enodes[0]!.expr = st.concl
-  anodes : ∀ j, j < s.anodes.size → ∃ A, ANodeInv db s s.anodes[j]! A
+  anodes : ∀ j, j < s.anodes.size → ∃ A, ANodeInv U db s s.anodes[j]! A
+  /-- The base of an assertion node follows its number. -/
+  base_eq : ∀ j, j < s.anodes.size → s.anodes[j]!.base = s.baseOf j
+  /-- The stride is positive and above every binder, the base above every variable of
+  the statement. -/
+  stride_pos : 0 < s.stride
+  stride_gt : ∀ A ∈ db.asserts, ∀ x ∈ A.vars, x.id < s.stride
+  fresh_gt : ∀ v, (v ∈ st.concl.vars ∨ ∃ h ∈ st.hyps, v ∈ h.vars) → v.id < s.freshBase
+  /-- A parent link points at an assertion node of the state. -/
+  parent_lt : ∀ e, e < s.enodes.size → ∀ j k, s.enodes[e]!.parent = some (j, k) → j < s.anodes.size
+  /-- The node above is earlier, and the children of an assertion node have it above. -/
+  up_lt : ∀ e p, up s e = some p → p < e
+  up_children : ∀ j, j < s.anodes.size → ∀ k, k < s.anodes[j]!.children.length →
+    up s s.anodes[j]!.children[k]! = some s.anodes[j]!.parent
 
 /-! ### An entry's proof is valid -/
 
@@ -208,7 +242,8 @@ theorem flatMap_congr_mem {α β : Type} (l : List α) (f g : α → List β) (h
 
 /-- The proof of a tree at node `i` that the answer absorbs has the shape of a proof
 of the statement under the answer, and proves the node's expression under it. -/
-theorem shape_of_inv {db : Database} (hwf : db.WF) {st : Statement} {s : State} (hs : StateInv db st s)
+theorem shape_of_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s)
     {θ : Subst} (hθ : θ.Typed) {i : ℕ} {T : SptTree} (hat : T.At s i) (habs : Absorbs s st θ T) :
     Shape db (st.subst θ) (proofOf db s θ T) ∧ (proofOf db s θ T).expr = θ.apply s.enodes[i]!.expr := by
   induction hat with
@@ -257,7 +292,8 @@ theorem shape_of_inv {db : Database} (hwf : db.WF) {st : Statement} {s : State} 
         exact (ih k hk (hcsabs _ hmem)).1
 
 /-- The conditions of the proof of a tree: the tree's conditions under the answer. -/
-theorem conds_proofOf {db : Database} (hwf : db.WF) {st : Statement} {s : State} (hs : StateInv db st s)
+theorem conds_proofOf {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s)
     {θ : Subst} {i : ℕ} {T : SptTree} (hat : T.At s i) :
     (proofOf db s θ T).conds db = (T.conds s).map (Cond.apply θ) := by
   induction hat with
@@ -286,7 +322,8 @@ theorem conds_proofOf {db : Database} (hwf : db.WF) {st : Statement} {s : State}
 /-- The theorem of this file: an entry at the root with the invariants gives a valid
 proof of the statement under its answer, with the conclusion under the answer at the
 root. -/
-theorem valid_of_inv {db : Database} (hwf : db.WF) {st : Statement} {s : State} (hs : StateInv db st s)
+theorem valid_of_inv {U : Unification} {db : Database} (hwf : db.WF) {st : Statement} {s : State}
+    (hs : StateInv U db st s)
     (E : Entry) (hE : EntryInv s st 0 E) :
     Valid db (st.subst E.sub) (E.proof db s) ∧ (E.proof db s).expr = E.sub.apply st.concl := by
   obtain ⟨hshape, hexpr⟩ := shape_of_inv hwf hs hE.typed hE.at_ hE.absorbs

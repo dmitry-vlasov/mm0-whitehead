@@ -6,5 +6,7 @@ import Theory.Closing
 import Theory.Search
 import Theory.Spt
 import Theory.Preserve
+import Theory.General
+import Theory.Generality
 import Theory.Theorems
 import Theory.Unify
