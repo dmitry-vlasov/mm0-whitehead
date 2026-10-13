@@ -1,14 +1,17 @@
 # Status
 
-Last updated: 2026-10-12.
+Last updated: 2026-10-13.
 
 ## Phase
 
 **Phase 1 — readers**: done; the acceptance tests pass (report below).
 **Phase 2 — independent verifier**: done; the acceptance tests pass (report below).
-**Phase 3 — prover**: the engine is ported, in both directions, with unfolding of
-definitions as a step; both acceptance tests are run (report below). The questions of
-`DESIGN.md` are all answered; what is left is under "Next steps".
+**Phase 3 — prover**: done; accepted on 2026-10-13, with both acceptance tests passed
+(report below). Two known gaps are carried under "Next steps": shared conversions in
+the replay reader, and the checking of a proof found for a task with metavariables.
+**Phase 4 — pattern mining and ranking**: started on 2026-10-13. The design, with its
+questions, is in `DESIGN.md` ("Phase 4"); the first tool, the chain miner
+(`prove chains`), is built, and its numbers are below.
 
 ### Phase 1 acceptance
 
@@ -178,6 +181,33 @@ every tenth theorem of the two sections, 1 s per theorem:
 All proofs found are accepted by the verifier. Every derivation of a statement is now
 a fact of the front (one per application and key, as in the tree); while a statement
 was a fact once, forward alone proved 38 of the 281, and both in turn 156 or 157.
+
+### Phase 4: the chains of set.mm (2026-10-13)
+
+`mm0-whitehead prove chains .tools/corpus/setmm.mmb`, chains of 2 to 6 steps, kept
+from 2 occurrences; 24 s. 47,611 proofs, 3,508,182 steps.
+
+| chain length | occurrences | distinct, 2 or more times | their occurrences |
+| - | - | - | - |
+| 2 | 3,460,589 | 187,720 | 3,263,904 (94.3%) |
+| 3 | 3,358,854 | 341,988 | 2,689,315 (80.0%) |
+| 4 | 3,223,526 | 348,027 | 2,189,045 (67.9%) |
+| 5 | 3,071,583 | 322,516 | 1,869,896 (60.8%) |
+| 6 | 2,911,366 | 298,376 | 1,635,323 (56.1%) |
+
+Steps on a chain of 2 or more steps that occurs at least: 2 times, 96.5%; 10 times,
+86.4%; 100 times, 60.2%; 1,000 times, 23.3%. Of the occurrences of chains of 2, 99,724
+reach the root of their proof and 541,717 start at a hypothesis of the theorem; of
+chains of 6, 21,104 and 309,550. On `peano` (29,050 steps): 83.6%, 46.3%, 23.4% and
+11.2% of the steps at the four thresholds.
+
+An occurrence is counted once per use, so a shared subproof of a large proof counts
+every time it is used, and the report also says in how many proofs a chain occurs
+(`--mm0 setmm.mm0` gives the names, the translation having no index). The most used
+chain of two steps, `renegcli` on `pire` (minus pi is real), occurs 11,088 times in 74
+proofs, the Fourier theorems; `syl` on `syl` 9,649 times in 983 proofs, and `adantr`
+on `syl` 9,449 times in 1,687. Of six steps: `adantr .0 syl .0 simpld .0 mpbid .1 syl
+.1 fourierdlem2`, 2,450 times in 20 proofs.
 
 ## Decisions (2026-10-01)
 

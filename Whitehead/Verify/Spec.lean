@@ -166,4 +166,24 @@ def matchSpec (env : Env) (f : MmbFile) : Except VerifyError Nat := do
             msg := s!"the specification has {env.order.size} statements, the proof file declares only {next} of them; the next one is {declLabel env env.order[next]!}" }
   return next
 
+/-- The names the specification gives to the axioms and theorems of the proof file, as
+pairs of the number in its theorem table and the name: for a proof file without an
+index, whose names are made up (`MmbFile.thmName`). The walk is that of `matchSpec`
+without the matching; a local theorem has no statement in the specification and keeps
+its made-up name. -/
+def specNames (env : Env) (f : MmbFile) : Array (Nat × String) := Id.run do
+  let mut names : Array (Nat × String) := #[]
+  let mut next := 0
+  for s in f.stmts do
+    let isLocal := match s.kind with
+      | .termDef l | .thm l => l
+      | _ => false
+    if isLocal then continue
+    let some decl := env.order[next]? | break
+    next := next + 1
+    match s.kind, decl with
+    | .ax, .thm i | .thm _, .thm i => names := names.push (s.index, env.thms[i]!.name)
+    | _, _ => pure ()
+  return names
+
 end Whitehead.Verify

@@ -32,6 +32,8 @@ Lean.
                                                      #   --strategy bfs (backward), forward, or both
                                                      #   --max-facts N, --join-cap N|all: the forward limits
     mm0-whitehead prove db file.mmb                  # what the prover reads from a proof file
+    mm0-whitehead prove chains file.mmb [--mm0 file.mm0]   # phase 4: the chains of steps of the proofs
+                                                     #   and how often each occurs (names from the .mm0)
 
 `verify` exits with 0 if the file is accepted; otherwise it prints the first error with
 its file offset and statement.

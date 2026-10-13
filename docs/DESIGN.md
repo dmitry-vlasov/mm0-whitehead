@@ -1356,3 +1356,115 @@ Answered on 2026-10-12:
   (`Limits.maxFacts`, `--max-facts`); the join cap was a constant of `Expand.lean` and
   is `Limits.joinCap`, `--join-cap N|all`, set into `Env.joinCap` when a search starts.
   The defaults are Russell's, 512 and 4. Nothing is open.
+
+## Phase 4: linear subproofs and ranking
+
+Phase 3 was accepted on 2026-10-13. Phase 4 is the research layer of `CLAUDE.md`:
+linear subproofs mined from the set.mm translation and exposed to the prover as
+derived rules; an environment API for learned policies, and a dataset for premise
+ranking. It is designed here before it is built, and the questions at the end come
+first. Only the miner is built.
+
+### What Russell has
+
+Two layers, of different standing (`CLAUDE.md`: the Russell source is the final judge,
+but what Claude Code wrote there is not the author's word).
+
+- The author's own, from 2021: `ml/common_subproofs.flow` and `ml/collect_data.flow`
+  ("machine-learning stubs are added", "common subproofs coverage is started").
+  `ruCollectSubproofCoverage` takes every use of an assertion across all proofs
+  (`RuAssUsage`: theorem, proof, step) and, for the deepest step not yet covered, walks
+  up its chain of parents, keeping the uses whose chains of parents are the same
+  assertions (`ruFindMaxCommonPath`); the chain with its evidences is one
+  `RuProofNodesCoverage`, and the command prints the distribution of chain lengths.
+  `ruCollectLearningDataFromTheorem` runs the prover on a theorem with a tactic that
+  follows the known proof (`compute_leafs`) and records, for every assertion node that
+  the tree makes, a context: the goal expression and the premises, positive when the
+  node is a step of the known proof and negative otherwise (`RuUsageContext`,
+  `RuAssertionUsage` in `learning_data.flow`).
+- From May 2026: `tactics/subproof_replay.flow` (`ruBuildStepIndex`, an index of the
+  conclusion of every step of every proof; `spr`, the replay of a corpus subproof
+  whose step matches a leaf), `tactics/linear_guided.flow` (`ruExtractSpine`: the path
+  of a proof tree from a step whose conclusion unifies with the goal down to a step
+  whose conclusion unifies with a premise, the steps off the path becoming open goals;
+  `linear-guided`: its replay through `follow_proof`), `unify/lgg.flow` (the least
+  general generalization of two expressions, a fresh variable at every mismatch;
+  `ruLggDistance`; 1-gram feature vectors), and the per-assertion models of `ml/`
+  (feature centroids, medoids, iterated LGG templates, k-NN, each from the positive and
+  negative contexts; `ml/premise_selector.flow` scores a node by them and `ruMlTactic`
+  expands the frontier best first; `commands/eval_ranking.flow` measures top-k and the
+  mean reciprocal rank by replaying proofs). `commands/find_linear_chains.flow` counts
+  the theorems with a spine of a given depth, offline.
+
+### The model for MM0
+
+A **chain** is a path of `k` steps in a proof tree, each proving one hypothesis of the
+one above it (`Chains.lean`). With the positions it is a derived rule: compose the
+assertions along it by unification — the conclusion of `a₂` with the `j₁`-th hypothesis
+of `a₁`, and so on down — and the result has as hypotheses what is left open along the
+chain, and as conclusion that of `a₁` under the composed substitution. The rule is
+applied to a goal by one unifier, as an assertion is, and is emitted as the `k` steps it
+stands for: the tree is a search space, the MM0 proof is emission (as "Unfolding as an
+inference step"). Russell does not build the rule: `linear-guided` replays the concrete
+steps of one occurrence, instantiated by the goal; `common_subproofs` counts chains
+without positions.
+
+**Mining** (built: `prove chains`): the chains of 2 to `K` steps that occur at least
+`min` times across the proofs of a file, counted in the manner of Apriori — a chain is
+counted only where its upper part is frequent, since a chain occurs at most as often as
+any part of it — so the counts of the frequent chains are exact and memory holds those
+only. The report gives, by length, the occurrences, the distinct frequent chains, the
+most frequent by name, how many occurrences reach the root of their proof and how many
+start at a hypothesis of the theorem; and the coverage: the share of all steps that lie
+on a chain occurring at least 2, 10, 100 or 1,000 times. A shared subproof is walked
+each time it is used. The numbers are in `STATUS.md`.
+
+**Schemas by anti-unification** (to build): the occurrences of a chain differ in what
+the goal and the open hypotheses are instantiated with. Their least general
+generalization (`lgg.flow`: the two expressions walked together, a fresh variable where
+they differ; for MM0, a variable of the sort where the sorts agree) is the schema of the
+chain: more special than the composed rule where the chain is always used with the same
+subterm, and the same otherwise. The schema with its frequency describes the
+macro-action for a ranking; the composed rule is its unifier.
+
+**Macro-actions in the engine** (to build): a derived rule is an assertion of the
+database (`Db.asserts`, with `pseudo` saying which chain), in the index of conclusions
+with the rank of the latest assertion of the chain, so that a theorem may use it only
+when it may use every step of it. Expanding a node lists the macro-actions among the
+variants of one step, so expansion stays granular. The tree with macro-actions is a
+superset of the tree without them: completeness is kept, and a proof found through a
+macro-action is one the engine could find step by step — the same proof, which the
+dedup by key merges where both are found. Soundness is as for every step: the emission
+writes the chain's steps, and the verifier checks them.
+
+**Measurement** (to build): the coverage above; and out-of-sample replay — the chains
+mined on the theorems before a cut, the theorems after it replayed and searched with
+and without the macro-actions, and the search baseline run again with them.
+
+**The environment and the dataset** (to build): the state of a search is the frontier
+(`Env.leafs` with their variants); an action is a pair (node, variant), which a
+strategy's `expand` already is. The dataset of `collect_data.flow`: for every theorem,
+the prover run with the oracle strategy over the full expansion (`oracleAll`), and for
+every assertion node of the tree one row — the goal expression, the premises, the
+assertion, and whether the node is a step of the known proof. That is the premise
+ranking dataset; it needs no new engine, only an export. A learned policy is then a
+strategy that orders `expand`.
+
+### Questions (2026-10-13)
+
+1. What is a linear subproof for you: any chain of steps, which is what `prove chains`
+   counts, or Russell's spine — a chain from a premise of the theorem to its goal with
+   the other hypotheses open? The report counts both (to the root, from a hypothesis).
+2. Are the positions part of the chain? Without them, as `common_subproofs` counts, a
+   chain is not a rule; with them it is. The miner keys on them.
+3. The schema: the LGG of the occurrences, or the composed rule? Both are proposed
+   above, with different roles; say if one is enough.
+4. Macro-actions as assertions of the database with a rank, or as a kind of step of
+   their own, like unfolding? The first needs nothing new in the engine.
+5. Shared subproofs: an occurrence inside a shared subproof is counted each time the
+   subproof is used, as Russell counts uses. On set.mm that puts `renegcli .0 pire`
+   first, 11,088 uses in 74 proofs, where `adantr .0 syl` has 9,449 uses in 1,687
+   proofs; the report gives both counts. Which is the frequency of a schema: uses, or
+   proofs?
+6. Of the 2026 Russell files (`linear_guided`, `subproof_replay`, `lgg`, the models of
+   `ml/`), which are your design, to be followed, and which are to be read as ideas?

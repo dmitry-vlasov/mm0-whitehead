@@ -15,6 +15,7 @@ import Tests.Prove.Index
 import Tests.Prove.Prod
 import Tests.Prove.Engine
 import Tests.Prove.Defs
+import Tests.Prove.Chains
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -31,6 +32,7 @@ def main : IO UInt32 := do
     Tests.Prove.prodTests
     Tests.Prove.engineTests
     Tests.Prove.defsTests
+    Tests.Prove.chainTests
     Tests.Prove.fullReplayTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests

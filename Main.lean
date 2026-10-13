@@ -37,6 +37,11 @@ def usage : String :=
                                  above the limit all do and the process stops if memory does not
                                  come back within 15 s), [--quiet]
   prove db <file.mmb>            what the prover reads from a proof file
+  prove chains <file.mmb> [--max-len K] [--min N] [--top T] [--mm0 file.mm0]
+                                 mine the chains of steps of the proofs: how often each occurs, by
+                                 length (up to K, 6), keeping those that occur N times (2), the T
+                                 (10) most frequent listed; and the share of the steps on a chain.
+                                 --mm0: the names from the specification, for a file without an index
   bench <file> ...               time the .mm0 front end or the .mmb reader on the given files"
 
 -- Exit codes: 0 success, 1 the input was rejected, 2 the command line is wrong.
@@ -398,6 +403,61 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"  written to {out}"
   return 0
 
+/-- `prove chains`: the chains of steps of the proofs and how often each occurs. -/
+def proveChains (path : String) (args : List String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok file => pure file
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  -- the set.mm translation has no index: its names are in the specification
+  let db ←
+    match strOption args "--mm0" with
+    | none => pure db
+    | some mm0 =>
+      match ← Mm0.load mm0 with
+      | .error e =>
+        IO.eprintln e.format
+        return 1
+      | .ok spec =>
+        match Mm0.elaborate spec with
+        | .error e =>
+          IO.eprintln e.format
+          return 1
+        | .ok env =>
+          pure <| (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
+            if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
+  let opts : Prove.ChainOptions :=
+    { maxLen := max 2 (numOption args "--max-len" 6), min := max 1 (numOption args "--min" 2),
+      top := numOption args "--top" 10 }
+  let start ← IO.monoMsNow
+  let stats ←
+    match Prove.mineChains db opts with
+    | .ok s => pure s
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let pct (n d : Nat) : String := if d == 0 then "0" else s!"{n * 1000 / d / 10}.{n * 1000 / d % 10}"
+  IO.println s!"{path}: {stats.proofs} proofs, {stats.steps} steps; chains of 2 to {opts.maxLen} steps, \
+    frequent from {opts.min} occurrences, in {(← IO.monoMsNow) - start} ms"
+  for l in stats.lengths do
+    IO.println s!"length {l.len}: {l.occurrences} occurrences, {l.counted} counted (the upper part frequent), \
+      {l.toRoot} of them to the root and {l.fromHyp} from a hypothesis; \
+      {l.frequent} frequent chains with {l.frequentOccurrences} occurrences ({pct l.frequentOccurrences l.occurrences}%)"
+    for (key, n, proofs) in l.top do
+      IO.println s!"  {n} in {proofs} proofs  {Prove.chainText db key}"
+  for (t, n) in stats.covered do
+    IO.println s!"steps on a chain of 2 or more steps that occurs at least {t} times: {n} ({pct n stats.steps}%)"
+  return 0
+
 def bench (path : String) : IO UInt32 :=
   if (path : System.FilePath).extension == some "mmb" then benchMmb path else benchMm0 path
 
@@ -415,6 +475,7 @@ def main (args : List String) : IO UInt32 := do
   | ["prove", "db", path] => proveDb path
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: "search" :: path :: rest => proveSearch path rest
+  | "prove" :: "chains" :: path :: rest => proveChains path rest
   | _ =>
     IO.eprintln usage
     return 2
