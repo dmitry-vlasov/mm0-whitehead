@@ -8,5 +8,6 @@ import Theory.Spt
 import Theory.Preserve
 import Theory.General
 import Theory.Generality
+import Theory.Completeness
 import Theory.Theorems
 import Theory.Unify

@@ -15,9 +15,13 @@ chain miner (`prove chains`), is built, and its numbers are below.
 **The verification of the engine** (`THEORY.md`): started on 2026-10-13, before phase 4
 goes on — a reference engine in Lean with Mathlib, in the package `theory/`, and the
 proofs of its soundness and completeness for MM0, backward search; the production
-engine to be tested against it. Milestone 1 reached the same day: the model, the
-engine and the theorem statements type-check, and the engine runs on the logic fixture
-with the production engine's answers. The proofs are the work ahead.
+engine to be tested against it. Reached the same day: the model, the engine and the
+theorem statements type-check, the engine runs on the logic fixture with the
+production engine's answers, and **soundness, generality and completeness are proved**
+for the reference engine, relative to the unification postulate (`THEORY.md`,
+milestones 1–4). `cd theory && lake build` has one `sorry` left: the postulate for the
+first-order unifier (milestone 7). Ahead: that, the engine lemmas (milestone 5), and
+the differential test against the production engine (milestone 6).
 
 ### Phase 1 acceptance
 

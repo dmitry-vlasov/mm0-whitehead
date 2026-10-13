@@ -14,6 +14,7 @@ import Theory.Search
 import Theory.Closing
 import Theory.Preserve
 import Theory.Generality
+import Theory.Completeness
 
 namespace Theory
 
@@ -52,11 +53,11 @@ theorem generality (U : Unification) (db : Database) (hwf : db.WF) (st : Stateme
   generality' hwf n
 
 /-- Completeness: every proof of an instance of the statement is, after enough rounds,
-an instance of the proof of an entry at the root congruent to it. -/
-theorem completeness (U : Unification) (db : Database) (st : Statement) (σ : Subst) (hσ : σ.Typed)
-    (π : PTree) (hπ : IsProof db (st.subst σ) π) :
+an instance of the proof of an entry at the root congruent to it (`Completeness.lean`). -/
+theorem completeness (U : Unification) (db : Database) (hwf : db.WF) (st : Statement) (σ : Subst)
+    (hσ : σ.Typed) (π : PTree) (hπ : IsProof db (st.subst σ) π) :
     ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st,
-      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) := by
-  sorry
+      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) :=
+  completeness' hwf hσ hπ
 
 end Theory

@@ -193,9 +193,28 @@ unifier's test against its reference unifier.
    (`run_inv`, `sptE_inv`). The engine was rewritten as folds and recursions for this,
    with the SPT sets a recursive function of the depth. The converse, that the answer
    is *most general*, is what generality and completeness need and is still to do.
-4. Soundness, then generality and completeness from the SPT lemma. **Soundness
-   reached on 2026-10-13**: `soundness_valid` and `soundness` are proved, relative to
-   the unification postulate. Generality and completeness are pending.
+4. Soundness, then generality and completeness from the SPT lemma. **All three reached
+   on 2026-10-13**, relative to the unification postulate. Soundness: `Spt.lean`,
+   `Preserve.lean`. Generality (`Generality.lean`): a proof congruent to an entry's
+   tree gives one substitution on the whole state (`build`): the instance's below the
+   fresh variables, and at the renamed binders of each node of the tree what the
+   proof's step there gives them — well defined because a tree never visits a node
+   twice (`anodes_nodup`, through the chain of nodes above a node, `chain`); it absorbs
+   the tree and the proof is the tree's proof under it (`sim`); an entry's answer is
+   most general among what absorbs its tree (`entry_mostGeneral`); so the proof is an
+   instance. Completeness (`Completeness.lean`): the model records every attempt with
+   the base it used, so that an expanded node is known to have tried every assertion
+   (`tried_of_lt`), and an assertion node is known to have been made in the round after
+   its parent appeared (`anode_round`); the proof's variant is built by following the
+   proof into the graph (`treeOf`), each needed node shown to exist because a
+   substitution solving its equation exists (`override`, `treeOf_at`); the entry for
+   that variant exists at the depth the tree needs (`entry_exists`, with the join most
+   general and the conditions kept under the answer, `holds_of_instance`), and the
+   depth is within the state (`fuel_le`); generality's argument then gives the
+   instance. To make instances equalities, the model changed along the way: leaves
+   carry their hypothesis, step substitutions stay on the binders, bases follow node
+   numbers, typed substitutions give names to name types, and the postulate says a
+   unifier mentions no variable outside its problem.
 5. The engine lemmas: restriction, key, settled.
 6. The differential test.
 7. The unification postulate discharged for sorted first-order terms.
