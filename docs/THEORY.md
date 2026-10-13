@@ -347,6 +347,82 @@ and are left out.
 Later: the forward direction; the production engine; the verifier against `mm0.lean`;
 the fragment of Lean.
 
+## Definitions (the second variant; started 2026-10-13)
+
+Decision 6 deferred definitions "with their original semantics — MM0's conversion
+judgment — rather than only as assertions". The second variant adds them so.
+
+### Decisions (2026-10-13)
+
+9. **The judgment is the primary specification's.** `examples/mm0.mm0` checks a
+   conversion by a certificate (`CExpr`): `CRefl`, `CSymm`, `CTrans`, `CCong` with one
+   certificate per argument, and `CUnfold f es zs`, a leaf, `f(es) = B[xs := es, ys :=
+   zs]` for `def f (xs) {.ys} = B`, each `z` a bound variable of the context that occurs
+   in no argument (`VerifyConvUnfold`). `mm0.lean` has the same judgment without
+   transitivity, a `.mmb` `Conv` being a chain of its `conv` proof steps; the model
+   follows `mm0.mm0`, with its `VConv c p : B` from `c : A = B` and `p : A`. Two
+   additions from the verifiers: the dummies of one unfolding are distinct from each
+   other (`MMB-NOTES.md`, section 9, point 4: `E. y E. z ~ y = z` could otherwise be
+   unfolded to `E. y E. y ~ y = y`), and at an argument that takes names both sides of
+   a congruence are the same name (`mm0.mm0` asks both to be bound variables, and
+   two bound variables have no certificate between them but through themselves; the
+   theory takes the consequence as the rule rather than prove it about normal forms).
+10. **The engine is unchanged; the database grows.** The reference engine searches, as
+    the production engine does inside a variable, with MM0's judgment as assertions
+    (`DESIGN.md`, "Unfolding inside a variable"): terms `≡_s` and `≡'_s` of a judgment
+    sort, and the rules `conv_s`, `refl_s`, `cong_t`, `cong'_t_i`, `unfold_f`,
+    `unfold'_f`, `fold_f`, `fold'_f`, exactly the production engine's `convRules` so
+    that the differential test compares like with like. The theorems of the first
+    variant hold for this database as for any other; what definitions add is the
+    link between proofs over it and MM0's own proofs.
+11. **Two translations make the link.** From a proof over the extended database to an
+    MM0 proof: a `conv_s` step becomes a `VConv`, its `≡'` subtree a certificate
+    (`refl_s` to `CRefl`, `cong_t` to `CCong`, `unfold_f` to `CTrans (CUnfold ..)`,
+    `fold_f` to `CTrans .. (CSymm (CUnfold ..))`). From an MM0 proof to one over the
+    extended database: a certificate becomes a rule tree — `CSymm` pushed to the
+    leaves, where it swaps `unfold` and `fold`; `CTrans` by a lemma that composes rule
+    trees (an unfolding on the left of a rule tree is undone by induction on the
+    tree, with congruence of substitution for the `cong` case); then the tree is
+    primed along a path to one of its unfoldings, and a certificate with no
+    unfolding, which converts an expression to itself, is dropped with its `VConv`.
+12. **The (def, occurrence) steps** of the production engine (`convRule`) are derived
+    rules of the extended system — `C[B] ⊢ C[f(xs)]` by `conv_s` over `cong'` along
+    `C` to `unfold'_f` — so soundness covers them, and completeness is not affected
+    by their presence. In the differential test they are switched off (an option of
+    the production engine), so that the two engines have the same steps per round.
+13. **Generality** stays within the extended system (a proof congruent to an entry
+    uses the same rules); the two theorems restated for MM0 are soundness and
+    completeness.
+
+### The model (`Theory/Defs.lean`)
+
+- A definition: the term, its result type, its arguments and dummies as variables,
+  and its value over them (`Def`); well-formed when the value is over them, the
+  dummies are name-typed, and all are distinct. A database carries its definitions
+  beside its assertions (`Database.defs`); the engine never reads them.
+- A certificate (`CTree`) as in decision 9, and its validity `CValid db sig c k e₁ e₂`,
+  "`k` converts `e₁` to `e₂`", over the signature for the typing of a congruence and
+  the constants of the statement for the names an argument has.
+- An MM0 proof (`DTree`): a hypothesis, an assertion step, or a conversion `conv e k t`
+  proving `e` from `t` by `k : t.expr = e`; its shape, conditions, variables; a proof of
+  the statement (`IsProofD`) as `IsProof` with conversions.
+
+### Milestones
+
+8. The model: `Def`, `Database.defs`, `CTree`, `CValid`, `DTree`, `DShape`, `IsProofD`.
+   **Reached on 2026-10-13** (`Defs.lean`), with the first variant's proofs embedded
+   as MM0 proofs (`PTree.ofP`, `isProofD_ofP`). The rules and the translation of
+   milestone 9 are defined (`Rules.lean`: `Language`, `Database.withConv`,
+   `Database.ruleAt`, `PTree.toC`, `PTree.toD`), their theorem is next.
+9. The extended database (`Database.withConv`), its well-formedness, and the
+   translation from proofs over it to MM0 proofs with its theorem (`toD_isProof`);
+   `soundness_defs`.
+10. The translation from MM0 proofs to proofs over the extended database
+    (`ofD_isProof`), with the lemmas of decision 11; `completeness_defs`.
+11. The converter maps the definitions and the rules; the production engine's
+    (def, occurrence) steps get an off switch; the differential test on the files
+    with definitions (`defs.mmb`, `peano`, `hol`, `mm0`).
+
 ## Questions
 
 Answered on 2026-10-13: definitions are excluded (decision 6); metavariables stay

@@ -18,9 +18,23 @@ structure Assertion where
   concl : Exp
   deriving Inhabited
 
-/-- The assertions that may be used, by number. -/
+/-- A definition `def f (xs) {.ys}: s = B` (`docs/THEORY.md`, "Definitions"): the term
+it defines and its result type, its arguments and its dummies as variables, and its
+value over both. -/
+structure Def where
+  term : ℕ
+  ty : Ty
+  args : List Var
+  dummies : List Var
+  value : Exp
+  deriving Inhabited
+
+/-- The assertions that may be used, by number; and the definitions of the file,
+which the engine never reads (decision 10): it searches over the conversion judgment
+as assertions, and `Defs.lean` has the judgment itself. -/
 structure Database where
   asserts : List Assertion
+  defs : List Def := []
 
 /-- A well-formed assertion: its conclusion, hypotheses and pairs are over its
 binders, and the first binder of every pair is bound, a name. -/
