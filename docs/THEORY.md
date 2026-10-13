@@ -502,7 +502,105 @@ judgment — rather than only as assertions". The second variant adds them so.
     binders — the model now does the same, with the largest binder plus one as the
     meaning that its proofs need.
 
+## The production engine (the third variant; designed 2026-10-13)
+
+Decision 3 made the reference engine the object of the theorems and deferred a proof
+about the production engine. What the production engine does beyond the reference
+engine (`Whitehead/Prove`, "The reference engine" above): it keeps *one proof per key*
+at a node, the key being the proof's substitution restricted to the visible variables
+with its open conditions (`proofKey`); it carries a proof up with that *restriction*
+only (`restrict`, `buildPropProofs`); it judges a condition *settled* and drops it,
+or *violated* and drops the proof, as soon as that is decided (`judge`, `openConds`);
+it joins a new proof of one child with the proofs of the others *incrementally*, as
+they come (`addProof`), through a join index; it finds the assertions by the index
+and splits the unifier into the part on the goal and the part on the assertion
+(`splitProp`); and it has budgets. The engine lemmas of milestone 5 are the
+arguments the first three rest on, stated about the reference engine's SPT sets.
+
+### Two ways
+
+- **A proof about the code.** The engine is `StateT Env BaseIO` over arrays and hash
+  maps, with `partial` unification, index walks and proof building, and reads of the
+  clock and the memory. A proof about it needs a pure, total core carved out first — a
+  rewrite of the engine's core (`Proofs.lean`, `Expand.lean`, `Unify.lean`,
+  `Index.lean`, `Prod.lean`, some 1,500 lines) with fuel for every `partial` and the
+  lemma libraries of `Std.HashMap` and `Array` for the data — and then the proofs
+  about that code. `CLAUDE.md` asks the engine to be a program with `partial` and
+  in-place arrays, not a proof library, and its performance is measured against
+  mm0-c; the rewrite would be against that grain, and the proofs about imperative
+  code several times the size of the first two variants.
+- **A proof about the algorithm, and a test of the code against it at every node.**
+  A third engine in the theory, the *keyed engine*: the reference engine's SPT sets
+  with the production engine's three ideas — the restriction on the way up, one entry
+  per key, the conditions judged settled or violated or pending — over the model's
+  data (`Theory/Keyed.lean`). Two theorems, by the engine lemmas: every entry of the
+  keyed engine at a node is the restriction of an entry of the reference engine with
+  the same conditions pending, and every entry of the reference engine has an entry
+  of the keyed engine with its key; so the keyed engine's answers at the root are the
+  reference engine's, and soundness and completeness carry over. Then the
+  differential test compares the production engine with the keyed engine *node by
+  node*: after each round, the keys of the proofs at every expression node and every
+  assertion node, not the root's answers alone. That tests `addProof`, `restrict`,
+  `proofKey`, `judge`, `splitProp` and `buildPropProofs` directly, on the fixtures and
+  the corpus, which is how the two faults of the metavariable mode were found. The
+  incremental join and the index remain the code's own; the test is what covers them.
+
+### Decisions (2026-10-13)
+
+15. The second way (chosen with the user, see the question of the same day): the
+    algorithm proved, the code tested against it at every node. The first way stays
+    open for the day the engine's core is rewritten for other reasons.
+
+### The keyed engine
+
+`Theory/Keyed.lean`: `keyedE U st s fuel i : List KEntry`, by the recursion of `sptE`,
+where an entry carries its tree, its substitution *restricted to the visible variables
+of its node* (`visible st s i`), and its pending conditions; at an assertion node the
+join of `θ_a` with one entry per child (their restricted substitutions), the result
+restricted to the parent's visible variables, its conditions judged under the answer —
+violated: dropped; settled, that is on a name no node above can replace: dropped as a
+condition; pending: kept — and the entries kept one per key, the key being the
+restricted substitution with the pending conditions, the first found. The engine's
+state, rounds and nodes are the reference engine's (`State.run`): the keyed engine
+differs in what it reads off the state, as the production engine's tree differs in
+its proofs, not its nodes.
+
+### Milestones
+
+12. The keyed engine, running on the fixture: `Keyed.lean`, `lake exe ref-search
+    --keyed`. **Reached on 2026-10-13.** The engine is `keyedE`, the recursion of
+    `sptE` over entries of `KEntry` (tree, restricted substitution, pending
+    conditions): at an assertion node the join of `θ_a` with the restricted
+    substitutions of one entry per child (`anodeK`), the conditions judged under the
+    join as the production engine's `judge` judges them (`judgeK`: violated when the
+    name occurs; settled when the name is a variable not among the variables of the
+    parent's expression under the join nor of the statement, or a constant with no
+    variable left in the expression; pending otherwise), the join restricted to the
+    parent's visible variables, and one entry per key (`dedupKeys`, the first found,
+    the key compared exactly). On the logic fixture at 3 rounds the keyed engine has
+    1, 4, 3 and 4 entries at the roots of `a1i`, `mpcom`, `alrimi` and `dummy` where the
+    reference engine has 1, 36, 83 and 2,079 — and the production engine 1, 4, 3 and
+    4. `diff-test --keyed` compares the production engine's root proofs with the
+    keyed engine's entries by their *keys* — the answer with the pending conditions,
+    renamed by first occurrence — as sets: which proof is kept per key depends on
+    the order of enumeration, and how many entries share a key up to renaming on
+    which of two variables a unifier keeps, and both differ between the engines; the
+    sets agree on both fixtures at 2 and 3 rounds, with and without metavariables.
+13. The keyed engine is sound for the reference engine: every keyed entry at a node is
+    the restriction of a reference entry with the same tree, by `spt_restrict` for the
+    join and `spt_settled` for the dropped conditions; so its root answers are
+    reference answers and `soundness` applies (`Keyed.lean`, `keyed_sound`).
+14. The keyed engine is complete for the reference engine: every reference entry has a
+    keyed entry with its key, by `spt_key` for the one kept per key; so every reference
+    answer is among the keyed engine's and `completeness` applies (`keyed_complete`).
+15. The structural differential test: `diff-test --nodes` compares, after each round,
+    the keys at every node of the production engine's tree with the keyed engine's,
+    on the fixtures and the corpus samples; what it finds is fixed or recorded.
+
 ## Questions
+
+Asked on 2026-10-13: which of the two ways of "The production engine"; the second was
+chosen (decision 15).
 
 Answered on 2026-10-13: definitions are excluded (decision 6); metavariables stay
 (decision 7); closing is a separate step, and trivial where the sorts allow dummies

@@ -1,6 +1,6 @@
 /-
 `lake exe diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...]
-[--max-tuples N] [--max-nodes N] [--assertions K]`: the differential test of the production engine against the reference engine
+[--max-tuples N] [--max-nodes N] [--assertions K] [--keyed]`: the differential test of the production engine against the reference engine
 (`docs/THEORY.md`, "The link to the production engine", milestone 6).
 
 For each theorem of the range, both engines run for the same number of rounds: the
@@ -144,6 +144,23 @@ def referenceRows (dbm : Database) (names terms : Array String) (st : Statement)
     let answer := " ".intercalate ((canon (E.sub.apply st.concl :: values)).map (Convert.expText terms))
     { shape := refShape names (E.proof dbm s), answer }).toArray
 
+/-- The key of a keyed entry at the root, as text: the goal and the metavariables under
+the substitution, and the pending conditions, renamed together. -/
+def keyedKey (terms : Array String) (st : Statement) (metas : List Var) (K : KEntry) : String :=
+  let values := metas.map fun m => K.sub.apply (.var m)
+  let conds := K.conds.flatMap fun k => [k.1, k.2]
+  let all := canon (K.sub.apply st.concl :: values ++ conds)
+  s!"{" ".intercalate ((all.take (1 + values.length)).map (Convert.expText terms))}\
+    {if conds.isEmpty then "" else " | " ++ " ".intercalate ((all.drop (1 + values.length)).map (Convert.expText terms))}"
+
+/-- The key of a production proof at the root, as text, in the same form. -/
+def productionKey (terms : Array String) (env : Whitehead.Prove.Env) (proof : Whitehead.Prove.Proof) : String :=
+  let values := (Whitehead.Prove.metaValues env proof).toList.map Convert.exp
+  let conds := proof.conds.toList.flatMap fun c => [Convert.exp ⟨#[c.name]⟩, Convert.exp c.expr]
+  let all := canon (Convert.exp proof.expr :: values ++ conds)
+  s!"{" ".intercalate ((all.take (1 + values.length)).map (Convert.expText terms))}\
+    {if conds.isEmpty then "" else " | " ++ " ".intercalate ((all.drop (1 + values.length)).map (Convert.expText terms))}"
+
 /-- `State.sptE` of the reference engine with a cap on the tuples it visits: the entries
 of an expression node down to a depth, together with the number of tuples of child
 entries visited so far — the sum of the sizes of the products — or `none` once that
@@ -181,6 +198,9 @@ structure Options where
   maxTuples : ℕ := 1000000
   maxNodes : ℕ := 2000000
   assertions : ℕ := 1000000000
+  /-- Against the keyed engine (`Theory/Keyed.lean`): one entry per key on both sides,
+  so the proofs must agree exactly, each a row of the other and as many. -/
+  keyed : Bool := false
   verbose : Bool := false
   dump : Bool := false
 
@@ -237,9 +257,35 @@ def oneTheorem (db : Whitehead.Prove.Db) (index : Whitehead.Prove.Index ℕ) (id
   let missingRef := prodRows.filter fun r => !refRows.contains r
   let missingProd := refRows.filter fun r => !prodRows.any (·.answer == r.answer)
   let ok := missingRef.isEmpty && missingProd.isEmpty && prodRows.size ≤ refRows.size
+  -- against the keyed engine: the same keys up to renaming (which proof is kept per key
+  -- depends on the order of enumeration, and how many entries share a key up to
+  -- renaming on which of two variables a unifier keeps; both differ between the engines)
+  let (keyedOk, keyedText) ←
+    if opts.keyed then
+      let start ← IO.monoMsNow
+      let kroot := keyedRoot Unify.postulate st s
+      let kMs := (← IO.monoMsNow) - start
+      let kkeys := (kroot.map (keyedKey terms st metas)).toArray.qsort (· < ·)
+      let pkeys := ((direct.map fun ((e, _, sub) : Whitehead.Prove.Exp × ℕ × Whitehead.Prove.Subst) =>
+          let values := env.task.metas.toList.map fun m => Convert.exp (sub.apply (Whitehead.Prove.Exp.ofVar m))
+          " ".intercalate ((canon (Convert.exp e :: values)).map (Convert.expText terms))) ++
+        (proofs.filter fun proof => (prodShape db (Whitehead.Prove.makeProofTree env proof)).isSome).map
+          (productionKey terms env)).qsort (· < ·)
+      let kset := kkeys.foldl (init := #[]) fun acc k => if acc.back? == some k then acc else acc.push k
+      let pset := pkeys.foldl (init := #[]) fun acc k => if acc.back? == some k then acc else acc.push k
+      let kok := kset == pset
+      if !kok then
+        for k in pset do
+          if !kset.contains k then IO.println s!"  production key not keyed: {k}"
+        for k in kset do
+          if !pset.contains k then IO.println s!"  keyed key not production: {k}"
+      pure (kok, s!"; keyed {kkeys.size} entries, {kset.size} keys up to renaming against {pset.size} ({kMs} ms)\
+        {if kok then "" else ", DIFFER"}")
+    else pure (true, "")
+  let ok := ok && keyedOk
   let verdict := if ok then "agree" else "DISAGREE"
   IO.println s!"{name}: {verdict}; reference {root.length} proofs at the root ({s.enodes.size} expression nodes, \
-    {s.anodes.size} assertion nodes, {refTuples} tuples, {refMs} ms); {prodText}"
+    {s.anodes.size} assertion nodes, {refTuples} tuples, {refMs} ms); {prodText}{keyedText}"
   if !ok || opts.verbose then
     for r in missingRef do
       IO.println s!"  production proof not a reference entry: {rowText r}"
@@ -280,13 +326,13 @@ def main (args : List String) : IO UInt32 := do
         IO.eprintln s!"{path}: {m}"
         return 1
     let some n := rounds.toNat?
-      | IO.eprintln "usage: diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...] [--max-tuples N] [--max-nodes N] [--assertions K] [--verbose]"
+      | IO.eprintln "usage: diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...] [--max-tuples N] [--max-nodes N] [--assertions K] [--keyed] [--verbose]"
         return 2
     let opts : Diff.Options :=
       { first := Diff.numOption rest "--from" 0, last := Diff.numOption rest "--to" 1000000000,
         every := max 1 (Diff.numOption rest "--every" 1), metas := Diff.numsOption rest "--meta",
         maxTuples := Diff.numOption rest "--max-tuples" 1000000, maxNodes := Diff.numOption rest "--max-nodes" 2000000,
-        assertions := Diff.numOption rest "--assertions" 1000000000,
+        assertions := Diff.numOption rest "--assertions" 1000000000, keyed := rest.contains "--keyed",
         verbose := rest.contains "--verbose", dump := rest.contains "--dump" }
     if !db.defs.isEmpty then
       match Convert.rulesMismatch db with
@@ -316,5 +362,5 @@ def main (args : List String) : IO UInt32 := do
       {leftOut} left out over the limits of {opts.maxTuples} tuples and {opts.maxNodes} assertion nodes"
     return (if agreed + leftOut == total then 0 else 1)
   | _ =>
-    IO.eprintln "usage: diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...] [--max-tuples N] [--max-nodes N] [--assertions K] [--verbose]"
+    IO.eprintln "usage: diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...] [--max-tuples N] [--max-nodes N] [--assertions K] [--keyed] [--verbose]"
     return 2

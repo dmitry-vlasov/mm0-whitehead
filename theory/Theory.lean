@@ -16,3 +16,4 @@ import Theory.Completeness
 import Theory.Theorems
 import Theory.Unify
 import Theory.Engine
+import Theory.Keyed

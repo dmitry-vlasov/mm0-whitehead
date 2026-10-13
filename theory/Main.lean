@@ -10,7 +10,8 @@ import Theory.Convert
 open Theory
 
 def main (args : List String) : IO UInt32 := do
-  match args with
+  let keyed := args.contains "--keyed"
+  match args.filter (· != "--keyed") with
   | [path, thm, rounds] =>
     let file ←
       match Whitehead.Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
@@ -42,7 +43,15 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  goal {Convert.expText terms st.concl}; hypotheses {st.hyps.map (Convert.expText terms)}"
     for E in root do
       IO.println s!"  {Convert.proofText names terms (E.proof dbm s)}"
+    if keyed then
+      let start ← IO.monoMsNow
+      let kroot := keyedRoot Unify.postulate st s
+      let done ← IO.monoMsNow
+      IO.println s!"  keyed: {kroot.length} entries at the root, one per key, in {done - start} ms"
+      for K in kroot do
+        IO.println s!"  {Convert.proofText names terms (K.proof dbm s)} with \
+          {Convert.expText terms (K.sub.apply st.concl)}, {K.conds.length} pending"
     return 0
   | _ =>
-    IO.eprintln "usage: ref-search <file.mmb> <theorem> <rounds>"
+    IO.eprintln "usage: ref-search <file.mmb> <theorem> <rounds> [--keyed]"
     return 2
