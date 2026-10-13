@@ -17,6 +17,7 @@ import Theory.Generality
 import Theory.Completeness
 import Theory.ToD
 import Theory.OfD
+import Theory.KeyedCorr
 
 namespace Theory
 
@@ -97,5 +98,35 @@ theorem completeness_defs (U : Unification) (L : Language) (db : Database) (hwf 
       (D.toP L db).IsInstance (db.withConv L) (E.proof (db.withConv L) (run U (db.withConv L) st n)) :=
   completeness U (db.withConv L) (Database.withConv_WF db hwf hdefs) st σ hσ _
     (DTree.toP_isProof (hL.subst hσ) hdefs hnd hD hf)
+
+
+/-- The keyed engine against the reference engine, for a database without conditions
+on bound variables (`docs/THEORY.md`, "The production engine", milestone 13): every
+keyed entry at the root has a reference entry at the root with its tree, no condition
+pending, and the same answer on the statement's variables up to instance each way;
+that entry's proof is valid for the statement under its answer (`soundness_valid`). -/
+theorem keyed_soundness_np (U : Unification) (db : Database) (hwf : db.WF) (hnp : db.NoPairs)
+    (st : Statement) (n : ℕ) :
+    ∀ K ∈ keyedRoot U st (run U db st n), ∃ E ∈ (run U db st n).rootEntries U st,
+      K.tree = E.tree ∧ K.conds = [] ∧ SameOn (visible st (run U db st n) 0) K.sub E.sub ∧
+      Valid db (st.subst E.sub) (E.proof db (run U db st n)) := by
+  intro K hK
+  have hs := run_inv U db hwf st n
+  obtain ⟨E, hE, ht, hc, hsame⟩ := keyed_sound_np hs hwf hnp _ 0 hs.root_lt K hK
+  exact ⟨E, hE, ht, hc, hsame, (soundness_valid U db hwf st n E hE).1⟩
+
+/-- The other direction (milestone 14): every proof of an instance of the statement is
+found, up to congruence and instance, by a reference entry at the root
+(`completeness`), and the keyed engine keeps an entry with that entry's answer on the
+statement's variables up to instance each way. -/
+theorem keyed_completeness_np (U : Unification) (db : Database) (hwf : db.WF) (hnp : db.NoPairs)
+    (st : Statement) (σ : Subst) (hσ : σ.Typed) (π : PTree) (hπ : IsProof db (st.subst σ) π) :
+    ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st, ∃ K ∈ keyedRoot U st (run U db st n),
+      SameOn (visible st (run U db st n) 0) K.sub E.sub ∧
+      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) := by
+  obtain ⟨n, E, hE, hcong, hinst⟩ := completeness U db hwf st σ hσ π hπ
+  have hs := run_inv U db hwf st n
+  obtain ⟨K, hK, hsame⟩ := keyed_complete_np hs hwf hnp _ 0 hs.root_lt E hE
+  exact ⟨n, E, hE, K, hK, hsame, hcong, hinst⟩
 
 end Theory

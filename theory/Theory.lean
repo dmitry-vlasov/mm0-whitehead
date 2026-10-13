@@ -18,3 +18,4 @@ import Theory.Unify
 import Theory.Engine
 import Theory.Keyed
 import Theory.KeyedLemmas
+import Theory.KeyedCorr

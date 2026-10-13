@@ -586,16 +586,45 @@ its proofs, not its nodes.
     the order of enumeration, and how many entries share a key up to renaming on
     which of two variables a unifier keeps, and both differ between the engines; the
     sets agree on both fixtures at 2 and 3 rounds, with and without metavariables.
-13. The keyed engine is sound for the reference engine: every keyed entry at a node is
-    the restriction of a reference entry with the same tree, by `spt_restrict` for the
-    join and `spt_settled` for the dropped conditions; so its root answers are
-    reference answers and `soundness` applies (`Keyed.lean`, `keyed_sound`).
-14. The keyed engine is complete for the reference engine: every reference entry has a
-    keyed entry with its key, by `spt_key` for the one kept per key; so every reference
-    answer is among the keyed engine's and `completeness` applies (`keyed_complete`).
+13. The keyed engine is sound for the reference engine: every keyed entry at a node has
+    a reference entry at the node with the same tree, no condition pending, and the
+    same answer on the node's visible variables *up to instance each way*
+    (`KeyedCorr.lean`, `keyed_sound_np`; at the root, with `soundness_valid`,
+    `keyed_soundness_np` in `Theorems.lean`). **Reached on 2026-10-13 for databases
+    without conditions on bound variables** (`Database.NoPairs`: no assertion has
+    pairs); the conditions are milestone 16. Two things came out differently from the
+    design above. The keyed entry is not the *restriction* of the reference entry: the
+    join of the restricted members and the join of the full members are unifiers of
+    the same problem up to the fresh variables below, and which of two equal variables
+    a unifier keeps is the postulate's choice, so the two answers agree on the visible
+    variables up to instance each way (`SameOn`), which for idempotent answers is up to
+    a renaming; the key is therefore compared up to renaming, as `diff-test --keyed`
+    already does. And the argument is not `spt_restrict` alone: a member's variables
+    that are not visible at its child are inside that child's block (`KInv`, `Member`,
+    `block_apart`), hence apart from `θ_a` and from the other children's members,
+    which is what `joinAll_restrict_*` and `joinAll_sameOn` need; a chain over the
+    children (`restrict_chain`, `sameOn_chain`) replaces the members one at a time.
+14. The keyed engine is complete for the reference engine: every reference entry at a
+    node has a keyed entry at the node with the same answer on the visible variables up
+    to instance each way, the one kept for its key (`keyed_complete_np`,
+    `dedupKeys_spec`; at the root, with `completeness`, `keyed_completeness_np`).
+    **Reached on 2026-10-13 for databases without conditions**, by the same chains run
+    the other way. A keyed entry carries no proof of its own: its proof is the
+    reference entry's, the same tree under the full answer; the restricted answer does
+    not instantiate the nodes below. The production engine keeps at every proof node
+    the join made there and composes them down the tree when it extracts a proof
+    (`makeProofTree`, `Proofs.lean`), which milestone 15's test and the verifier cover.
 15. The structural differential test: `diff-test --nodes` compares, after each round,
     the keys at every node of the production engine's tree with the keyed engine's,
     on the fixtures and the corpus samples; what it finds is fixed or recorded.
+16. The conditions: milestones 13 and 14 for databases with pairs. What is missing is
+    a theory of renamings: two answers that are instances of each other on a set of
+    variables differ there by an injective renaming, and `Cond.Holds` is invariant
+    under one; with it, a condition settled under the keyed answer is settled under
+    the reference answer (`spt_settled`'s argument), a violated one is violated under
+    both, and the pending ones agree up to the renaming. `judgeK` is already the
+    production engine's `judge`; the test of milestone 12 covers the conditions on the
+    fixtures and the corpus meanwhile.
 
 ## Questions
 

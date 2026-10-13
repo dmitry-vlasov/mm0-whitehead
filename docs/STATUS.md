@@ -47,7 +47,18 @@ the converter and the differential test on the files with definitions, reached t
 same day: the model's rules are the file's, rule for rule, on `defs.mmb`, `peano`,
 `hol`, `mm0` and `x86`, and the two engines agree on every sampled theorem of each,
 with the production engine's (def, occurrence) steps off (`Env.convSteps`). All
-eleven milestones are reached; `cd theory && lake build` has no `sorry`.
+eleven milestones are reached. **The third variant, the production engine**
+(`THEORY.md`, "The production engine"; decision 15: the algorithm proved, the code
+tested node by node): the keyed engine — the reference engine's SPT sets with the
+production engine's restriction on the way up, one entry per key and conditions judged
+early (`Keyed.lean`, milestone 12) — matches the production engine's root keys up to
+renaming on the fixtures and the corpus samples (`diff-test --keyed`); and it is sound
+and complete for the reference engine, node by node, for databases without conditions
+on bound variables (`KeyedCorr.lean`, `keyed_sound_np`, `keyed_complete_np`;
+`Theorems.lean`, `keyed_soundness_np`, `keyed_completeness_np`; milestones 13 and 14),
+the answers agreeing on the visible variables up to instance each way rather than
+exactly. Open: the conditions (milestone 16, a theory of renamings) and the structural
+differential test (milestone 15). `cd theory && lake build` has no `sorry`.
 
 ### Phase 1 acceptance
 

@@ -107,8 +107,4 @@ def keyedE (U : Unification) (st : Statement) (s : State) : ℕ → ℕ → List
 def keyedRoot (U : Unification) (st : Statement) (s : State) : List KEntry :=
   keyedE U st s s.enodes.size 0
 
-/-- The proof a keyed entry stands for, under its restricted answer. -/
-def KEntry.proof (db : Database) (s : State) (K : KEntry) : PTree :=
-  State.proofOf db s K.sub K.tree
-
 end Theory
