@@ -22,10 +22,12 @@ structure Assertion where
 structure Database where
   asserts : List Assertion
 
-/-- The statement being proved: its variables as constants (`Consts`), its hypotheses
-and its conclusion, over constants and — for a task with metavariables — variables. -/
+/-- The statement being proved: its variables as constants (`Consts`), the sorts whose
+dummies a proof may use (`mm0.md`: neither `strict` nor `free`), its hypotheses and
+its conclusion, over constants and — for a task with metavariables — variables. -/
 structure Statement where
   consts : Consts
+  dummies : ℕ → Bool
   hyps : List Exp
   concl : Exp
 
@@ -134,9 +136,19 @@ def Valid (db : Database) (st : Statement) (T : PTree) : Prop :=
   Shape db st T ∧ CondsHold db st T
 
 /-- A proof of the statement: a valid tree with the statement's conclusion at the
-root, whose variables are all names — the dummies of the MM0 proof. -/
+root, whose variables are all names of sorts that allow dummies — the dummies of the
+MM0 proof (`Dummy` in the `.mmb`). -/
 def IsProof (db : Database) (st : Statement) (T : PTree) : Prop :=
-  Valid db st T ∧ T.expr = st.concl ∧ ∀ v ∈ T.vars, v.ty.name = true
+  Valid db st T ∧ T.expr = st.concl ∧ ∀ v ∈ T.vars, v.ty.name = true ∧ st.dummies v.ty.sort = true
+
+/-- The closing of a tree, a step apart from the search (`docs/THEORY.md`, decision 8):
+every variable left becomes a dummy, a name of its sort with the same number, so that
+distinct variables stay distinct. -/
+def PTree.closing (T : PTree) : Subst :=
+  Subst.ofFun T.vars (fun v => if v ∈ T.vars then .var ⟨v.id, ⟨v.ty.sort, true⟩⟩ else .var v)
+    (fun v hv => by simp [hv])
+
+def PTree.close (T : PTree) : PTree := T.subst T.closing
 
 /-- `T'` is an instance of `T`: `T' = δ(T)` (the paper's `T ≽ T'`). -/
 def PTree.IsInstance (T' T : PTree) : Prop := ∃ δ : Subst, T' = T.subst δ

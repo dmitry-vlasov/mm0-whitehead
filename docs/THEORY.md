@@ -18,6 +18,17 @@ record of the decisions; the formal development is the Lake package `theory/`.
 6. (2026-10-13, later) Definitions are excluded from the first variant. They are to be
    added afterwards with their original semantics — MM0's conversion judgment — rather
    than only as assertions. The converter leaves the conversion rules out.
+8. (2026-10-13, later) Closing — giving the variables a proof leaves to a value — is a
+   step of its own after the search (`PTree.close`, with its own theorem
+   `close_isProof`), as the production engine has it at emission. Every variable left
+   becomes a dummy of its sort, which MM0 allows in a theorem for every sort that is
+   neither `strict` nor `free` (`mm0.md`: "any number of additional dummy variables of
+   any desired sorts"; a dummy is a bound variable, and a bound variable is an
+   expression of its sort). In the set.mm translation `wff` and `class` are neither, so
+   the closing is this trivial one. What is not in the model: the sorts that allow no
+   dummies, where the production engine tries a term without arguments or a variable
+   of the theorem; and MM0's limit of 55 bound variables per theorem, which
+   `mergeNames` meets by merging leftover names that no condition keeps apart.
 7. (2026-10-13, later) The statement may have metavariables (free variables are
    constants, metavariables are variables of the tree, as in `Db.task`). They do not
    complicate the theory: the root is an expression node like any other, and every
@@ -175,24 +186,7 @@ the fragment of Lean.
 ## Questions
 
 Answered on 2026-10-13: definitions are excluded (decision 6); metavariables stay
-(decision 7). Open:
-
-2. **Variables that a proof leaves undetermined.** When the engine finds a proof, some
-   variables of the tree may be left that nothing in the proof determines. They are of
-   two kinds. (a) A variable standing for a *bound variable*: the `x` of `∀x ph → ph`
-   when it is used to prove `ph` from `∀x ph` and nothing else fixes `x`. MM0 lets a
-   proof introduce such a variable as a *dummy* (`Dummy` in the `.mmb`). (b) A variable
-   standing for an *expression*, such as a `wff` that occurs in a hypothesis of a lemma
-   but not in its conclusion, when the subproof of that hypothesis leaves it open. MM0
-   has no dummy of that kind: the proof must say what the expression is. The production
-   engine fills in (b) when it writes the proof, by a heuristic (`DESIGN.md`,
-   "Closing": a new bound variable of the sort if the sort has them, else a term
-   without arguments declared before the theorem, else a variable of the theorem; up to
-   four tries against the verifier). The model as written: the theorems are about
-   proofs *with* variables; a *proof of the statement* (`IsProof`) is one whose
-   remaining variables are all of kind (a), each a distinct new dummy; a tree with a
-   remaining variable of kind (b) is a valid schematic proof but not yet a proof of the
-   statement — it needs an instantiation, which the model takes as given from outside
-   (any instantiation keeps validity, by monotonicity, as long as the conditions hold).
-   Is that acceptable for the first variant, or should the closing rule for (b) be part
-   of the model?
+(decision 7); closing is a separate step, and trivial where the sorts allow dummies
+(decision 8). The earlier form of the question had it wrong: MM0 does allow dummies of
+every sort that is neither `strict` nor `free`, so a variable left for an expression of
+such a sort becomes a dummy like a variable left for a bound variable. Nothing is open.

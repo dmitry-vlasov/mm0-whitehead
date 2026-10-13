@@ -24,13 +24,27 @@ theorem soundness_valid (U : Unification) (db : Database) (st : Statement) (n : 
       (E.proof db (run U db st n)).expr = E.sub.apply st.concl := by
   sorry
 
-/-- Soundness: every entry at the root has an instance that is a proof of the
-statement under the answer — its variables left open given distinct fresh names,
-which become the dummies. -/
-theorem soundness (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
-    ∀ E ∈ (run U db st n).rootEntries, ∃ δ : Subst,
-      IsProof db (st.subst (δ.comp E.sub)) ((E.proof db (run U db st n)).subst δ) := by
+/-- Closing (`PTree.close`) is a step of its own: a valid tree whose variables are of
+sorts that allow dummies, with every variable made a dummy, is a proof of the statement
+under the closing. Distinct fresh names satisfy every condition that holds under the
+answer: a condition fails only when its name already occurs. -/
+theorem close_isProof (db : Database) (st : Statement) (θ : Subst) (T : PTree)
+    (hv : Valid db (st.subst θ) T) (he : T.expr = θ.apply st.concl)
+    (hd : ∀ v ∈ T.vars, st.dummies v.ty.sort = true) :
+    IsProof db (st.subst (T.closing.comp θ)) T.close := by
   sorry
+
+/-- Soundness: the closing of the proof of every entry at the root is a proof of the
+statement under the answer and the closing, when the sorts of the variables left allow
+dummies. -/
+theorem soundness (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
+    ∀ E ∈ (run U db st n).rootEntries,
+      (∀ v ∈ (E.proof db (run U db st n)).vars, st.dummies v.ty.sort = true) →
+      IsProof db (st.subst ((E.proof db (run U db st n)).closing.comp E.sub))
+        (E.proof db (run U db st n)).close := by
+  intro E hE hd
+  obtain ⟨hv, he⟩ := soundness_valid U db st n E hE
+  exact close_isProof db st E.sub _ hv he hd
 
 /-- Generality: the proof of an entry at the root is more general than every proof of
 an instance of the statement that is congruent to it. -/

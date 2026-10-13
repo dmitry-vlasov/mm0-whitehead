@@ -29,7 +29,7 @@ def main (args : List String) : IO UInt32 := do
         return 1
     let task := db.task idx
     let (dbm, names) := Convert.database db task
-    let st := Convert.statement task
+    let st := Convert.statement db task
     let terms := db.terms.map (·.name)
     let n := rounds.toNat!
     let start ← IO.monoMsNow

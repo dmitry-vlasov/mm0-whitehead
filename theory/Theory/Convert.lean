@@ -47,8 +47,13 @@ def database (db : Whitehead.Prove.Db) (task : Whitehead.Prove.Task) : Database 
     a.rank < Whitehead.Prove.rankLimit task.limit && a.pseudo.isNone
   ({ asserts := usable.map assertion }, (usable.map (·.name)).toArray)
 
-def statement (task : Whitehead.Prove.Task) : Statement :=
+/-- The task as the statement. A sort allows dummies unless it is `strict` or `free`
+(the sort table of the proof file). -/
+def statement (db : Whitehead.Prove.Db) (task : Whitehead.Prove.Task) : Statement :=
   { consts := { ty := fun k => ty (task.consts[k]!).ty, deps := fun k => (task.consts[k]!).names.toList.toFinset },
+    dummies := fun s => match db.file.sorts[s]? with
+      | some d => !d.isStrict && !d.isFree
+      | none => false,
     hyps := task.premises.toList.map exp, concl := exp task.goal }
 
 /-- An expression for a reader: terms by name, constants as `c0`, variables as `?7`. -/
