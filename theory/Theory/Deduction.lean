@@ -22,9 +22,16 @@ structure Assertion where
 structure Database where
   asserts : List Assertion
 
-/-- A well-formed database: the first binder of every pair is bound, a name. -/
-def Database.WF (db : Database) : Prop :=
-  ∀ A ∈ db.asserts, ∀ p ∈ A.pairs, p.1.ty.name = true
+/-- A well-formed assertion: its conclusion, hypotheses and pairs are over its
+binders, and the first binder of every pair is bound, a name. -/
+structure Assertion.WF (A : Assertion) : Prop where
+  concl_vars : A.concl.vars ⊆ A.vars.toFinset
+  hyps_vars : ∀ h ∈ A.hyps, h.vars ⊆ A.vars.toFinset
+  pairs_vars : ∀ p ∈ A.pairs, p.1 ∈ A.vars ∧ p.2 ∈ A.vars
+  pairs_bound : ∀ p ∈ A.pairs, p.1.ty.name = true
+
+/-- A well-formed database: every assertion is. -/
+def Database.WF (db : Database) : Prop := ∀ A ∈ db.asserts, A.WF
 
 /-- The statement being proved: its variables as constants (`Consts`), the sorts whose
 dummies a proof may use (`mm0.md`: neither `strict` nor `free`), its hypotheses and
@@ -152,6 +159,11 @@ end
 
 theorem expr_mem_exprs (db : Database) (T : PTree) : T.expr ∈ T.exprs db := by
   cases T <;> simp [expr, exprs]
+
+theorem condsList_eq_flatMap (db : Database) :
+    ∀ cs : List PTree, condsList db cs = cs.flatMap (conds db)
+  | [] => rfl
+  | t :: ts => by simp [condsList, condsList_eq_flatMap db ts]
 
 theorem mem_condsList (db : Database) :
     ∀ (cs : List PTree) (k : Cond), k ∈ condsList db cs ↔ ∃ c ∈ cs, k ∈ c.conds db

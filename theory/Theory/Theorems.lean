@@ -20,7 +20,7 @@ open State
 /-- Soundness, the schematic form: the proof of an entry at the root is valid for the
 statement under the answer, and proves its conclusion. -/
 theorem soundness_valid (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
-    ∀ E ∈ (run U db st n).rootEntries,
+    ∀ E ∈ (run U db st n).rootEntries U st,
       Valid db (st.subst E.sub) (E.proof db (run U db st n)) ∧
       (E.proof db (run U db st n)).expr = E.sub.apply st.concl := by
   sorry
@@ -29,7 +29,7 @@ theorem soundness_valid (U : Unification) (db : Database) (st : Statement) (n : 
 statement under the answer and the closing, when the sorts of the variables left allow
 dummies (`close_isProof`, `Closing.lean`). -/
 theorem soundness (U : Unification) (db : Database) (hwf : db.WF) (st : Statement) (n : ℕ) :
-    ∀ E ∈ (run U db st n).rootEntries,
+    ∀ E ∈ (run U db st n).rootEntries U st,
       (∀ v ∈ (E.proof db (run U db st n)).allVars db, st.dummies v.ty.sort = true) →
       IsProof db (st.subst (((E.proof db (run U db st n)).closing db).comp E.sub))
         ((E.proof db (run U db st n)).close db) := by
@@ -40,7 +40,7 @@ theorem soundness (U : Unification) (db : Database) (hwf : db.WF) (st : Statemen
 /-- Generality: the proof of an entry at the root is more general than every proof of
 an instance of the statement that is congruent to it. -/
 theorem generality (U : Unification) (db : Database) (st : Statement) (n : ℕ) :
-    ∀ E ∈ (run U db st n).rootEntries, ∀ (σ : Subst) (π : PTree),
+    ∀ E ∈ (run U db st n).rootEntries U st, ∀ (σ : Subst) (π : PTree),
       IsProof db (st.subst σ) π → π.Congruent (E.proof db (run U db st n)) →
       π.IsInstance (E.proof db (run U db st n)) := by
   sorry
@@ -49,7 +49,7 @@ theorem generality (U : Unification) (db : Database) (st : Statement) (n : ℕ) 
 an instance of the proof of an entry at the root congruent to it. -/
 theorem completeness (U : Unification) (db : Database) (st : Statement) (σ : Subst) (π : PTree)
     (hπ : IsProof db (st.subst σ) π) :
-    ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries,
+    ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st,
       π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance (E.proof db (run U db st n)) := by
   sorry
 

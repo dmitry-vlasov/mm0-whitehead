@@ -1,7 +1,8 @@
 /-
 The reference engine (`docs/THEORY.md`, "The reference engine"): the proof variant tree
 and the substitution proof trees of the draft's Definitions 4.1 and 4.2, computed round
-by round, breadth first, every entry kept. Pure, and it runs.
+by round, breadth first, every entry kept. Pure, and it runs; written as folds and
+recursions, so that the invariants (`Spt.lean`) can be proved about it.
 
 One departure from the draft's wording of Definition 4.2: the entry of an assertion
 node joins the children's answers *with the node's own unifier* `θ_a`; without it the
@@ -49,13 +50,10 @@ structure Entry where
   conds : List Cond
   deriving Inhabited
 
+/-- The proof variant tree: its nodes, and the number of the next fresh variable. -/
 structure State where
   enodes : Array ENode
   anodes : Array ANode
-  /-- The SPT entries of each expression node and of each assertion node. -/
-  spt : Array (List Entry)
-  sptA : Array (List Entry)
-  /-- The number of the next fresh variable. -/
   fresh : ℕ
 
 namespace State
@@ -65,47 +63,52 @@ above every variable of the statement. -/
 def init (st : Statement) : State where
   enodes := #[{ expr := st.concl, parent := none, expanded := false }]
   anodes := #[]
-  spt := #[[]]
-  sptA := #[]
   fresh := (st.concl.vars ∪ (st.hyps.map Exp.vars).foldr (· ∪ ·) ∅).sup Var.id + 1
 
 /-- The renamed variable of an assertion node. -/
 def renamed (base : ℕ) (x : Var) : Var := ⟨base + x.id, x.ty⟩
 
-/-- Expands one expression node against every assertion of the database: an assertion
-node for each whose renamed conclusion unifies with the expression, with the
-hypotheses under the unifier as new expression nodes. -/
-def expandNode (U : Unification) (db : Database) (i : ℕ) (s : State) : State := Id.run do
-  let mut s := { s with enodes := s.enodes.modify i fun n => { n with expanded := true } }
-  let e := s.enodes[i]!.expr
-  for a in [0:db.asserts.length] do
-    let A := db.asserts[a]!
+/-- The conditions of an assertion node: the pairs of its assertion, renamed, under
+its unifier. -/
+def nodeConds (A : Assertion) (b : ℕ) (θ : Subst) : List Cond :=
+  A.pairs.map fun p => (θ.apply (.var (renamed b p.1)), θ.apply (.var (renamed b p.2)))
+
+/-- Tries one assertion at an expression node: an assertion node if the renamed
+conclusion unifies with the expression, with the hypotheses under the unifier as new
+expression nodes. -/
+def tryAssertion (U : Unification) (db : Database) (i a : ℕ) (s : State) : State :=
+  match db.asserts[a]? with
+  | none => s
+  | some A =>
     let b := s.fresh
-    match U.mgu [(e, A.concl.rename b)] with
-    | none => pure ()
+    match U.mgu [(s.enodes[i]!.expr, A.concl.rename b)] with
+    | none => s
     | some θ =>
-      let ai := s.anodes.size
-      let mut children : List ℕ := []
-      let mut enodes := s.enodes
-      for j in [0:A.hyps.length] do
-        children := children ++ [enodes.size]
-        enodes := enodes.push { expr := θ.apply (A.hyps[j]!.rename b), parent := some (ai, j), expanded := false }
-      let conds := A.pairs.map fun p => (θ.apply (.var (renamed b p.1)), θ.apply (.var (renamed b p.2)))
-      s := { s with enodes,
-                    anodes := s.anodes.push { parent := i, assertion := a, base := b, sub := θ, children, conds },
-                    spt := s.spt ++ Array.replicate A.hyps.length [],
-                    sptA := s.sptA.push [],
-                    fresh := b + (A.vars.map (·.id)).foldl max 0 + 1 }
-  return s
+      let j := s.anodes.size
+      let n := s.enodes.size
+      let newE : List ENode := (List.range A.hyps.length).map fun k =>
+        { expr := θ.apply (A.hyps[k]!.rename b), parent := some (j, k), expanded := false }
+      { enodes := s.enodes ++ newE.toArray,
+        anodes := s.anodes.push
+          { parent := i, assertion := a, base := b, sub := θ,
+            children := (List.range A.hyps.length).map (n + ·), conds := nodeConds A b θ },
+        fresh := b + (A.vars.map (·.id)).foldl max 0 + 1 }
+
+/-- Expands one expression node against every assertion of the database. -/
+def expandNode (U : Unification) (db : Database) (i : ℕ) (s : State) : State :=
+  let s := { s with enodes := s.enodes.modify i fun n => { n with expanded := true } }
+  (List.range db.asserts.length).foldl (fun s a => tryAssertion U db i a s) s
 
 /-- One round of expansion: every expression node not yet expanded. The nodes made in
 the round wait for the next one, which is breadth first. -/
-def expandAll (U : Unification) (db : Database) (s : State) : State := Id.run do
-  let todo := (List.range s.enodes.size).filter fun i => !s.enodes[i]!.expanded
-  let mut s := s
-  for i in todo do
-    s := expandNode U db i s
-  return s
+def expandAll (U : Unification) (db : Database) (s : State) : State :=
+  ((List.range s.enodes.size).filter fun i => !s.enodes[i]!.expanded).foldl
+    (fun s i => expandNode U db i s) s
+
+/-- The state after `n` rounds. -/
+def run (U : Unification) (db : Database) (st : Statement) : ℕ → State
+  | 0 => init st
+  | n + 1 => expandAll U db (run U db st n)
 
 /-- The leaf entries of an expression node: the hypotheses of the statement that it
 unifies with (Definition 4.2, a hypothesis used as a fact). -/
@@ -131,31 +134,27 @@ def anodeEntries (U : Unification) (c : Consts) (j : ℕ) (a : ANode) (childEntr
         some { tree := .node j (tup.map (·.tree)), sub := θ, conds }
       else none
 
-/-- The SPT sets of every node, computed from scratch: expression nodes from the last
-made to the root, since the children of an assertion node were made after the node's
-own expression node. -/
-def propagate (U : Unification) (st : Statement) (s : State) : State := Id.run do
-  let mut s := { s with spt := Array.replicate s.enodes.size [], sptA := Array.replicate s.anodes.size [] }
-  for k in [0:s.enodes.size] do
-    let i := s.enodes.size - 1 - k
-    let aChildren := (List.range s.anodes.size).filter fun j => s.anodes[j]!.parent == i
-    for j in aChildren do
-      let a := s.anodes[j]!
-      s := { s with sptA := s.sptA.set! j (anodeEntries U st.consts j a (a.children.map fun c => s.spt[c]!)) }
-    s := { s with spt := s.spt.set! i (leafEntries U st i s.enodes[i]!.expr ++ aChildren.flatMap fun j => s.sptA[j]!) }
-  return s
+/-- The assertion nodes whose expression node is `i`. -/
+def aChildren (s : State) (i : ℕ) : List ℕ :=
+  (List.range s.anodes.size).filter fun j => s.anodes[j]!.parent == i
 
-/-- A round: expand, then propagate. -/
-def step (U : Unification) (db : Database) (st : Statement) (s : State) : State :=
-  propagate U st (expandAll U db s)
+/-- The SPT set of an expression node, down to a depth: its leaf entries, and the
+entries of its assertion nodes, each from the SPT sets of the node's children. The
+depth of the tree is below the number of its expression nodes, so `enodes.size` is
+depth enough (`rootEntries`). -/
+def sptE (U : Unification) (st : Statement) (s : State) : ℕ → ℕ → List Entry
+  | 0, _ => []
+  | fuel + 1, i =>
+    leafEntries U st i s.enodes[i]!.expr ++ (aChildren s i).flatMap fun j =>
+      anodeEntries U st.consts j s.anodes[j]! (s.anodes[j]!.children.map fun c => sptE U st s fuel c)
 
-/-- The state after `n` rounds. -/
-def run (U : Unification) (db : Database) (st : Statement) : ℕ → State
-  | 0 => init st
-  | n + 1 => step U db st (run U db st n)
+/-- The SPT set of an assertion node. -/
+def sptA (U : Unification) (st : Statement) (s : State) (fuel j : ℕ) : List Entry :=
+  anodeEntries U st.consts j s.anodes[j]! (s.anodes[j]!.children.map fun c => sptE U st s fuel c)
 
 /-- The entries at the root: the answers. -/
-def rootEntries (s : State) : List Entry := s.spt[0]!
+def rootEntries (U : Unification) (st : Statement) (s : State) : List Entry :=
+  sptE U st s s.enodes.size 0
 
 /-- The substitution of a step for the binders of its assertion: what the renamed
 binder gets under `θ_a` and then the answer `θ`. -/

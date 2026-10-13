@@ -121,7 +121,7 @@ theorem conds_name {db : Database} (hwf : db.WF) {st : Statement} {T : PTree} (h
       rw [hA] at hk
       simp only [List.mem_map] at hk
       obtain ⟨p, hp, rfl⟩ := hk
-      exact (hθ p.1).2 (hwf A (List.mem_of_getElem? hA) p hp)
+      exact (hθ p.1).2 ((hwf A (List.mem_of_getElem? hA)).pairs_bound p hp)
     · rw [PTree.mem_condsList] at hk
       obtain ⟨c, hc, hk⟩ := hk
       exact ih c hc k hk

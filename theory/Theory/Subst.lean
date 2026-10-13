@@ -183,3 +183,26 @@ theorem constsList_applyList (θ : Subst) :
 end
 
 end Theory.Subst
+
+namespace Theory.Subst
+
+theorem comp_assoc (θ η σ : Subst) : (θ.comp η).comp σ = θ.comp (η.comp σ) := by
+  apply ext
+  funext v
+  show (θ.comp η).apply (σ.f v) = θ.apply ((η.comp σ).f v)
+  rw [apply_comp]
+  rfl
+
+theorem comp_id (θ : Subst) : θ.comp Subst.id = θ := by
+  apply ext
+  funext v
+  show θ.apply (Subst.id.f v) = θ.f v
+  rfl
+
+theorem id_comp (θ : Subst) : Subst.id.comp θ = θ := by
+  apply ext
+  funext v
+  show Subst.id.apply (θ.f v) = θ.f v
+  exact apply_id _
+
+end Theory.Subst

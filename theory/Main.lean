@@ -34,13 +34,13 @@ def main (args : List String) : IO UInt32 := do
     let n := rounds.toNat!
     let start ← IO.monoMsNow
     let s := State.run Unify.postulate dbm st n
-    let entries := (s.spt.map (·.length)).foldl (· + ·) 0
+    let root := s.rootEntries Unify.postulate st
     let done ← IO.monoMsNow
     IO.println s!"{path}: {db.asserts[idx]!.name}, {dbm.asserts.length} assertions, {n} rounds: \
       {s.enodes.size} expression nodes, {s.anodes.size} assertion nodes, \
-      {entries} entries, {s.rootEntries.length} proofs at the root, in {done - start} ms"
+      {root.length} proofs at the root, in {done - start} ms"
     IO.println s!"  goal {Convert.expText terms st.concl}; hypotheses {st.hyps.map (Convert.expText terms)}"
-    for E in s.rootEntries do
+    for E in root do
       IO.println s!"  {Convert.proofText names terms (E.proof dbm s)}"
     return 0
   | _ =>
