@@ -28,17 +28,32 @@ The MM0 repository has two Lean 3 files for the semantics:
   the logic. The checks the machine needs beyond `mm0b.lean` are exactly those whose
   absence would break that theorem, which is how they are justified.
 
-Two points of `mm0.lean` to keep in mind when reading the port: `env.extend.defn_def`
-builds on `E2` on both sides where `E1` was presumably meant (ported as written; see
-milestone V6), and `sexpr.ok_bi'` is defined but not used (ported as written).
+Four points of `mm0.lean` to keep in mind when reading the port. `safe_subst`, the
+disjointness conditions of a theorem step, reads the binders `u` and `v` and the
+dependency of `v` on `u` in the context of the proof being checked, where the binders
+of the theorem being applied are meant: `mm0.mm0`'s `VerifyProofThm` has the same text
+against its own comment ("the disjoint variable conditions of the theorem are honored
+by the substitution"), `mm0.md` states the rule over the theorem's binders, and the
+three implementations check the theorem's binders; against the text as written the
+machine could not be proved sound, so the port corrects it (the second deviation): the
+binders and their dependencies are read in the theorem's context, the substituted
+expression's variables in the proof's. `conv'` has no
+transitivity rule, where the primary specification has the certificate `CTrans`
+(`mm0.mm0`, `VerifyConvTrans`); the `Unfold` command of a proof file replaces an
+obligation on an application by one on its unfolding, which `conv'.unfold` alone
+cannot justify (it concludes the unfolding from the application, not the converse);
+so the port adds `conv'.trans`, its one deviation, as the judge is the primary
+specification. `env.extend.defn_def` builds on `E2` on both sides where `E1` was
+presumably meant (ported as written; see milestone V6). `sexpr.ok_bi'` is defined but
+not used (ported as written).
 
 ## Conventions
 
 - The port is literal: the same names (snake case, as the original, so that the two
   files can be read side by side), the same order, Lean 3's `list.nth` as `[i]?`,
-  `inth` as `getD`, `list.forall₂` as `List.Forall₂`, `set` as `Set`. Nothing is added
-  to `Spec/Mm0.lean`; whatever the proofs need about the semantics is in separate
-  files.
+  `inth` as `getD`, `list.forall₂` as `List.Forall₂`, `set` as `Set`. Nothing but
+  `conv'.trans` and the correction of `safe_subst` is changed in `Spec/Mm0.lean`; whatever the proofs need about the
+  semantics is in separate files.
 - What stays trusted at the end: Lean's kernel, the fidelity of the port (400 lines,
   reviewed side by side), the `.mm0` front end (lexer, parser, elaborator: the text
   grammar has no formalization, and a proof against our own grammar would only move the

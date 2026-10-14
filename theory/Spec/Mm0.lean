@@ -2,9 +2,13 @@
 A port of `mm0-lean/mm0/mm0.lean` of the MM0 repository (Lean 3, mathlib of 2020) to
 Lean 4, line for line: the formal semantics of MM0 environments and proofs, the Lean
 form of `examples/mm0.mm0`. The names are the original's, so that the two can be read
-side by side; nothing is added (`docs/VERIFIER-THEORY.md`). Lean 3's `list.nth` is
-`[i]?`, `inth` is `getD`, `list.forall₂` is `List.Forall₂`, `set` is `Set`; the
-original's `let Γ := … in` of `env.proof'.thm` is written out.
+side by side (`docs/VERIFIER-THEORY.md`). Lean 3's `list.nth` is `[i]?`, `inth` is
+`getD`, `list.forall₂` is `List.Forall₂`, `set` is `Set`; the original's `let Γ := … in`
+of `env.proof'.thm` is written out. One rule is added, `conv'.trans`: the primary
+specification `examples/mm0.mm0` has the certificate `CTrans` (`VerifyConvTrans`), and
+`mm0.lean` omits it; the judge is the primary specification, and the `Unfold` command
+of a proof file needs it. One definition is corrected, `safe_subst`: see the comment
+there. Nothing else is changed.
 -/
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.List.Forall2
@@ -200,6 +204,8 @@ def sexpr.subst (σ : List sexpr) : sexpr → sexpr
 inductive conv' (E : env) (Γ : ctx) : sexpr → sexpr → List binder → sort_id → Prop
   | refl {e args s} : sexpr.ok' E Γ e args s → conv' E Γ e e args s
   | symm {e1 e2 s} : conv' E Γ e1 e2 [] s → conv' E Γ e2 e1 [] s
+  -- `CTrans` of `mm0.mm0`, absent from `mm0.lean`
+  | trans {e1 e2 e3 s} : conv' E Γ e1 e2 [] s → conv' E Γ e2 e3 [] s → conv' E Γ e1 e3 [] s
   | cong {f1 f2 bi bis x1 x2 s} :
     sexpr.ok_bi E Γ x1 bi → sexpr.ok_bi E Γ x2 bi →
     conv' E Γ f1 f2 (bi :: bis) s →
@@ -215,9 +221,14 @@ inductive conv' (E : env) (Γ : ctx) : sexpr → sexpr → List binder → sort_
 def conv (E : env) (Γ : ctx) (e1 e2 : sexpr) (s : sort_id) : Prop :=
   conv' E Γ e1 e2 [] s
 
-def safe_subst (Γ : ctx) (σ : List sexpr) : Prop :=
-  ∀ u v, (∃ s, Γ[u]? = some (binder.bound s)) →
-    v < Γ.length → ¬ sexpr.has_var Γ (sexpr.var v) u →
+-- The original reads the binders `u` and `v` and the dependency of `v` on `u` in `Γ`,
+-- the context of the proof, where `args`, the binders of the theorem applied, are
+-- meant (`mm0.mm0`, `VerifyProofThm`, has the same, against its own comment, "the
+-- disjoint variable conditions of the theorem", and `mm0.md`); the substituted
+-- expression `e2` lives in `Γ`, which stays. The second deviation of the port.
+def safe_subst (Γ args : ctx) (σ : List sexpr) : Prop :=
+  ∀ u v, (∃ s, args[u]? = some (binder.bound s)) →
+    v < args.length → ¬ sexpr.has_var args (sexpr.var v) u →
     ∀ y e2, σ[u]? = some (sexpr.var y) → σ[v]? = some e2 →
       ¬ sexpr.has_var Γ e2 y
 
@@ -227,7 +238,7 @@ inductive proof (E : env) (Γ : ctx) (Hs : Set sexpr) : sexpr → Prop
   | thm {args hs ret σ} :
     E.get_thm args hs ret →
     List.Forall₂ (sexpr.ok_bi E Γ) σ args →
-    safe_subst Γ σ →
+    safe_subst Γ args σ →
     (∀ h ∈ hs, proof E Γ Hs (sexpr.subst σ h)) →
     proof E Γ Hs (sexpr.subst σ ret)
   | conv {e1 e2 s} : conv E Γ e1 e2 s → proof E Γ Hs e1 → proof E Γ Hs e2
