@@ -641,7 +641,12 @@ its proofs, not its nodes.
     identified, a legitimate answer that completeness requires — is found. After the
     three changes the keys agree at every node of both fixtures, with no, one and two
     metavariables, at 3 and 2 rounds; the main test suite passes with the two unifier
-    tests that encoded the positional choice updated.
+    tests that encoded the positional choice updated. On the corpus, with the first
+    300 assertions as the database and every 25th theorem (`peano`: 108 theorems,
+    `mm0`: 195, `x86`: 306) and with the first 100 and every 100th of set.mm (391 of
+    478, the rest over the tuple cap), at 2 rounds, the keys agree at every node —
+    up to 12,000 nodes compared for one theorem; the `peano` sample with its first
+    variable a metavariable agreed on the 21 theorems it reached in 50 minutes.
 16. The conditions: milestones 13 and 14 for databases with pairs. What is missing is
     a theory of renamings: two answers that are instances of each other on a set of
     variables differ there by an injective renaming, and `Cond.Holds` is invariant

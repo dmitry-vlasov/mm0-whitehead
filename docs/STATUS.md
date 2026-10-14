@@ -62,7 +62,8 @@ the keys at every node of the production engine's tree with the keyed engine's; 
 found that the two unifiers oriented a binding between a metavariable and a fresh
 variable differently — both now bind the fresher variable — and a production fault
 in premise matching with two metavariables swapped (`Binds.bind`), fixed; the keys
-agree at every node of both fixtures in every metavariable mode. Open: the conditions
+agree at every node of both fixtures in every metavariable mode, and of the corpus
+samples of `peano`, `mm0`, `x86` and set.mm at 2 rounds. Open: the conditions
 (milestone 16, a theory of renamings). `cd theory && lake build` has no `sorry`.
 
 ### Phase 1 acceptance
