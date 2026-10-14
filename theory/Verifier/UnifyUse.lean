@@ -70,14 +70,17 @@ theorem unify_defn {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : Sto
     (hu : Unify c st .defn (argHeap args) us [e] S hs S' hs') :
     ∃ v ds σ', decodeDef terms args.length us = some (v, ds) ∧ args.map (toSexpr st.store) <+: σ' ∧
       σ'.length = args.length + ds.length ∧ DummiesCorr st.store args.length σ' ds ∧
-      toSexpr st.store e = sexpr.subst σ' v ∧ sexpr.VarsLt v σ'.length := by
-  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, _⟩ :=
+      toSexpr st.store e = sexpr.subst σ' v ∧ sexpr.VarsLt v σ'.length ∧
+      ∃ H', DummyNodes st args.length σ' ds (argHeap args) H' := by
+  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, _, hdn⟩ :=
     (unify_decode hwf hterms hprefix args.length (2 * us.length + 2)).1 us (by omega) .defn e [] (argHeap args)
       (initHeap args.length) [] (args.map (toSexpr st.store)) S hs S' hs' hu (heapCorr_init _ _ _) (by simp)
       (fun j s h => by simp at h)
   have := unify_defn_rest hrest
   subst this
-  refine ⟨x, ds', σ', ?_, hout.σpre, hout.σlen, hout.dummies, hsx, hvl⟩
+  refine ⟨x, ds', σ', ?_, hout.σpre, hout.σlen, hout.dummies, hsx, hvl, H',
+    hdn (argHeap args) ⟨List.prefix_rfl, [], rfl, fun j hj => by simp at hj, fun j hj => by simp at hj,
+      fun j hj => by simp at hj⟩⟩
   simp [decodeDef, hdec]
 
 /-! ### Theorem mode -/
@@ -97,7 +100,7 @@ theorem unify_thm_hyps {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms :
     | nil _ _ _ _ _ => exact ⟨[], [], by simp [decodeHyps], by simp, List.Forall₂.nil⟩
     | hyp_thm _ us' e' S0 _ _ _ hu' =>
       simp only [List.length_cons] at hf
-      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, _, hu2, hdm⟩ :=
+      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, _, hu2, hdm, -⟩ :=
         (unify_decode hwf hterms hprefix nargs fuel).1 us' (by omega) .thm e' [] H heapS [] σ S0 hs S' hs' hu'
           (heapCorr_any hcorr hnf) (by simp [hσ]) (fun j s h => by simp at h)
       have hds2 : ds2 = [] := hdm (by decide)
@@ -122,7 +125,7 @@ theorem unify_thm {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : Stor
       S = ps.map El.proof ++ S' ∧
       List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst (args.map (toSexpr st.store)) h) ps hl := by
   set σ := args.map (toSexpr st.store) with hσdef
-  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, _, hrest, hdm⟩ :=
+  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, _, hrest, hdm, -⟩ :=
     (unify_decode hwf hterms hprefix args.length (2 * us.length + 2)).1 us (by omega) .thm e [] (argHeap args)
       (initHeap args.length) [] σ S [] S' [] hu (heapCorr_init _ _ _) (by simp [hσdef]) (fun j s h => by simp at h)
   have hds : ds' = [] := hdm (by decide)
@@ -155,7 +158,7 @@ theorem unify_end_hyps {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms :
       exact ⟨[], by simp [decodeHyps], List.Forall₂.nil⟩
     | hyp_end _ us' e' _ hs0 _ _ hu' =>
       simp only [List.length_cons] at hf
-      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, hvl, hu2, hdm⟩ :=
+      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, hvl, hu2, hdm, -⟩ :=
         (unify_decode hwf hterms hprefix nargs fuel).1 us' (by omega) .thmEnd e' [] H heapS [] σ S hs0 S' hs' hu'
           (heapCorr_any hcorr hnf) (by simp [hσ]) (fun j s h => by simp at h)
       have hds2 : ds2 = [] := hdm (by decide)
@@ -179,7 +182,7 @@ theorem unify_end {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : Stor
       List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst (args.map (toSexpr st.store)) h ∧
         sexpr.VarsLt h args.length) hyps.reverse hl := by
   set σ := args.map (toSexpr st.store) with hσdef
-  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, hdm⟩ :=
+  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, hdm, -⟩ :=
     (unify_decode hwf hterms hprefix args.length (2 * us.length + 2)).1 us (by omega) .thmEnd e [] (argHeap args)
       (initHeap args.length) [] σ [] hyps [] [] hu (heapCorr_init _ _ _) (by simp [hσdef]) (fun j s h => by simp at h)
   have hds : ds' = [] := hdm (by decide)

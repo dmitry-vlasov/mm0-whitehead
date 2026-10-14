@@ -8,8 +8,6 @@ namespace Verifier
 
 open mm0
 
-/-- The dependencies of node `p`, empty if there is none. -/
-def depsAt (st : State) (p : ℕ) : Finset ℕ := ((st.ty p).map fun ty : Ty => ty.deps).getD ∅
 
 /-- What `thmDisjoint` has seen after the first `m` positions. -/
 structure Seen (st : State) (bs : List Binder) (ps : List ℕ) (m : ℕ) (seen : List (ℕ × Finset ℕ))

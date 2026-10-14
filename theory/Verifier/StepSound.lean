@@ -69,7 +69,7 @@ theorem unfold_ob (hW : WorldOk W c allTerms bs D) {st : State} (hwf : StoreWF s
     (hU : Unify c st .defn (args.map fun p => (p, false)) us [e2] S [] S [])
     (he2 : e2 < st.store.length) (hob : ObTrue W e2 e') : ObTrue W e e' := by
   have hu := hW.env.termsUnique
-  obtain ⟨v, ds', σ', hdec, hσpre, hσlen, hdum, hsx, -⟩ := unify_defn hwf hT hW.env.terms_prefix hU
+  obtain ⟨v, ds', σ', hdec, hσpre, hσlen, hdum, hsx, -, -⟩ := unify_defn hwf hT hW.env.terms_prefix hU
   obtain ⟨d0, hd0, hl0⟩ := hT e ty t args hn
   rw [hd] at hd0
   cases hd0

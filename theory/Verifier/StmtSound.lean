@@ -172,7 +172,7 @@ theorem term_stmt_sound {E : env} {c : Ctx} {allTerms : List TermDecl} (hE : Env
     have hx := run_ext hrun
     have hT' := storeTerms_run hrun hT
     rw [argsUheap_eq hL hx.heap] at hU
-    obtain ⟨v, ds, σ', hdec, hσpre, hσlen, hdum, hsx, hvl⟩ := unify_defn hfin.store.wf hT' hE.terms_prefix hU
+    obtain ⟨v, ds, σ', hdec, hσpre, hσlen, hdum, hsx, hvl, -⟩ := unify_defn hfin.store.wf hT' hE.terms_prefix hU
     simp only [List.length_range] at hdec hσlen hdum
     refine ⟨v, ds, hdec, ?_⟩
     -- the value's node, well-typed at the result sort in the final context

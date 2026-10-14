@@ -93,10 +93,6 @@ theorem Ext.refl (st : State) : Ext st st := ⟨List.prefix_rfl, List.prefix_rfl
 theorem Ext.trans {a b c : State} (h₁ : Ext a b) (h₂ : Ext b c) : Ext a c :=
   ⟨h₁.store.trans h₂.store, h₁.heap.trans h₂.heap, h₁.hyps.trans h₂.hyps⟩
 
-theorem prefix_ite {α : Type} (l : List α) (b : Bool) (x : α) : l <+: (if b then l ++ [x] else l) := by
-  cases b
-  · exact List.prefix_rfl
-  · exact List.prefix_append _ _
 
 theorem step_ext {c : Ctx} {cmd : ProofCmd} {st st' : State} (h : Step c cmd st st') : Ext st st' := by
   cases h
