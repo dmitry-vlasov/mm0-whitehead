@@ -9,13 +9,7 @@ namespace Verifier
 
 open mm0
 
-/-! ### Binders well-formed -/
-
-/-- What `LoadArgs` establishes of the binders: a bound binder's dependency set is its
-own number, a regular binder depends on bound binders before it. -/
-def BindersWF (bs : List Binder) : Prop :=
-  ∀ i b, bs[i]? = some b →
-    (b.bound = true → b.deps = {countBefore bs i}) ∧ (b.bound = false → ∀ k ∈ b.deps, k < countBefore bs i)
+/-! ### The count of bound binders -/
 
 theorem countBefore_mono (bs : List Binder) {i j : ℕ} (h : i ≤ j) : countBefore bs i ≤ countBefore bs j := by
   unfold countBefore

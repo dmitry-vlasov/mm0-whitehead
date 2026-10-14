@@ -12,6 +12,14 @@ namespace Verifier
 
 open mm0
 
+/-! ### Binders well-formed -/
+
+/-- What `LoadArgs` establishes of the binders: a bound binder's dependency set is its
+own number, a regular binder depends on bound binders before it. -/
+def BindersWF (bs : List Binder) : Prop :=
+  ∀ i b, bs[i]? = some b →
+    (b.bound = true → b.deps = {countBefore bs i}) ∧ (b.bound = false → ∀ k ∈ b.deps, k < countBefore bs i)
+
 /-! ### The environment and the tables -/
 
 /-- The environment a statement is checked in has the declarations of the context's
@@ -30,6 +38,10 @@ structure EnvHas (E : env) (c : Ctx) (allTerms : List TermDecl) : Prop where
     E.get_thm (d.args.map (Binder.toMm0 d.args)) hs concl
   /-- The table is a prefix of the whole one. -/
   terms_prefix : ∀ (t : ℕ) (d : TermDecl), c.terms[t]? = some d → allTerms[t]? = some d
+  /-- The declarations are well-formed: their binders, and the return type's
+  dependencies among their bound binders. -/
+  terms_wf : ∀ (t : ℕ) (d : TermDecl), c.terms[t]? = some d →
+    BindersWF d.args ∧ ∀ m ∈ d.ret.deps, m < (boundNumbers d.args).length
 
 /-! ### The type word -/
 
