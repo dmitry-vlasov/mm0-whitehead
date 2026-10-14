@@ -20,3 +20,4 @@ import Verifier.StepSound
 import Verifier.RunSound
 import Verifier.StmtSound
 import Verifier.FileSound
+import Verifier.Check
