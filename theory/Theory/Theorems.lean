@@ -18,6 +18,7 @@ import Theory.Completeness
 import Theory.ToD
 import Theory.OfD
 import Theory.KeyedCorr
+import Theory.KeyedExact
 
 namespace Theory
 
@@ -128,5 +129,50 @@ theorem keyed_completeness_np (U : Unification) (db : Database) (hwf : db.WF) (h
   have hs := run_inv U db hwf st n
   obtain ⟨K, hK, hsame⟩ := keyed_complete_np hs hwf hnp _ 0 hs.root_lt E hE
   exact ⟨n, E, hE, K, hK, hsame, hcong, hinst⟩
+
+
+/-- The keyed engine against the reference engine, exactly, for an oriented postulate
+(`docs/THEORY.md`, "The production engine", milestone 16): every keyed entry at the
+root has a reference entry at the root with its tree, whose restricted answer it is and
+whose conditions it has filtered to the pending ones; that entry's proof is valid for
+the statement under its answer (`soundness_valid`). -/
+theorem keyed_soundness (U : Unification) (hU : U.Oriented) (db : Database) (hwf : db.WF) (st : Statement) (n : ℕ) :
+    ∀ K ∈ keyedRoot U st (run U db st n), ∃ E ∈ (run U db st n).rootEntries U st,
+      K.tree = E.tree ∧ KEq st (run U db st n) 0 K E ∧ Valid db (st.subst E.sub) (E.proof db (run U db st n)) := by
+  intro K hK
+  have hs := run_inv U db hwf st n
+  obtain ⟨E, hE, ht, heq⟩ := keyed_sound_ex hU hs hwf _ 0 hs.root_lt K hK
+  exact ⟨E, hE, ht, heq, (soundness_valid U db hwf st n E hE).1⟩
+
+/-- The other direction: every proof of an instance of the statement is found, up to
+congruence and instance, by a reference entry at the root (`completeness`), and the
+keyed engine keeps an entry with that entry's restricted answer and pending
+conditions. -/
+theorem keyed_completeness (U : Unification) (hU : U.Oriented) (db : Database) (hwf : db.WF) (st : Statement)
+    (σ : Subst) (hσ : σ.Typed) (π : PTree) (hπ : IsProof db (st.subst σ) π) :
+    ∃ n : ℕ, ∃ E ∈ (run U db st n).rootEntries U st, ∃ K ∈ keyedRoot U st (run U db st n),
+      KEq st (run U db st n) 0 K E ∧
+      π.Congruent (E.proof db (run U db st n)) ∧ π.IsInstance db (E.proof db (run U db st n)) := by
+  obtain ⟨n, E, hE, hcong, hinst⟩ := completeness U db hwf st σ hσ π hπ
+  have hs := run_inv U db hwf st n
+  obtain ⟨K, hK, heq⟩ := keyed_complete_ex hU hs hwf _ 0 hs.root_lt E hE
+  exact ⟨n, E, hE, K, hK, heq, hcong, hinst⟩
+
+/-- The two, for the concrete unifier, which is oriented. -/
+theorem keyed_soundness_postulate (db : Database) (hwf : db.WF) (st : Statement) (n : ℕ) :
+    ∀ K ∈ keyedRoot Unify.postulate st (run Unify.postulate db st n),
+      ∃ E ∈ (run Unify.postulate db st n).rootEntries Unify.postulate st,
+        K.tree = E.tree ∧ KEq st (run Unify.postulate db st n) 0 K E ∧
+        Valid db (st.subst E.sub) (E.proof db (run Unify.postulate db st n)) :=
+  keyed_soundness Unify.postulate Unify.postulate_oriented db hwf st n
+
+theorem keyed_completeness_postulate (db : Database) (hwf : db.WF) (st : Statement) (σ : Subst) (hσ : σ.Typed)
+    (π : PTree) (hπ : IsProof db (st.subst σ) π) :
+    ∃ n : ℕ, ∃ E ∈ (run Unify.postulate db st n).rootEntries Unify.postulate st,
+      ∃ K ∈ keyedRoot Unify.postulate st (run Unify.postulate db st n),
+        KEq st (run Unify.postulate db st n) 0 K E ∧
+        π.Congruent (E.proof db (run Unify.postulate db st n)) ∧
+        π.IsInstance db (E.proof db (run Unify.postulate db st n)) :=
+  keyed_completeness Unify.postulate Unify.postulate_oriented db hwf st σ hσ π hπ
 
 end Theory

@@ -63,8 +63,16 @@ found that the two unifiers oriented a binding between a metavariable and a fres
 variable differently — both now bind the fresher variable — and a production fault
 in premise matching with two metavariables swapped (`Binds.bind`), fixed; the keys
 agree at every node of both fixtures in every metavariable mode, and of the corpus
-samples of `peano`, `mm0`, `x86` and set.mm at 2 rounds. Open: the conditions
-(milestone 16, a theory of renamings). `cd theory && lake build` has no `sorry`.
+samples of `peano`, `mm0`, `x86` and set.mm at 2 rounds. The conditions (milestone 16,
+reached 2026-10-14): for an oriented unification postulate — of two variables that fit
+each other the one with the larger number is bound, as both engines' unifiers do — an
+idempotent unifier is unique (`Oriented.lean`), so the keyed engine's substitutions are
+the reference engine's restricted ones exactly and its pending conditions the
+reference entry's filtered (`KeyedExact.lean`, `keyed_sound_ex`, `keyed_complete_ex`;
+`Theorems.lean`, `keyed_soundness`, `keyed_completeness`, and the two for the concrete
+unifier). Found on the way and fixed in both engines: the settled test of a condition
+ignored the images of the metavariables, where a name a node above can still replace
+may sit. All sixteen milestones are reached; `cd theory && lake build` has no `sorry`.
 
 ### Phase 1 acceptance
 

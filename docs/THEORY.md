@@ -654,36 +654,54 @@ its proofs, not its nodes.
     478, the rest over the tuple cap), at 2 rounds, the keys agree at every node —
     up to 12,000 nodes compared for one theorem; the `peano` sample with its first
     variable a metavariable agreed on the 21 theorems it reached in 50 minutes.
-16. The conditions: milestones 13 and 14 for databases with pairs. **Started on
-    2026-10-14.** The design (decision 16) does without a theory of renamings. What
-    made one seem necessary: a pending condition mentions variables that are not
+16. The conditions: milestones 13 and 14 for databases with pairs. **Reached on
+    2026-10-14**, for an oriented postulate (decision 16). What made a theory of
+    renamings seem necessary: a pending condition mentions variables that are not
     visible at its node, the fresh ones of the blocks below, and for those the two
     engines' answers are related only by which variable a unifier keeps of two it
-    makes equal. But both unifiers now keep the older one (milestone 15), and an
+    makes equal. But both unifiers keep the older one (milestone 15), and an
     idempotent unifier with that orientation is *unique*: of two such unifiers that
-    are instances of each other, each representative the first keeps the second
-    would have to bind to an older one and the first then bind that one back, which
-    the orientation forbids (`Oriented.lean`, `oriented_unique`). So, for an oriented
-    postulate (`Unification.Oriented`, which the concrete unifier has), the join of
-    restricted members *equals* the join of the full members on every variable that
-    the restriction did not drop (`joinAll_restrict_eq`, the exact form of
-    `joinAll_restrict_instance`: the restricted join extended by the dropped bindings
-    is an oriented idempotent unifier of the full problem, hence the full join), and
-    the keyed engine's substitutions are exactly the reference engine's restricted
-    ones, conditions included: every keyed entry has the reference entry with its tree
-    whose restricted answer it is and whose conditions it has filtered to the pending
-    ones, and conversely. The plan, in order: (a) the settled test: `judgeK` and the
-    production `judge` must take the name as still replaceable when it occurs in the
-    *image* of a visible variable under the answer, the metavariables' values
-    included, not only when it occurs in the expression's image or is a variable of
-    the statement — a name inside a metavariable's value can be identified above with
-    a name of the condition's expression (found by writing this proof; the fixtures
-    and samples did not show it); (b) `Oriented` and the uniqueness theorem, and the
-    concrete unifier oriented; (c) `joinAll_restrict_eq` and `joinAll_key_eq`; (d)
-    the exact correspondence with conditions, by the induction of milestones 13 and
-    14 with equalities in place of `SameOn`, the settled conditions preserved above by
-    `joinAll_mentions` since no member above mentions their name; (e) the root
-    theorems and the differential test rerun.
+    are instances of each other, a representative the first keeps the second would
+    have to bind to an older one, and the first then bind that one back, which the
+    orientation forbids (`Oriented.lean`, `oriented_unique`). So, for an oriented
+    postulate (`Unification.Oriented`, which the concrete unifier has,
+    `Unify.postulate_oriented`), the join of restricted members *equals* the join of
+    the full members on every variable the restriction did not drop
+    (`KeyedExact.lean`, `joinAll_restrict_eq`: the restricted join extended by the
+    dropped bindings is an oriented idempotent unifier of the full problem, hence
+    the full join), and the keyed engine's substitutions are exactly the reference
+    engine's restricted ones, conditions included. The theorems (`keyed_sound_ex`,
+    `keyed_complete_ex`; at the root `keyed_soundness`, `keyed_completeness` in
+    `Theorems.lean`, and `keyed_soundness_postulate`, `keyed_completeness_postulate`
+    for the concrete unifier): every keyed entry at a node has a reference entry at
+    the node with its tree, whose answer restricted to the node's visible variables
+    is the keyed entry's and whose conditions filtered to the pending ones are the
+    keyed entry's (`KEq`); and every reference entry has a keyed entry with its
+    restricted answer and pending conditions, the one kept for that key. The pending
+    test (`isPending`): the name is a variable in the image of the visible variables
+    under the answer, or a constant and the expression still has a variable. The
+    argument of the step: the two joins agree on the variables that no child's entry
+    dropped (`restrict_chain_eq`), and the variables of every condition judged at
+    the node are such (`cond_var_not_dropped`, `anode_cond_var_not_dropped`: a
+    variable of a child's condition is visible at the child or in a block of its
+    tree, which no other child's entry mentions); so the node's own conditions and
+    the children's pending ones are judged alike; and a condition settled at a child
+    has a name in a block below that the restricted entry does not mention, so the
+    join at the parent does not mention it either (`settled_at_parent`,
+    `joinAll_mentions`), the condition holds there as it held (`settled`), and it is
+    settled again at the parent. Dedup by key needs nothing more: the key is a
+    function of the reference entry (`dedupKeys_spec`). On the way: (a) the settled
+    test of `judgeK` and of the production `judge` looked only at the image of the
+    node's expression (the production engine) or at the statement's variables
+    themselves (`judgeK`): a name inside a metavariable's value, which a node above
+    can still identify with a name of the condition's expression, was judged settled
+    and the condition dropped; both now take the images of the visible variables, the
+    metavariables' values included (`visibleVars`, `imageVars`). The fixtures and the
+    corpus samples agree at every node in every metavariable mode after the change.
+    Only `propext`, `Classical.choice` and `Quot.sound` are used; `lake build` has no
+    `sorry`. Milestones 13 and 14 keep their general postulate and their weaker
+    statement up to instance each way; the exact statement subsumes them for an
+    oriented one.
 
 ## Questions
 
