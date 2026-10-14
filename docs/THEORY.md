@@ -550,6 +550,13 @@ arguments the first three rest on, stated about the reference engine's SPT sets.
 15. The second way (chosen with the user, see the question of the same day): the
     algorithm proved, the code tested against it at every node. The first way stays
     open for the day the engine's core is rewritten for other reasons.
+16. (2026-10-14) The correspondence with conditions is proved for an *oriented*
+    unification postulate — of two variables that fit each other the one with the
+    larger number is bound — rather than up to a renaming of variables: an oriented
+    idempotent unifier is unique, so the keyed engine's substitutions are the
+    reference engine's restricted ones exactly, and no renaming arises. The concrete
+    unifier is oriented since milestone 15, and the production engine's too; the
+    theorems of milestones 1 to 14 keep their general postulate.
 
 ### The keyed engine
 
@@ -647,14 +654,36 @@ its proofs, not its nodes.
     478, the rest over the tuple cap), at 2 rounds, the keys agree at every node —
     up to 12,000 nodes compared for one theorem; the `peano` sample with its first
     variable a metavariable agreed on the 21 theorems it reached in 50 minutes.
-16. The conditions: milestones 13 and 14 for databases with pairs. What is missing is
-    a theory of renamings: two answers that are instances of each other on a set of
-    variables differ there by an injective renaming, and `Cond.Holds` is invariant
-    under one; with it, a condition settled under the keyed answer is settled under
-    the reference answer (`spt_settled`'s argument), a violated one is violated under
-    both, and the pending ones agree up to the renaming. `judgeK` is already the
-    production engine's `judge`; the test of milestone 12 covers the conditions on the
-    fixtures and the corpus meanwhile.
+16. The conditions: milestones 13 and 14 for databases with pairs. **Started on
+    2026-10-14.** The design (decision 16) does without a theory of renamings. What
+    made one seem necessary: a pending condition mentions variables that are not
+    visible at its node, the fresh ones of the blocks below, and for those the two
+    engines' answers are related only by which variable a unifier keeps of two it
+    makes equal. But both unifiers now keep the older one (milestone 15), and an
+    idempotent unifier with that orientation is *unique*: of two such unifiers that
+    are instances of each other, each representative the first keeps the second
+    would have to bind to an older one and the first then bind that one back, which
+    the orientation forbids (`Oriented.lean`, `oriented_unique`). So, for an oriented
+    postulate (`Unification.Oriented`, which the concrete unifier has), the join of
+    restricted members *equals* the join of the full members on every variable that
+    the restriction did not drop (`joinAll_restrict_eq`, the exact form of
+    `joinAll_restrict_instance`: the restricted join extended by the dropped bindings
+    is an oriented idempotent unifier of the full problem, hence the full join), and
+    the keyed engine's substitutions are exactly the reference engine's restricted
+    ones, conditions included: every keyed entry has the reference entry with its tree
+    whose restricted answer it is and whose conditions it has filtered to the pending
+    ones, and conversely. The plan, in order: (a) the settled test: `judgeK` and the
+    production `judge` must take the name as still replaceable when it occurs in the
+    *image* of a visible variable under the answer, the metavariables' values
+    included, not only when it occurs in the expression's image or is a variable of
+    the statement — a name inside a metavariable's value can be identified above with
+    a name of the condition's expression (found by writing this proof; the fixtures
+    and samples did not show it); (b) `Oriented` and the uniqueness theorem, and the
+    concrete unifier oriented; (c) `joinAll_restrict_eq` and `joinAll_key_eq`; (d)
+    the exact correspondence with conditions, by the induction of milestones 13 and
+    14 with equalities in place of `SameOn`, the settled conditions preserved above by
+    `joinAll_mentions` since no member above mentions their name; (e) the root
+    theorems and the differential test rerun.
 
 ## Questions
 

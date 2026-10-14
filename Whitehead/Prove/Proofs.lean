@@ -67,6 +67,17 @@ inductive Verdict where
   /-- It can still go either way. -/
   | pending (c : Cond)
 
+/-- The variables that a node above can still replace, for `judge`: those of the
+parent's expression under `theta`, and those of the metavariables' values under it — a
+metavariable's binding goes up with every proof (`restrict`), so a name inside its
+value is not a dummy yet, and a node above can identify it with a name that occurs in
+a condition's expression. Found on 2026-10-14 by the proof of the keyed engine with
+conditions (`docs/THEORY.md`, milestone 16); before, only the expression's image was
+looked at. -/
+def visibleVars (task : Task) (theta : Subst) (e : Exp) : Std.HashSet Nat :=
+  task.metas.foldl (init := (theta.apply e).varIds) fun acc m =>
+    (theta.apply (Exp.ofVar m)).varIds.fold (fun acc v => acc.insert v) acc
+
 /-- Judges a condition. `x` must be a name: one node.
 
 - A bound variable of the task: violated if it occurs in `e`, or a regular variable of
@@ -305,7 +316,7 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
     match joined with
     | none => counters := { counters with notUnified := counters.notUnified + 1 }
     | some theta =>
-      match openConds env prop theta (theta.apply hypExpr).varIds row with
+      match openConds env prop theta (visibleVars env.task theta hypExpr) row with
       | none => counters := { counters with disjoint := counters.disjoint + 1 }
       | some conds =>
         if !consistent prop theta row then

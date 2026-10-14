@@ -44,16 +44,23 @@ theorem Subst.beq_iff {θ η : Subst} : Subst.beq θ η = true ↔ θ = η := by
 /-- The same key: the same restricted substitution and the same pending conditions. -/
 def KEntry.sameKey (K K' : KEntry) : Bool := Subst.beq K.sub K'.sub && K.conds == K'.conds
 
+/-- The variables of the images of `V` under `J`: what a node above can still replace,
+when `V` is what it sees. -/
+def imageVars (J : Subst) (V : Finset Var) : Finset Var := V.biUnion fun v => (J.f v).vars
+
 /-- What can be said of a condition under the join `J` at a node whose expression is
 `e`, as `judge` of the production engine says it: `none`, violated — the name occurs;
 `some false`, settled — the name is a variable that no node above can replace, since
-it is not among the variables of the expression under `J` nor of the statement, or a
-constant and the expression has no variable left; `some true`, pending. -/
+it is not among the variables of the images under `J` of the visible variables, those
+of the expression and of the statement (a name inside a metavariable's value can still
+be identified above with a name of the condition's expression; the image of the
+statement's variables was missing until 2026-10-14), or a constant and the expression
+has no variable left; `some true`, pending. -/
 def judgeK (c : Consts) (st : Statement) (e : Exp) (J : Subst) (k : Cond) : Option Bool :=
   let k' := Cond.apply J k
   if ¬ k'.Holds c then none
   else match k'.1 with
-    | .var y => if y ∈ (J.apply e).vars ∪ st.vars then some true else some false
+    | .var y => if y ∈ imageVars J (e.vars ∪ st.vars) then some true else some false
     | _ => if k'.2.vars = ∅ then some false else some true
 
 /-- The conditions of a new entry: `none` if one is violated; otherwise the pending

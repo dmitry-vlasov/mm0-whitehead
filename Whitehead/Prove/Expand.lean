@@ -154,7 +154,7 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
   if a.hyps.isEmpty then
     -- an assertion without premises is a proof at once, if its conditions on bound
     -- variables allow it
-    let visible := (prop.sub.apply env.hyps[prop.parent]!.expr).varIds
+    let visible := visibleVars env.task prop.sub env.hyps[prop.parent]!.expr
     match openConds env prop prop.sub visible #[] with
     | none => modify fun env => { env with counters := { env.counters with disjoint := env.counters.disjoint + 1 } }
     | some conds =>
