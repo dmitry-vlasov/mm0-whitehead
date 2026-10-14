@@ -23,6 +23,10 @@ def binderOf (a : Arg) : Binder := ⟨a.sort, a.bound, depsOf a.deps⟩
 def fileOf (f : MmbFile) : Except String File := do
   let terms ← (List.range f.terms.size).mapM fun t => do
     let args := (f.termArgs t).toList.map binderOf
+    -- the format's consistency of the table with the return type (MMB-NOTES.md section 9,
+    -- point 9): the machine reads the return type only
+    if f.terms[t]!.sort != (f.termRet t).sort then
+      throw s!"term {t}: the table's result sort differs from the return type's"
     let defn ← if f.terms[t]!.isDef then
         match f.termUnifyCmds t with
         | .ok us => pure (some us.toList)
@@ -40,7 +44,9 @@ def fileOf (f : MmbFile) : Except String File := do
       | .error e => throw s!"statement at 0x{Whitehead.Mmb.hex s.pos}: {e.msg}"
     let kind : StmtKind := match s.kind with
       | .sort => .sort
-      | .termDef isLocal => if f.terms[s.index]!.isDef then .defn isLocal else .term
+      -- a local statement is a def statement whatever the table says: on an entry that
+      -- is not a def the machine rejects it (MMB-NOTES.md section 9, point 7)
+      | .termDef isLocal => if f.terms[s.index]!.isDef || isLocal then .defn isLocal else .term
       | .ax => .ax
       | .thm isLocal => .thm isLocal
     pure ({ kind, body } : Stmt)

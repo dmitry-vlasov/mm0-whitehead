@@ -120,10 +120,32 @@ V3. Soundness of the machine for the logic: a proof stream the machine accepts f
 V3b. Well-formedness: a file the machine accepts declares an `env.ok` environment.
 V4. The reference verifier: an executable `check` over decoded statements, proved sound
     and complete for the machine relation; with V3, a verified checker of `.mmb` proofs.
+V4 is **reached on 2026-10-14**: `Verifier/Check.lean`, `checkFile`, with every
+    function proved sound for its relation, and `checkFile_correct : checkFile f = true
+    → ∃ E, toEnv f = some E ∧ env.proof' E`, a verified checker of decoded `.mmb`
+    files (standard axioms only). It is not fast — lists and finite sets — but it
+    checks the set.mm translation in 39 s.
 V5. The differential test: the reference verifier against `Whitehead/Verify`
     (`checkProofs`) statement by statement, on the corpus and on the mutants of
     `tests/mutate`; what it finds is fixed or recorded. (V5b, optional: the byte
-    decoder against the encoder, decode after encode the identity.)
+    decoder against the encoder, decode after encode the identity.) **Reached on
+    2026-10-14**: `lake exe verify-diff` (`theory/VDiff.lean`; the conversion of the
+    reader's output, `Verifier/OfMmb.lean`, is trusted). Results: the 49 verifier
+    fixtures agree, each rejection at the same statement; every corpus file agrees
+    (set.mm translation, peano, peano_hex, hol, set, mm0, x86, compiler,
+    hello_mmc accepted by both; hello_assembler rejected by both at its `Sorry`);
+    the mutant campaign of phase 2 — 31,800 mutants of six files, at its counts and
+    seeds — agrees on all 24,168 that the reader reads (2,723 accepted by both). It
+    found three things. A modelling error in the machine: `Hyp` pushed the proof onto
+    the stack, where the format only puts it on the heap, so every valid theorem with
+    hypotheses was rejected (fixed in the machine, the step function and the proof).
+    A fault in the conversion: a `LocalDef` statement on an entry that is not a def
+    was converted to a term statement (point 7 of `MMB-NOTES.md` section 9; fixed).
+    And a format check outside the machine: the term table's sort byte must equal
+    the return type's (point 9), which the machine never reads; the conversion checks
+    it, as it checks that every stream decodes. A rejection by the conversion counts
+    as agreeing with any rejection of the fast verifier: the reader decides it and is
+    trusted.
 V6. The match with the specification: `matchSpec` of `Whitehead/Verify/Spec.lean`
     accepts only when `env.extend` holds between the specification's environment and
     the proof file's.

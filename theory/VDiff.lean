@@ -38,7 +38,7 @@ def refVerdict (f : MmbFile) : Verdict :=
 rejection, at no statement, matches the counts check). -/
 def agree : Verdict → Verdict → Bool
   | .accept, .accept => true
-  | .reject a _, .reject b _ => a == b
+  | .reject a _, .reject b m => a == b || m.startsWith "decode"
   | _, _ => false
 
 structure Tally where

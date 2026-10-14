@@ -79,9 +79,13 @@ with three deviations recorded: `conv'.trans`, and the corrections of `safe_subs
 of `sexpr.free'` to `mm0.mm0`'s text), the stack machine of `.mmb` files as relations
 (`theory/Verifier/Machine.lean`, `mm0b.lean` completed), and its soundness for the
 logic proved: a proof file the machine accepts declares an environment all of whose
-theorems are proved (`file_sound`, milestone V3). Open: well-formedness (`env.ok`,
-V3b), the executable reference verifier and its differential test against
-`Whitehead/Verify` (V4, V5), the match with the specification (V6).
+theorems are proved (`file_sound`, milestone V3). An executable reference verifier
+is proved sound for the machine (`checkFile_correct`, V4: a `true` from it is
+`env.proof'` of the semantics), and agrees with the fast verifier statement by
+statement on every fixture, every corpus file and 24,168 mutants (`lake exe
+verify-diff`, V5); the test found a modelling error in the machine's `Hyp` and a
+fault in the conversion, both fixed. Open: well-formedness (`env.ok`, V3b) and the
+match with the specification (V6).
 
 ### Phase 1 acceptance
 
