@@ -148,4 +148,22 @@ V5. The differential test: the reference verifier against `Whitehead/Verify`
     trusted.
 V6. The match with the specification: `matchSpec` of `Whitehead/Verify/Spec.lean`
     accepts only when `env.extend` holds between the specification's environment and
-    the proof file's.
+    the proof file's. **Reached on 2026-10-14** in the form of milestones V4 and V5:
+    a reference matcher (`Verifier/Extend.lean`, `extendRev`) proved sound for
+    `env.extend`, and the end-to-end theorem `spec_proved : checkFile f = true →
+    toEnv f = some E → extendRev S.reverse E.reverse L = true → env.proof S` (standard
+    axioms only). `env.extend.defn_def` is corrected in the port to `mm0.mm0`'s
+    `EnvExtendDef` (the fourth deviation: the original builds the abstract def on the
+    later environment). The specification is converted by `Verifier/OfMm0.lean`
+    (trusted, like the front end it reads), with three choices of names and order the
+    semantics does not depend on: term ids are the proof file's numbers, a def's
+    dummies are numbered by first occurrence, a theorem's hypotheses are listed last
+    first, as the stream has them. `lake exe verify-diff x.mm0 x.mmb [--mutants N]`
+    compares `extendRev` with `matchSpec`: both accept every corpus pair (set.mm
+    translation, peano, peano_hex, hol, set, mm0, x86, hello_mmc, compiler), and they
+    agree on all 652 mutants of hol, set and peano that both proof checks accept (479
+    matched by both, 173 rejected by both).
+    What `spec_proved` gives is `EnvExtend` and `EnvFull` of `mm0.mm0`'s top-level
+    `ValidEnv spec := Env spec ∧ ∃ e, Env e ∧ EnvExtend spec e ∧ EnvFull e`; `Env e`,
+    the well-formedness of the proof file's environment, is milestone V3b, and
+    `Env spec` is the front end's (trusted).

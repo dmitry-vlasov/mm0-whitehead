@@ -84,8 +84,11 @@ is proved sound for the machine (`checkFile_correct`, V4: a `true` from it is
 `env.proof'` of the semantics), and agrees with the fast verifier statement by
 statement on every fixture, every corpus file and 24,168 mutants (`lake exe
 verify-diff`, V5); the test found a modelling error in the machine's `Hyp` and a
-fault in the conversion, both fixed. Open: well-formedness (`env.ok`, V3b) and the
-match with the specification (V6).
+fault in the conversion, both fixed. The match with the specification is proved the
+same way (`spec_proved`, V6: a file accepted and matched proves the specification,
+`env.proof`), and agrees with `matchSpec` on every corpus pair and 652 mutants. Open:
+well-formedness of the proof file's environment (`env.ok`, V3b), the remaining part
+of `mm0.mm0`'s `ValidEnv`.
 
 ### Phase 1 acceptance
 

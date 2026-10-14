@@ -7,8 +7,8 @@ side by side (`docs/VERIFIER-THEORY.md`). Lean 3's `list.nth` is `[i]?`, `inth` 
 of `env.proof'.thm` is written out. One rule is added, `conv'.trans`: the primary
 specification `examples/mm0.mm0` has the certificate `CTrans` (`VerifyConvTrans`), and
 `mm0.lean` omits it; the judge is the primary specification, and the `Unfold` command
-of a proof file needs it. Two definitions are corrected, `safe_subst` and
-`sexpr.free'`: see the comments there. Nothing else is changed.
+of a proof file needs it. Three definitions are corrected, `safe_subst`, `sexpr.free'`
+and `env.extend.defn_def`: see the comments there. Nothing else is changed.
 -/
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.List.Forall2
@@ -186,9 +186,12 @@ inductive env.extend : env → env → Prop
   | defn_skip {E1 E2 id a r o} :
     env.extend E1 E2 →
     env.extend E1 (E2 ++ [decl.defn id a r o])
+  -- the original has `E2` on the left, where `E1` is meant (`mm0.mm0`, `EnvExtendDef`:
+  -- the abstract def is added to the environment that the earlier part extends). The
+  -- fourth deviation of the port.
   | defn_def {E1 E2 id a r o} :
     env.extend E1 E2 →
-    env.extend (E2 ++ [decl.defn id a r none]) (E2 ++ [decl.defn id a r o])
+    env.extend (E1 ++ [decl.defn id a r none]) (E2 ++ [decl.defn id a r o])
   | thm_skip {E1 E2 a h r} :
     env.extend E1 E2 →
     env.extend E1 (E2 ++ [decl.thm a h r])
