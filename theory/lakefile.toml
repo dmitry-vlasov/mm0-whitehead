@@ -17,6 +17,12 @@ path = ".."
 [[lean_lib]]
 name = "Theory"
 
+[[lean_lib]]
+name = "Spec"
+
+[[lean_lib]]
+name = "Verifier"
+
 [[lean_exe]]
 name = "ref-search"
 root = "Main"
