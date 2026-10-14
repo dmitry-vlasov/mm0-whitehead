@@ -130,36 +130,41 @@ theorem StoreWF.append_app {store : List Node} (hwf : StoreWF store) (ty : Ty) (
 open Whitehead.Mmb (UnifyCmd)
 
 /-- The variables of the arguments, the initial heap of a stream. -/
-def initHeap (n : ℕ) : List sexpr := (List.range n).map sexpr.var
+def initHeap (n : ℕ) : List (Option sexpr) := (List.range n).map fun i => some (sexpr.var i)
 
 mutual
 /-- The meaning of a unify stream, read left to right: the expression it starts with,
 the rest of the stream, the heap after it (the arguments' variables, then one entry per
 saved term and dummy, in stream order) and the sorts of the dummies so far. A saved
-term takes its heap entry before its arguments are read (as `Unify.term` does), with a
-placeholder meanwhile; a dummy is the next variable after the arguments. -/
+term takes its heap entry before its arguments are read (as `Unify.term` does), `none`
+meanwhile; a dummy is the next variable after the arguments. The fuel is twice the
+stream's length and two: a term costs two steps. -/
 def decodeExpr (terms : List TermDecl) (nargs : ℕ) :
-    ℕ → List UnifyCmd → List sexpr → List ℕ → Option (sexpr × List UnifyCmd × List sexpr × List ℕ)
+    ℕ → List UnifyCmd → List (Option sexpr) → List ℕ → Option (sexpr × List UnifyCmd × List (Option sexpr) × List ℕ)
   | 0, _, _, _ => none
   | fuel + 1, us, heap, ds =>
     match us with
-    | UnifyCmd.ref i :: rest => (heap[i]?).map fun e => (e, rest, heap, ds)
+    | UnifyCmd.ref i :: rest =>
+      match heap[i]? with
+      | some (some x) => some (x, rest, heap, ds)
+      | _ => none
     | UnifyCmd.term t save :: rest =>
       match terms[t]? with
       | none => none
       | some decl =>
-        let heap' := if save then heap ++ [sexpr.var 0] else heap
+        let heap' := if save then heap ++ [none] else heap
         match decodeN terms nargs fuel decl.args.length rest heap' ds with
         | none => none
         | some (args, rest', heap'', ds') =>
-          some (sexpr.app t args, rest', if save then heap''.set heap.length (sexpr.app t args) else heap'', ds')
+          some (sexpr.app t args, rest', if save then heap''.set heap.length (some (sexpr.app t args)) else heap'', ds')
     | UnifyCmd.dummy s :: rest =>
-      some (sexpr.var (nargs + ds.length), rest, heap ++ [sexpr.var (nargs + ds.length)], ds ++ [s])
+      some (sexpr.var (nargs + ds.length), rest, heap ++ [some (sexpr.var (nargs + ds.length))], ds ++ [s])
     | _ => none
 
 /-- `n` expressions in sequence. -/
 def decodeN (terms : List TermDecl) (nargs : ℕ) :
-    ℕ → ℕ → List UnifyCmd → List sexpr → List ℕ → Option (List sexpr × List UnifyCmd × List sexpr × List ℕ)
+    ℕ → ℕ → List UnifyCmd → List (Option sexpr) → List ℕ →
+      Option (List sexpr × List UnifyCmd × List (Option sexpr) × List ℕ)
   | 0, _, _, _, _ => none
   | _ + 1, 0, us, heap, ds => some ([], us, heap, ds)
   | fuel + 1, n + 1, us, heap, ds =>
@@ -173,7 +178,7 @@ end
 
 /-- The hypotheses of a theorem's stream: `UHyp` and an expression, each. -/
 def decodeHyps (terms : List TermDecl) (nargs : ℕ) :
-    ℕ → List UnifyCmd → List sexpr → List ℕ → Option (List sexpr)
+    ℕ → List UnifyCmd → List (Option sexpr) → List ℕ → Option (List sexpr)
   | 0, _, _, _ => none
   | _ + 1, [], _, _ => some []
   | fuel + 1, UnifyCmd.hyp :: rest, heap, ds =>
@@ -185,14 +190,15 @@ def decodeHyps (terms : List TermDecl) (nargs : ℕ) :
 /-- The statement of a theorem's stream: its conclusion and its hypotheses, over the
 theorem's binders. -/
 def decodeThm (terms : List TermDecl) (nargs : ℕ) (us : List UnifyCmd) : Option (sexpr × List sexpr) :=
-  match decodeExpr terms nargs (us.length + 1) us (initHeap nargs) [] with
+  match decodeExpr terms nargs (2 * us.length + 2) us (initHeap nargs) [] with
   | none => none
-  | some (concl, rest, heap, ds) => (decodeHyps terms nargs (rest.length + 1) rest heap ds).map fun hs => (concl, hs)
+  | some (concl, rest, heap, ds) =>
+    (decodeHyps terms nargs (2 * rest.length + 2) rest heap ds).map fun hs => (concl, hs)
 
 /-- The value of a def's stream, over its binders and then its dummies, with the
 dummies' sorts. -/
 def decodeDef (terms : List TermDecl) (nargs : ℕ) (us : List UnifyCmd) : Option (sexpr × List ℕ) :=
-  match decodeExpr terms nargs (us.length + 1) us (initHeap nargs) [] with
+  match decodeExpr terms nargs (2 * us.length + 2) us (initHeap nargs) [] with
   | some (v, [], _, ds) => some (v, ds)
   | _ => none
 
