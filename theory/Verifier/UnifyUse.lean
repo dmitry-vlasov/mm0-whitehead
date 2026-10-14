@@ -70,14 +70,14 @@ theorem unify_defn {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : Sto
     (hu : Unify c st .defn (argHeap args) us [e] S hs S' hs') :
     ∃ v ds σ', decodeDef terms args.length us = some (v, ds) ∧ args.map (toSexpr st.store) <+: σ' ∧
       σ'.length = args.length + ds.length ∧ DummiesCorr st.store args.length σ' ds ∧
-      toSexpr st.store e = sexpr.subst σ' v := by
-  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, _, hrest, _⟩ :=
+      toSexpr st.store e = sexpr.subst σ' v ∧ sexpr.VarsLt v σ'.length := by
+  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, _⟩ :=
     (unify_decode hwf hterms hprefix args.length (2 * us.length + 2)).1 us (by omega) .defn e [] (argHeap args)
       (initHeap args.length) [] (args.map (toSexpr st.store)) S hs S' hs' hu (heapCorr_init _ _ _) (by simp)
       (fun j s h => by simp at h)
   have := unify_defn_rest hrest
   subst this
-  refine ⟨x, ds', σ', ?_, hout.σpre, hout.σlen, hout.dummies, hsx⟩
+  refine ⟨x, ds', σ', ?_, hout.σpre, hout.σlen, hout.dummies, hsx, hvl⟩
   simp [decodeDef, hdec]
 
 /-! ### Theorem mode -/
@@ -145,7 +145,7 @@ theorem unify_end_hyps {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms :
       2 * rest.length + 2 ≤ fuel → Unify c st .thmEnd H rest [] S hs S' hs' → HeapCorr σ st.store H heapS [] →
       NoneFree heapS →
       ∃ hl, decodeHyps terms nargs fuel rest heapS [] = some hl ∧
-        List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst σ h) hs.reverse hl
+        List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst σ h ∧ sexpr.VarsLt h σ.length) hs.reverse hl
   | 0, _, _, _, _, _, _, _, hf, _, _, _ => by omega
   | fuel + 1, rest, H, heapS, S, hs, S', hs', hf, hu, hcorr, hnf => by
     cases hu with
@@ -155,7 +155,7 @@ theorem unify_end_hyps {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms :
       exact ⟨[], by simp [decodeHyps], List.Forall₂.nil⟩
     | hyp_end _ us' e' _ hs0 _ _ hu' =>
       simp only [List.length_cons] at hf
-      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, _, hu2, hdm⟩ :=
+      obtain ⟨x, rest2, heapS2, ds2, σ2, H2, hdec, hout, hsx, hvl, hu2, hdm⟩ :=
         (unify_decode hwf hterms hprefix nargs fuel).1 us' (by omega) .thmEnd e' [] H heapS [] σ S hs0 S' hs' hu'
           (heapCorr_any hcorr hnf) (by simp [hσ]) (fun j s h => by simp at h)
       have hds2 : ds2 = [] := hdm (by decide)
@@ -168,17 +168,18 @@ theorem unify_end_hyps {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms :
       refine ⟨x :: hl, ?_, ?_⟩
       · simp [decodeHyps, hdec, hdecH]
       · rw [List.reverse_append]
-        exact List.Forall₂.cons hsx hall
+        exact List.Forall₂.cons ⟨hsx, hvl⟩ hall
 
 theorem unify_end {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : StoreTerms c st.store)
     {terms : List TermDecl} (hprefix : ∀ (t : ℕ) (d : TermDecl), c.terms[t]? = some d → terms[t]? = some d)
     {args : List ℕ} {us : List UnifyCmd} {e : ℕ} {hyps : List ℕ}
     (hu : Unify c st .thmEnd (argHeap args) us [e] [] hyps [] []) :
     ∃ concl hl, decodeThm terms args.length us = some (concl, hl) ∧
-      toSexpr st.store e = sexpr.subst (args.map (toSexpr st.store)) concl ∧
-      List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst (args.map (toSexpr st.store)) h) hyps.reverse hl := by
+      toSexpr st.store e = sexpr.subst (args.map (toSexpr st.store)) concl ∧ sexpr.VarsLt concl args.length ∧
+      List.Forall₂ (fun p h => toSexpr st.store p = sexpr.subst (args.map (toSexpr st.store)) h ∧
+        sexpr.VarsLt h args.length) hyps.reverse hl := by
   set σ := args.map (toSexpr st.store) with hσdef
-  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, _, hrest, hdm⟩ :=
+  obtain ⟨x, rest, heapS', ds', σ', H', hdec, hout, hsx, hvl, hrest, hdm⟩ :=
     (unify_decode hwf hterms hprefix args.length (2 * us.length + 2)).1 us (by omega) .thmEnd e [] (argHeap args)
       (initHeap args.length) [] σ [] hyps [] [] hu (heapCorr_init _ _ _) (by simp [hσdef]) (fun j s h => by simp at h)
   have hds : ds' = [] := hdm (by decide)
@@ -188,7 +189,10 @@ theorem unify_end {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : Stor
   have hnf := noneFree_out hout (noneFree_init _)
   obtain ⟨hl, hdecH, hall⟩ := unify_end_hyps hwf hterms hprefix args.length σ (by simp [hσdef])
     (2 * rest.length + 2) rest H' heapS' [] hyps [] [] le_rfl hrest (heapCorr_any hout.corr hnf) hnf
-  refine ⟨x, hl, ?_, hsx, hall⟩
-  simp [decodeThm, hdec, hdecH]
+  have hσl : σ.length = args.length := by simp [hσdef]
+  refine ⟨x, hl, ?_, hsx, by rw [← hσl]; exact hvl, ?_⟩
+  · simp [decodeThm, hdec, hdecH]
+  · rw [← hσl]
+    exact hall
 
 end Verifier
