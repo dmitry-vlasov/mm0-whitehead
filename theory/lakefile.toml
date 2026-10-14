@@ -38,3 +38,7 @@ root = "Diff"
 [[lean_exe]]
 name = "verify-diff"
 root = "VDiff"
+
+[[lean_exe]]
+name = "certify"
+root = "Certify"

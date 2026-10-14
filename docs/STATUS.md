@@ -90,6 +90,9 @@ same way (`spec_proved`, V6: a file accepted and matched proves the specificatio
 the proof file's environment is well-formed (`file_valid`, V3b), so that a file
 accepted and matched gives `mm0.mm0`'s `ValidEnv` of the specification but for the
 specification's own well-formedness, which the front end establishes (`spec_valid`).
+The prover's output is certified by the verified checker (`lake exe certify`,
+`scripts/prove-certified.sh`): the replays of peano and of 2,000 set.mm theorems and
+the search on the logic fixture are certified against their specifications.
 All milestones of the verifier's verification are reached; `cd theory && lake build`
 has no `sorry`. Trusted: Lean's kernel, the port of the semantics (four deviations,
 recorded), the `.mm0` front end, the byte reader, and the two conversions.

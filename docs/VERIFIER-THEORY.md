@@ -186,3 +186,26 @@ V6. The match with the specification: `matchSpec` of `Whitehead/Verify/Spec.lean
     `ValidEnv spec := Env spec ∧ ∃ e, Env e ∧ EnvExtend spec e ∧ EnvFull e`; `Env e`,
     the well-formedness of the proof file's environment, is milestone V3b, and
     `Env spec` is the front end's (trusted).
+
+## The prover's soundness (2026-10-14)
+
+The prover's proofs are made sound by verified checking of what it writes, not by a
+proof about the prover. `lake exe certify <file.mmb> [<spec.mm0>]` (`theory/Certify.lean`)
+runs the verified checker on a proof file, and the verified matcher against a
+specification: accepted, the file's environment is well-formed and proved
+(`file_valid`) and the specification is valid up to its own well-formedness
+(`spec_valid`). `scripts/prove-certified.sh replay|search <in.mmb> <out.mmb> [<spec.mm0>]`
+runs the prover with `-o` and then `certify` on the file written. The main package
+cannot call the checker itself: the theory package needs Mathlib, which the main
+package must not depend on.
+
+Checked on 2026-10-14: the replay of peano (2,650 proofs reconstructed) and of the
+first 2,000 theorems of the set.mm translation (1,974 reconstructed) are certified
+against their specifications (0.2 s and 37 s); the search on the logic fixture (15 of
+16 proved) is certified; a fixture with a wrong proof is rejected.
+
+What this does not cover: a proof the prover reports but does not write (without `-o`),
+and a proof found for a task with metavariables, which proves an instance of the
+theorem and is neither written nor checked (`STATUS.md`, "Next steps"). Trusted as for
+the verifier: Lean's kernel and compiler, the port of the semantics, the byte reader,
+the `.mm0` front end, and the two conversions.
