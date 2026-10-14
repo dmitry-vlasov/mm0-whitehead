@@ -42,6 +42,10 @@ structure EnvHas (E : env) (c : Ctx) (allTerms : List TermDecl) : Prop where
   dependencies among their bound binders. -/
   terms_wf : ∀ (t : ℕ) (d : TermDecl), c.terms[t]? = some d →
     BindersWF d.args ∧ ∀ m ∈ d.ret.deps, m < (boundNumbers d.args).length
+  /-- A def's value is well-typed over its binders and dummies, at its result sort. -/
+  defs_ok : ∀ (t : ℕ) (d : TermDecl) (us : List Whitehead.Mmb.UnifyCmd) (v : sexpr) (ds : List ℕ),
+    c.terms[t]? = some d → d.defn = some us → decodeDef allTerms d.args.length us = some (v, ds) →
+    sexpr.ok E (ctxOf d.args ds) v d.ret.sort
 
 /-! ### The type word -/
 
