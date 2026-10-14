@@ -176,4 +176,51 @@ theorem unfold_ob (hW : WorldOk W c allTerms bs D) {st : State} (hwf : StoreWF s
   rw [hx2] at hc
   exact conv'.trans (conv'.symm hunf) hc
 
+/-! ### `Thm` -/
+
+theorem thm_sound (hW : WorldOk W c allTerms bs D) {st : State} (hwf : StoreWF st.store) (hT : StoreTerms c st.store)
+    (hpre : st.store <+: W.store) (hdef : c.isDef = false) {t : ℕ} {decl : ThmDecl} {e : ℕ} {args : List ℕ}
+    {S₁ S₂ S₃ : List El} (hdecl : c.thms[t]? = some decl) (hstk : st.stack = El.expr e :: S₁)
+    (hpop : popArgs decl.args.length S₁ args S₂) (hargs : argsOk st decl.args args)
+    (hdis : thmDisjoint st decl.args args [] [])
+    (hU : Unify c st .thm (args.map fun p => (p, false)) decl.unify [e] S₂ [] S₃ [])
+    (hS : SOk W st.store.length st.stack) :
+    e < st.store.length ∧ proof W.E W.Γ W.Hs (W.x e) ∧ SOk W st.store.length S₃ := by
+  rw [hstk] at hS
+  have he : e < st.store.length := hS.1
+  have hS₁ := SOk.tail_of_not_ob hS (fun a b h => by cases h)
+  obtain ⟨hlen, hS₁eq⟩ := popArgs_spec hpop
+  rw [hS₁eq] at hS₁
+  obtain ⟨hargs_lt, hS₂⟩ := SOk.drop_exprs args.reverse hS₁
+  obtain ⟨concl, hl, ps, hdec, hsx, hS₂eq, hall⟩ := unify_thm hwf hT hW.env.terms_prefix hU
+  rw [hS₂eq] at hS₂
+  obtain ⟨hps, hS₃⟩ := SOk.drop_proofs ps hS₂
+  obtain ⟨concl', hs', hdec', hget⟩ := hW.env.thms t decl hdecl
+  rw [hlen] at hdec
+  rw [hdec] at hdec'
+  simp only [Option.some.injEq, Prod.mk.injEq] at hdec'
+  obtain ⟨rfl, rfl⟩ := hdec'
+  -- the substitution in the final world
+  have hσ : args.map (toSexpr st.store) = args.map W.x :=
+    List.map_congr_left fun q hq => (lift_x hW hwf hpre (hargs_lt q (List.mem_reverse.2 hq))).symm
+  set st₀ := st.withStore W.store
+  have hst₀ : StoreOk W.E bs D false st₀.store := by
+    have := hW.store
+    rw [hdef] at this
+    exact this
+  have hok := argsOk_forall₂ hst₀ (argsOk_prefix hpre hargs)
+  have hsafe := safe_subst_of hst₀ (argsOk_prefix hpre hargs) (thmDisjoint_prefix hpre hdis)
+  change List.Forall₂ _ (args.map W.x) _ at hok
+  change safe_subst _ _ (args.map W.x) at hsafe
+  rw [← hW.ctx] at hok hsafe
+  have hxe : W.x e = sexpr.subst (args.map W.x) concl := by
+    rw [lift_x hW hwf hpre he, hsx, hσ]
+  refine ⟨he, ?_, hS₃⟩
+  rw [hxe]
+  refine proof.thm hget hok hsafe fun h hh => ?_
+  obtain ⟨p, hp, hph⟩ := forall₂_mem_right hall h hh
+  obtain ⟨hpl, hpp⟩ := hps p hp
+  rw [← hσ, ← hph, ← lift_x hW hwf hpre hpl]
+  exact hpp
+
 end Verifier
