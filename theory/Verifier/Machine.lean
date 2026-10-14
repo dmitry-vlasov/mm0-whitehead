@@ -195,9 +195,11 @@ inductive Unify (c : Ctx) (st : State) : UMode → UHeap → List UnifyCmd → L
     (∀ h ∈ H, h.2 = false → ∀ ty', st.ty h.1 = some ty' → Disjoint ty.deps ty'.deps) →
     Unify c st .defn (H ++ [(e, false)]) us K S hs S' hs' →
     Unify c st .defn H (UnifyCmd.dummy s :: us) (e :: K) S hs S' hs'
-  | hyp_thm (H us e K S hs S' hs') :
-    Unify c st .thm H us (e :: K) S hs S' hs' →
-    Unify c st .thm H (UnifyCmd.hyp :: us) K (El.proof e :: S) hs S' hs'
+  -- the unify stack is empty at a hypothesis: the conclusion has been read
+  -- (`mm0b.lean` lets a hypothesis come at any point; the streams of the format do not)
+  | hyp_thm (H us e S hs S' hs') :
+    Unify c st .thm H us [e] S hs S' hs' →
+    Unify c st .thm H (UnifyCmd.hyp :: us) [] (El.proof e :: S) hs S' hs'
   | hyp_end (H us e S hs S' hs') :
     Unify c st .thmEnd H us [e] S hs S' hs' →
     Unify c st .thmEnd H (UnifyCmd.hyp :: us) [] S (hs ++ [e]) S' hs'
