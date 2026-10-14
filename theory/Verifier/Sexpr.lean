@@ -94,6 +94,17 @@ theorem free_app (E : env) (Γ : ctx) (t : term_id) (es : List sexpr) (v : var_i
     · right
       exact h
 
+/-! ### Inversion -/
+
+theorem ok'_var_inv {E : env} {Γ : ctx} {v : var_id} {bis : List binder} {s : sort_id}
+    (h : sexpr.ok' E Γ (sexpr.var v) bis s) : ∃ bi, Γ[v]? = some bi ∧ bis = [] ∧ s = bi.sort := by
+  generalize he : sexpr.var v = e at h
+  cases h with
+  | var hv => cases he; exact ⟨_, hv, rfl, rfl⟩
+  | term _ => cases he
+  | app_var _ _ => cases he
+  | app_reg _ _ => cases he
+
 /-! ### Variables in range -/
 
 /-- Every variable of the expression is below `n`. -/
