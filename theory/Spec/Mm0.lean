@@ -7,8 +7,8 @@ side by side (`docs/VERIFIER-THEORY.md`). Lean 3's `list.nth` is `[i]?`, `inth` 
 of `env.proof'.thm` is written out. One rule is added, `conv'.trans`: the primary
 specification `examples/mm0.mm0` has the certificate `CTrans` (`VerifyConvTrans`), and
 `mm0.lean` omits it; the judge is the primary specification, and the `Unfold` command
-of a proof file needs it. One definition is corrected, `safe_subst`: see the comment
-there. Nothing else is changed.
+of a proof file needs it. Two definitions are corrected, `safe_subst` and
+`sexpr.free'`: see the comments there. Nothing else is changed.
 -/
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.List.Forall2
@@ -139,11 +139,13 @@ def maybe_free_args (es : List sexpr) (a : binder) (v : var_id) : Prop :=
 def sexpr.free' (E : env) (Γ : ctx) (v : var_id) :
     sexpr → List sexpr → List Prop → Prop
   | .var u, _, _ => sexpr.has_var Γ (sexpr.var u) v
+  -- the original joins the two cases with `∧`; `mm0.mm0`'s `FreeApp` has `∨`, and the
+  -- rule's sense is the disjunction. The third deviation of the port.
   | .term f, es, ps => ∃ args r rs o,
     E.get_term f args (r, rs) o ∧
-    (∃ (n : ℕ) (free : Prop) (a : binder), ps[n]? = some free ∧ args[n]? = some a ∧
-      free ∧ maybe_free_args es a v) ∧
-    ∃ u ∈ rs, es[u]? = some (sexpr.var v)
+    ((∃ (n : ℕ) (free : Prop) (a : binder), ps[n]? = some free ∧ args[n]? = some a ∧
+      free ∧ maybe_free_args es a v) ∨
+    ∃ u ∈ rs, es[u]? = some (sexpr.var v))
   | .app1 f x, es, ps =>
     sexpr.free' E Γ v f (x :: es) (sexpr.free' E Γ v x [] [] :: ps)
 

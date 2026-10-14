@@ -28,7 +28,13 @@ The MM0 repository has two Lean 3 files for the semantics:
   the logic. The checks the machine needs beyond `mm0b.lean` are exactly those whose
   absence would break that theorem, which is how they are justified.
 
-Four points of `mm0.lean` to keep in mind when reading the port. `safe_subst`, the
+Five points of `mm0.lean` to keep in mind when reading the port. `sexpr.free'`, the
+free variables of an application, joins its two cases — a variable free in a regular
+argument and not captured by a bound argument the binder depends on; a variable
+substituted for a bound binder the return type depends on — with a conjunction, where
+`mm0.mm0`'s `FreeApp` has the disjunction and the rule's sense (and `mmb.md`'s
+formula, `MMB-NOTES.md` section 6) is the union; the port corrects it (the third
+deviation). `safe_subst`, the
 disjointness conditions of a theorem step, reads the binders `u` and `v` and the
 dependency of `v` on `u` in the context of the proof being checked, where the binders
 of the theorem being applied are meant: `mm0.mm0`'s `VerifyProofThm` has the same text
@@ -52,7 +58,8 @@ not used (ported as written).
 - The port is literal: the same names (snake case, as the original, so that the two
   files can be read side by side), the same order, Lean 3's `list.nth` as `[i]?`,
   `inth` as `getD`, `list.forall₂` as `List.Forall₂`, `set` as `Set`. Nothing but
-  `conv'.trans` and the correction of `safe_subst` is changed in `Spec/Mm0.lean`; whatever the proofs need about the
+  `conv'.trans` and the corrections of `safe_subst` and `sexpr.free'` is changed in
+  `Spec/Mm0.lean`; whatever the proofs need about the
   semantics is in separate files.
 - What stays trusted at the end: Lean's kernel, the fidelity of the port (400 lines,
   reviewed side by side), the `.mm0` front end (lexer, parser, elaborator: the text
