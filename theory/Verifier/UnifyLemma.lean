@@ -220,7 +220,7 @@ def PExpr (c : Ctx) (st : State) (terms : List TermDecl) (nargs fuel : ℕ) : Pr
     ∃ x rest heapS' ds' σ' H', decodeExpr terms nargs fuel us heapS ds = some (x, rest, heapS', ds') ∧
       Out st.store nargs σ ds H heapS σ' ds' H' heapS' ∧
       toSexpr st.store e = sexpr.subst σ' x ∧ sexpr.VarsLt x σ'.length ∧
-      Unify c st mode H' rest K S hs S' hs'
+      Unify c st mode H' rest K S hs S' hs' ∧ (mode ≠ UMode.defn → ds' = ds)
 
 def PN (c : Ctx) (st : State) (terms : List TermDecl) (nargs fuel : ℕ) : Prop :=
   ∀ (us : List UnifyCmd), 2 * us.length + 2 ≤ fuel →
@@ -231,7 +231,7 @@ def PN (c : Ctx) (st : State) (terms : List TermDecl) (nargs fuel : ℕ) : Prop 
     ∃ xs rest heapS' ds' σ' H', decodeN terms nargs fuel n us heapS ds = some (xs, rest, heapS', ds') ∧
       Out st.store nargs σ ds H heapS σ' ds' H' heapS' ∧
       List.Forall₂ (fun k x => toSexpr st.store k = sexpr.subst σ' x ∧ sexpr.VarsLt x σ'.length) ks xs ∧
-      Unify c st mode H' rest K S hs S' hs'
+      Unify c st mode H' rest K S hs S' hs' ∧ (mode ≠ UMode.defn → ds' = ds)
 
 theorem heapCorr_below {store : List Node} {σ : List sexpr} {H : UHeap} {heapS : List (Option sexpr)} {e : ℕ}
     {ks : List ℕ} (h : HeapCorr σ store H heapS [e]) (hks : ∀ k ∈ ks, k < e) : HeapCorr σ store H heapS ks :=
@@ -255,7 +255,7 @@ theorem unify_decode {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : S
         | none => exact absurd (hpend rfl e (List.mem_singleton_self e)) (lt_irrefl e)
         | some x =>
           obtain ⟨hsx, hvl⟩ := hx x rfl
-          refine ⟨x, _, heapS, ds, σ, H, ?_, Out.refl hcorr hlen hd, hsx, hvl, hrest⟩
+          refine ⟨x, _, heapS, ds, σ, H, ?_, Out.refl hcorr hlen hd, hsx, hvl, hrest, fun _ => rfl⟩
           simp [decodeExpr, hox]
       | term _ _ us' _ t save ty args _ _ _ _ _ hnode hrest =>
         obtain ⟨d, hd', hargs⟩ := hterms e ty t args hnode
@@ -289,7 +289,7 @@ theorem unify_decode {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : S
                 rw [List.getElem?_append_right (by rw [← hcorr.len]; exact Nat.le_of_not_lt hil), ← hcorr.len, hil']
                 rfl
               | succ _ => rw [hil'] at hi; simp at hi
-        obtain ⟨xs, rest', heapS₁, ds₁, σ₁, H₁, hdec, hout, hall, hrest'⟩ :=
+        obtain ⟨xs, rest', heapS₁, ds₁, σ₁, H₁, hdec, hout, hall, hrest', hdm⟩ :=
           ihN us' hfuel' mode args.length args K _ _ ds σ S hs S' hs' rfl hrest hcorr' hlen hd
         have hsx : toSexpr st.store e = sexpr.subst σ₁ (sexpr.app t xs) := by
           rw [toSexpr_app hwf hnode, subst_app]
@@ -301,7 +301,7 @@ theorem unify_decode {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : S
           obtain ⟨k, _, hk⟩ := forall₂_mem_right hall x hx
           exact hk.2
         refine ⟨sexpr.app t xs, rest', if save then heapS₁.set heapS.length (some (sexpr.app t xs)) else heapS₁,
-          ds₁, σ₁, H₁, ?_, ?_, hsx, hvl, hrest'⟩
+          ds₁, σ₁, H₁, ?_, ?_, hsx, hvl, hrest', hdm⟩
         · rw [hargs] at hdec
           simp [decodeExpr, hdecl, hdec]
         · cases save with
@@ -355,7 +355,7 @@ theorem unify_decode {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : S
       | dummy _ us' _ s ty v _ _ _ _ _ hnode hbound hsort _ hrest =>
         have hsx := toSexpr_var hnode
         refine ⟨sexpr.var (nargs + ds.length), us', heapS ++ [some (sexpr.var (nargs + ds.length))], ds ++ [s],
-          σ ++ [sexpr.var v], H ++ [(e, false)], rfl, ?_, ?_, ?_, hrest⟩
+          σ ++ [sexpr.var v], H ++ [(e, false)], rfl, ?_, ?_, ?_, hrest, fun h => absurd rfl h⟩
         · refine ⟨List.prefix_append _ _, by simp only [List.length_append, List.length_singleton, hlen]; omega,
             List.prefix_append _ _, List.prefix_append _ _,
             ⟨by simp [hcorr.len], ?_⟩, ?_, ?_⟩
@@ -419,17 +419,18 @@ theorem unify_decode {c : Ctx} {st : State} (hwf : StoreWF st.store) (hterms : S
       cases ks with
       | nil =>
         subst hn
-        refine ⟨[], us, heapS, ds, σ, H, rfl, Out.refl hcorr hlen hd, List.Forall₂.nil, hu⟩
+        refine ⟨[], us, heapS, ds, σ, H, rfl, Out.refl hcorr hlen hd, List.Forall₂.nil, hu, fun _ => rfl⟩
       | cons k ks' =>
         subst hn
         simp only [List.cons_append] at hu
-        obtain ⟨x, rest, heapS₁, ds₁, σ₁, H₁, hdec, hout₁, hsx, hvl, hu₁⟩ :=
+        obtain ⟨x, rest, heapS₁, ds₁, σ₁, H₁, hdec, hout₁, hsx, hvl, hu₁, hdm₁⟩ :=
           ihE us (by omega) mode k (ks' ++ K) H heapS ds σ S hs S' hs' hu (heapCorr_mono hcorr (by simp)) hlen hd
         have hrestlen := (decode_length terms nargs fuel).1 us heapS ds x rest heapS₁ ds₁ hdec
-        obtain ⟨xs, rest', heapS₂, ds₂, σ₂, H₂, hdecN, hout₂, hall, hu₂⟩ :=
+        obtain ⟨xs, rest', heapS₂, ds₂, σ₂, H₂, hdecN, hout₂, hall, hu₂, hdm₂⟩ :=
           ihN rest (by omega) mode ks'.length ks' K H₁ heapS₁ ds₁ σ₁ S hs S' hs' rfl hu₁
             (heapCorr_restore hcorr hout₁ (fun k' hk' => List.mem_cons_of_mem _ hk')) hout₁.σlen hout₁.dummies
-        refine ⟨x :: xs, rest', heapS₂, ds₂, σ₂, H₂, ?_, hout₁.trans hout₂, ?_, hu₂⟩
+        refine ⟨x :: xs, rest', heapS₂, ds₂, σ₂, H₂, ?_, hout₁.trans hout₂, ?_, hu₂,
+          fun h => (hdm₂ h).trans (hdm₁ h)⟩
         · simp [decodeN, hdec, hdecN]
         · refine List.Forall₂.cons ⟨?_, varsLt_mono hout₂.σpre.length_le hvl⟩ hall
           rw [hsx, subst_prefix hout₂.σpre hvl]
