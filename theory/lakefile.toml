@@ -23,6 +23,10 @@ name = "Spec"
 [[lean_lib]]
 name = "Verifier"
 
+[[lean_lib]]
+name = "Mutate"
+roots = ["Mutate.Engine"]
+
 [[lean_exe]]
 name = "ref-search"
 root = "Main"
@@ -30,3 +34,7 @@ root = "Main"
 [[lean_exe]]
 name = "diff-test"
 root = "Diff"
+
+[[lean_exe]]
+name = "verify-diff"
+root = "VDiff"

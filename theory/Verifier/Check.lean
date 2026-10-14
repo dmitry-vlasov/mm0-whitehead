@@ -285,7 +285,7 @@ def stepF (c : Ctx) (st : State) : ProofCmd → Option State
           match c.sorts[ty.sort]? with
           | some sd =>
             if sd.provable = true then
-              some { st with stack := El.proof e :: S, heap := st.heap ++ [El.proof e], hyps := st.hyps ++ [e] }
+              some { st with stack := S, heap := st.heap ++ [El.proof e], hyps := st.hyps ++ [e] }
             else none
           | none => none
         | none => none

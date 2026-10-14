@@ -242,7 +242,8 @@ inductive Step (c : Ctx) : ProofCmd → State → State → Prop
   | hyp (st e S ty sd) :
     c.isDef = false → st.stack = El.expr e :: S → st.ty e = some ty →
     c.sorts[ty.sort]? = some sd → sd.provable = true →
-    Step c ProofCmd.hyp st { st with stack := El.proof e :: S, heap := st.heap ++ [El.proof e], hyps := st.hyps ++ [e] }
+    -- the proof goes to the heap only (notes, `Hyp`; `mm0b.lean` leaves a marker on the stack)
+    Step c ProofCmd.hyp st { st with stack := S, heap := st.heap ++ [El.proof e], hyps := st.hyps ++ [e] }
   | conv (st e1 e2 S) :
     st.stack = El.proof e2 :: El.expr e1 :: S →
     Step c ProofCmd.conv st { st with stack := El.coConv e1 e2 :: El.proof e1 :: S }

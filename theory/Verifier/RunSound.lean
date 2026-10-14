@@ -46,7 +46,7 @@ theorem step_sound (hW : WorldOk W c allTerms bs D) {cmd : ProofCmd} {st st' : S
     have hS' := SOk.tail_of_not_ob hS (fun a b h => by cases h)
     have hmem : e ∈ W.hyps := hhyps.subset (List.mem_append_right _ (List.mem_singleton_self e))
     have hp : proof W.E W.Γ W.Hs (W.x e) := proof.hyp ⟨e, hmem, rfl⟩
-    exact ⟨SOk.push (el := El.proof e) ⟨he, hp⟩ hS', hH.push (el := El.proof e) ⟨he, hp⟩ (fun a b h => by cases h)⟩
+    exact ⟨hS', hH.push (el := El.proof e) ⟨he, hp⟩ (fun a b h => by cases h)⟩
   case conv e1 e2 S hstk =>
     rw [hstk] at hS
     obtain ⟨⟨he2, hp2⟩, hrest⟩ := hS
