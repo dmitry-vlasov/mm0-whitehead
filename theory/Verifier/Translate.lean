@@ -12,11 +12,6 @@ open mm0
 
 /-! ### Variables and binders -/
 
-/-- The variable of bound-variable number `k`: the `k`-th bound binder, or, past the
-binders, the `k - nb`-th dummy, which is variable `bs.length + (k - nb)`. -/
-def bvVar (bs : List Binder) (k : ℕ) : ℕ :=
-  if h : k < (boundNumbers bs).length then (boundNumbers bs)[k] else bs.length + (k - (boundNumbers bs).length)
-
 def Binder.toMm0 (bs : List Binder) (b : Binder) : mm0.binder :=
   if b.bound then .bound b.sort else .reg b.sort (b.deps.image (bvVar bs))
 

@@ -11,6 +11,7 @@ numbers; the store, stack and heap are lists; equality of expressions is identit
 nodes, as in the format.
 -/
 import Spec.Mm0
+import Mathlib.Data.Finset.Union
 import Whitehead.Mmb.Types
 
 namespace Verifier
@@ -126,6 +127,20 @@ def argsOk (st : State) : List Binder → List ℕ → Prop
   | b :: bs, p :: ps => (∃ ty, st.ty p = some ty ∧ ty.sort = b.sort ∧ (b.bound → ty.bound)) ∧ argsOk st bs ps
   | _, _ => False
 
+/-- The positions of the bound binders among `bs`, in order: bound-variable number `k`
+of the declaration is the binder at position `(boundNumbers bs)[k]`. (The binders'
+`deps` are over these numbers.) -/
+def boundNumbers (bs : List Binder) : List ℕ :=
+  (List.range bs.length).filter fun i => (bs[i]?.map (·.bound)) = some true
+
+/-- The variable of bound-variable number `k`: the `k`-th bound binder, or, past the
+binders, the `k - nb`-th dummy, which is variable `bs.length + (k - nb)`. -/
+def bvVar (bs : List Binder) (k : ℕ) : ℕ :=
+  if h : k < (boundNumbers bs).length then (boundNumbers bs)[k] else bs.length + (k - (boundNumbers bs).length)
+
+/-- The dependencies of the argument at the position of bound-variable number `k`. -/
+def argDeps (bs : List Binder) (tys : List Ty) (k : ℕ) : Finset ℕ := (tys[bvVar bs k]?.map fun ty : Ty => ty.deps).getD ∅
+
 /-- The dependencies of an application (notes, `Term`): in an axiom or theorem the
 union over the arguments; in a definition the free variables — of a regular argument,
 its dependencies less those of the bound arguments its binder depends on; of a bound
@@ -133,18 +148,11 @@ argument, its dependencies if the return type depends on it. -/
 def appDeps (isDef : Bool) (bs : List Binder) (ret : Binder) (tys : List Ty) : Finset ℕ :=
   if isDef then
     ((List.range bs.length).filter fun i => (bs[i]?.map (·.bound)) = some false).foldr (init := ∅) (fun i acc =>
-      acc ∪ (((tys[i]?.map (·.deps)).getD ∅) \
-        ((List.range bs.length).filter fun j => (bs[j]?.map (·.bound)) = some true ∧ j ∈ (bs[i]?.map (·.deps)).getD ∅).foldr
-          (init := ∅) fun j acc => acc ∪ (tys[j]?.map (·.deps)).getD ∅)) ∪
-    ((List.range bs.length).filter fun j => (bs[j]?.map (·.bound)) = some true ∧ j ∈ ret.deps).foldr (init := ∅)
-      fun j acc => acc ∪ (tys[j]?.map (·.deps)).getD ∅
+      acc ∪ (((tys[i]?.map fun ty : Ty => ty.deps).getD ∅) \
+        ((bs[i]?.map fun b : Binder => b.deps).getD ∅).biUnion (argDeps bs tys))) ∪
+    ret.deps.biUnion (argDeps bs tys)
   else
     tys.foldr (init := ∅) fun ty acc => acc ∪ ty.deps
-
-/-- The dependency set of the `j`-th bound binder among `bs`: the number `j` stands for
-the bound binders in order. (The binders' `deps` are over these numbers.) -/
-def boundNumbers (bs : List Binder) : List ℕ :=
-  (List.range bs.length).filter fun i => (bs[i]?.map (·.bound)) = some true
 
 /-- The disjointness conditions of `Thm` (notes, `Thm`): a bound argument's dependency
 set is disjoint from every earlier argument's; a regular argument's is disjoint from the
