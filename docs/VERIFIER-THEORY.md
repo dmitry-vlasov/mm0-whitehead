@@ -80,7 +80,44 @@ V2. The machine semantics (`Verifier/Machine.lean`): `mm0b.lean`'s relations com
 V3. Soundness of the machine for the logic: a proof stream the machine accepts for a
     theorem gives `mm0.proof` of the theorem's statement in its context, and a proof
     file whose every statement the machine accepts gives `mm0.env.proof'` of the
-    environment it declares. The core theorem.
+    environment it declares. The core theorem. **Reached on 2026-10-14**:
+    `Verifier/FileSound.lean`, `file_sound : FileOk f → ∃ E, toEnv f = some E ∧
+    env.proof' E`, with only `propext`, `Classical.choice` and `Quot.sound`. The
+    argument, file by file:
+    - `Translate`: the machine's data as the semantics' — bound-variable numbers to
+      variables, binders, nodes to expressions, unify streams decoded to statements
+      and def values, a file to an `env`.
+    - `Store`, `StoreStep`, `NewNodes`, `AppDef`, `StepStore`, `Load`, `CtxOk`: the
+      type word of a node means what it says — its sort is the expression's, its bound
+      flag marks bound variables, its dependency set is the bound variables the
+      expression has (`has_var`, in a theorem) or has free (`free`, in a definition) —
+      through every command; the loaded binders are a well-formed context.
+    - `UnifyLemma`, `UnifyUse`: a stream the unifier accepts decodes to an expression
+      whose instance under the heap is the node's (strong induction on the decoder's
+      fuel; a saved term being read is undecoded and above every node of its
+      segment); its three uses — `Unfold` and the end of a def, `Thm`, the end of a
+      theorem.
+    - `Disjoint`: the machine's disjointness checks at `Thm` give `safe_subst`.
+    - `World`, `StepSound`, `RunSound`: the stack invariant, judged in the world of
+      the statement's end (its final store, context with all dummies, hypotheses): an
+      element is valid assuming the obligations above it, since `Conv` pushes a proof
+      whose validity rests on the obligation it pushes above it. Every command keeps
+      it; `Cong` and `Unfold` discharge obligations by the congruence and unfolding
+      rules, the latter needing the def's value well-typed (`EnvHas.defs_ok`, from the
+      def's own statement) so that the obligation's sort is the term's.
+    - `StmtSound`, `FileSound`: a theorem proves its decoded statement in its context
+      with its dummies (`env.proof'.thm`); a term or def establishes its declaration's
+      well-formedness and its value's typing; the statements in order build the
+      environment.
+    Two strengthenings of the machine were made in the course (both what the format
+    and the implementations do): a hypothesis of a theorem's stream comes with an
+    empty unify stack, and the def-mode dependency formula indexes arguments by
+    bound-variable number. What the theorem does not yet say: that the environment is
+    well-formed (`env.ok`: the definitions' free-variable condition, the terms'
+    result sorts not pure, and so on) — the machine checks these, and the facts are
+    proved on the way (`TermFacts`), but not assembled into `env.ok`; that is
+    milestone V3b.
+V3b. Well-formedness: a file the machine accepts declares an `env.ok` environment.
 V4. The reference verifier: an executable `check` over decoded statements, proved sound
     and complete for the machine relation; with V3, a verified checker of `.mmb` proofs.
 V5. The differential test: the reference verifier against `Whitehead/Verify`

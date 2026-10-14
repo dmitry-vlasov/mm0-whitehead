@@ -1,0 +1,22 @@
+-- The verification of the verifier (docs/VERIFIER-THEORY.md)
+import Verifier.Machine
+import Verifier.Translate
+import Verifier.Sexpr
+import Verifier.Vars
+import Verifier.Store
+import Verifier.StoreStep
+import Verifier.NewNodes
+import Verifier.AppDef
+import Verifier.StepStore
+import Verifier.Load
+import Verifier.CtxOk
+import Verifier.UnifyLemma
+import Verifier.UnifyUse
+import Verifier.Sexpr2
+import Verifier.RunFacts
+import Verifier.Disjoint
+import Verifier.World
+import Verifier.StepSound
+import Verifier.RunSound
+import Verifier.StmtSound
+import Verifier.FileSound

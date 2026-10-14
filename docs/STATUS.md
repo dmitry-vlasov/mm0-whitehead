@@ -73,6 +73,15 @@ reference entry's filtered (`KeyedExact.lean`, `keyed_sound_ex`, `keyed_complete
 unifier). Found on the way and fixed in both engines: the settled test of a condition
 ignored the images of the metavariables, where a name a node above can still replace
 may sit. All sixteen milestones are reached; `cd theory && lake build` has no `sorry`.
+**The verification of the verifier** (`docs/VERIFIER-THEORY.md`, started 2026-10-14):
+the MM0 semantics of `mm0-lean/mm0/mm0.lean` ported to Lean 4 (`theory/Spec/Mm0.lean`,
+with three deviations recorded: `conv'.trans`, and the corrections of `safe_subst` and
+of `sexpr.free'` to `mm0.mm0`'s text), the stack machine of `.mmb` files as relations
+(`theory/Verifier/Machine.lean`, `mm0b.lean` completed), and its soundness for the
+logic proved: a proof file the machine accepts declares an environment all of whose
+theorems are proved (`file_sound`, milestone V3). Open: well-formedness (`env.ok`,
+V3b), the executable reference verifier and its differential test against
+`Whitehead/Verify` (V4, V5), the match with the specification (V6).
 
 ### Phase 1 acceptance
 
