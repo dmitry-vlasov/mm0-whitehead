@@ -85,4 +85,18 @@ theorem spec_proved {f : File} {S E : env} {L : List Bool} (hc : checkFile f = t
   rw [List.reverse_reverse, List.reverse_reverse] at this
   exact ⟨E, this, hp⟩
 
+/-- **Validity** (milestone V3b): with the well-formedness of the proof file's
+environment, `mm0.mm0`'s `ValidEnv S` but for `Env S`, the specification's own
+well-formedness, which is the front end's: some well-formed environment extends `S`
+and proves every theorem of it. -/
+theorem spec_valid {f : File} {S E : env} {L : List Bool} (hc : checkFile f = true) (hE : toEnv f = some E)
+    (hx : extendRev S.reverse E.reverse L = true) : ∃ E', env.ok E' ∧ env.extend S E' ∧ env.proof' E' := by
+  obtain ⟨E', hE', hok, hp⟩ := file_valid (checkFile_sound hc)
+  rw [hE] at hE'
+  simp only [Option.some.injEq] at hE'
+  subst hE'
+  have := extendRev_sound hx
+  rw [List.reverse_reverse, List.reverse_reverse] at this
+  exact ⟨E, hok, this, hp⟩
+
 end Verifier

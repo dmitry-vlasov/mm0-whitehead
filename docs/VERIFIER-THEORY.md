@@ -118,6 +118,25 @@ V3. Soundness of the machine for the logic: a proof stream the machine accepts f
     proved on the way (`TermFacts`), but not assembled into `env.ok`; that is
     milestone V3b.
 V3b. Well-formedness: a file the machine accepts declares an `env.ok` environment.
+    **Reached on 2026-10-14**: `file_valid : FileOk f → ∃ E, toEnv f = some E ∧
+    env.ok E ∧ env.proof' E`, and with the matcher `spec_valid : … → ∃ E', env.ok E' ∧
+    env.extend S E' ∧ env.proof' E'`, which is `mm0.mm0`'s top-level `ValidEnv S` but
+    for `Env S`, the specification's own well-formedness (the front end's). Standard
+    axioms only. The pieces: `term_ok` (a fresh number, well-formed binders and
+    return type, a result sort not pure); `axiom_ok` (the statement and hypotheses
+    well-typed in the binders' context at provable sorts, the hypotheses' sorts kept
+    through the run, `HypsProvable`); and `defn_ok`, whose free-variable condition is
+    the substance (`WF.lean`, `term_stmt_wf`). A def's value is the one its stream
+    decodes, over its binders and the stream's own dummies; the node the machine
+    checked is that value renamed into the body's context. Free variables are carried
+    along an injective renaming that keeps the binders (`Free.lean`, `free_rename`),
+    and the renaming is injective because of `UDummy`'s freshness check — the dummies'
+    nodes are fresh against the arguments and against each other, which the unify
+    lemma now carries (`DummyNodes`) and which, with the meaning of the type words,
+    makes their variables distinct from each other and from the binders. A free
+    variable of a well-typed expression is bound (`free_bound`), so it has a number,
+    the node's dependencies contain it, and the machine bounds those by the return
+    type's.
 V4. The reference verifier: an executable `check` over decoded statements, proved sound
     and complete for the machine relation; with V3, a verified checker of `.mmb` proofs.
 V4 is **reached on 2026-10-14**: `Verifier/Check.lean`, `checkFile`, with every

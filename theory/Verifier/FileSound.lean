@@ -2,7 +2,7 @@
 A file the machine accepts proves the environment it declares (milestone V3): the
 statements in order, each checked against the environment of those before it.
 -/
-import Verifier.StmtSound
+import Verifier.WF
 
 namespace Verifier
 
@@ -77,6 +77,7 @@ tables declare, and its proof. -/
 structure PInv (f : File) (E : env) (ns nt nh : ℕ) : Prop where
   has : EnvHas E (ctxAt f ns nt nh false) f.terms
   pf : env.proof' E
+  wf : env.ok E
 
 /-- A new declaration that is not a term or def keeps the term clauses. -/
 theorem envHas_terms_keep {E : env} {f : File} {ns nt nh : ℕ} (h : EnvHas E (ctxAt f ns nt nh false) f.terms) {d : decl}
@@ -100,7 +101,7 @@ theorem inv_sort {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {
   obtain ⟨hterms, hunique⟩ := envHas_terms_keep hE (d := decl.sort ns sd) (fun _ _ _ _ => ⟨by simp, by simp⟩)
   refine ⟨⟨fun s sd' hs => ?_, fun s sd' hs => ?_, hterms, hunique, fun h' d' hd' => ?_, hE.terms_prefix,
     hE.terms_wf, fun t d' us v ds h1 h2 h3 => ok'_env_mono (sub_append E _) (hE.defs_ok t d' us v ds h1 h2 h3)⟩,
-    env.proof'.sort h.pf⟩
+    env.proof'.sort h.pf, env.ok.cons h.wf trivial⟩
   · rcases take_succ_cases hs with hs | ⟨rfl, hs⟩
     · exact List.mem_append_left _ (hE.sorts s sd' hs)
     · rw [hsd] at hs
@@ -117,14 +118,15 @@ theorem inv_sort {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {
 theorem inv_thm {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {d : ThmDecl} (hd : f.thms[nh]? = some d)
     {concl : sexpr} {hl : List sexpr} (hdec : decodeThm f.terms d.args.length d.unify = some (concl, hl)) {dd : decl}
     (hdd : dd = decl.ax (d.args.map (Binder.toMm0 d.args)) hl concl ∨ dd = decl.thm (d.args.map (Binder.toMm0 d.args)) hl concl)
-    (hproof : env.proof' (E ++ [dd])) :
+    (hproof : env.proof' (E ++ [dd])) (hok : decl.ok E dd) :
     PInv f (E ++ [dd]) ns nt (nh + 1) := by
   have hE := h.has
   obtain ⟨hterms, hunique⟩ := envHas_terms_keep hE (d := dd)
     (fun _ _ _ _ => by rcases hdd with rfl | rfl <;> exact ⟨by simp, by simp⟩)
   refine ⟨⟨fun s sd' hs => List.mem_append_left _ (hE.sorts s sd' hs), fun s sd' hs => ?_, hterms, hunique,
     fun h' d' hd' => ?_, hE.terms_prefix, hE.terms_wf,
-    fun t d' us v ds h1 h2 h3 => ok'_env_mono (sub_append E _) (hE.defs_ok t d' us v ds h1 h2 h3)⟩, hproof⟩
+    fun t d' us v ds h1 h2 h3 => ok'_env_mono (sub_append E _) (hE.defs_ok t d' us v ds h1 h2 h3)⟩, hproof,
+    env.ok.cons h.wf hok⟩
   · rcases List.mem_append.1 hs with hs | hs
     · exact hE.sorts_unique s sd' hs
     · simp only [List.mem_singleton] at hs
@@ -140,7 +142,8 @@ theorem inv_thm {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {d
       · exact Or.inr (List.mem_append_right _ (List.mem_singleton_self _))
 
 theorem inv_term {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {d : TermDecl} (hd : f.terms[nt]? = some d)
-    {b : Bool} (hfacts : TermFacts E (ctxAt f ns nt nh b) f.terms d) {dd : decl} (hdd : termDeclOf f nt = some dd) :
+    {b : Bool} (hfacts : TermFacts E (ctxAt f ns nt nh b) f.terms d) {dd : decl} (hdd : termDeclOf f nt = some dd)
+    (hok : decl.ok E dd) :
     PInv f (E ++ [dd]) ns (nt + 1) nh := by
   have hE := h.has
   -- the new declaration
@@ -168,7 +171,7 @@ theorem inv_term {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {
     rcases hshape with ⟨_, rfl⟩ | ⟨_, _, _, _, _, rfl⟩ <;> exact ⟨by simp, by simp⟩
   refine ⟨⟨fun s sd' hs => List.mem_append_left _ (hE.sorts s sd' hs), fun s sd' hs => ?_, fun t d' hd' => ?_,
     fun t a r o hg => ?_, fun h' d' hd' => ?_, fun t d' hd' => take_prefix hd', fun t d' hd' => ?_,
-    fun t d' us v ds h1 h2 h3 => ?_⟩, ?_⟩
+    fun t d' us v ds h1 h2 h3 => ?_⟩, ?_, env.ok.cons h.wf hok⟩
   · rcases List.mem_append.1 hs with hs | hs
     · exact hE.sorts_unique s sd' hs
     · simp only [List.mem_singleton] at hs
@@ -221,26 +224,43 @@ theorem inv_term {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {
 
 /-! ### The statements -/
 
-theorem stmts_sound {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f ss ns nt nh → ∀ E, PInv f E ns nt nh →
-    ∃ rest, toEnvAux f ss ns nt nh = some rest ∧ env.proof' (E ++ rest) := by
+/-- `term_ok` of a new term or def: its number is fresh, its binders and return type
+well-formed, its result sort not pure. -/
+theorem term_ok_of {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh) {b : Bool} {dc : TermDecl}
+    (hctx : ctx.ok E (ctxOf dc.args [])) (hdep : dep_type.ok E (ctxOf dc.args []) (depTypeOf dc.args dc.ret))
+    (hfacts : TermFacts E (ctxAt f ns nt nh b) f.terms dc) :
+    term_ok E nt (dc.args.map (Binder.toMm0 dc.args)) (depTypeOf dc.args dc.ret) := by
+  have hargs : dc.args.map (Binder.toMm0 dc.args) = ctxOf dc.args [] := by simp [ctxOf]
+  rw [hargs]
+  refine ⟨fun ⟨a, r, o, hg⟩ => ?_, hctx, hdep, ?_⟩
+  · obtain ⟨d, hd, _⟩ := h.has.terms_unique nt a r o hg
+    simp [ctxAt, List.getElem?_take] at hd
+  · obtain ⟨sd, hsd, hpure⟩ := hfacts.ret_sort
+    exact ⟨sd, h.has.sorts _ _ hsd, by simp [hpure]⟩
+
+theorem stmts_valid {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f ss ns nt nh → ∀ E, PInv f E ns nt nh →
+    ∃ rest, toEnvAux f ss ns nt nh = some rest ∧ env.ok (E ++ rest) ∧ env.proof' (E ++ rest) := by
   intro ss ns nt nh hS
   induction hS with
-  | nil => intro E h; exact ⟨[], rfl, by simpa using h.pf⟩
+  | nil => intro E h; exact ⟨[], rfl, by simpa using h.wf, by simpa using h.pf⟩
   | sort ss ns nt nh hns _ ih =>
     intro E h
     have hsd : f.sorts[ns]? = some f.sorts[ns] := List.getElem?_eq_getElem hns
     obtain ⟨rest, hrest, hp⟩ := ih _ (inv_sort h hsd)
-    refine ⟨decl.sort ns f.sorts[ns] :: rest, ?_, by simpa [List.append_assoc] using hp⟩
+    refine ⟨decl.sort ns f.sorts[ns] :: rest, ?_, by simpa [List.append_assoc] using hp.1,
+      by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hsd, hrest]
   | term ss ns nt nh dc hd hnone hok _ ih =>
     intro E h
     have hfacts := term_stmt_sound h.has (fun h' => by rw [hnone] at h'; cases h') hok
-    obtain ⟨dd, hdd⟩ : ∃ dd, termDeclOf f nt = some dd := by
+    have hwf := term_stmt_wf h.has (fun h' => by rw [hnone] at h'; cases h') hok
+    have hdd : termDeclOf f nt = some (decl.term nt (dc.args.map (Binder.toMm0 dc.args)) (depTypeOf dc.args dc.ret)) := by
       unfold termDeclOf
       rw [hd]
       simp [hnone]
-    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_term h hd hfacts hdd)
-    refine ⟨dd :: rest, ?_, by simpa [List.append_assoc] using hp⟩
+    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_term h hd hfacts hdd (term_ok_of h hwf.1 hwf.2.1 hfacts))
+    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp.1,
+      by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hdd, hrest]
   | defn ss ns nt nh dc isLocal body hd hsome hok _ ih =>
     intro E h
@@ -252,8 +272,20 @@ theorem stmts_sound {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f 
       unfold termDeclOf
       rw [hd]
       simp [hus, hdec]
-    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_term h hd hfacts hdd)
-    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp⟩
+    have hwf := term_stmt_wf (h.has.withDef (b := true)) (fun _ => rfl) hok
+    obtain ⟨hctxv, hfree⟩ := hwf.2.2 us hus v ds hdec
+    obtain ⟨v', ds', hdec', hvok⟩ := hfacts.value us hus
+    rw [hdec] at hdec'
+    simp only [Option.some.injEq, Prod.mk.injEq] at hdec'
+    obtain ⟨rfl, rfl⟩ := hdec'
+    have hdok : decl.ok E (decl.defn nt (dc.args.map (Binder.toMm0 dc.args)) (depTypeOf dc.args dc.ret) (some (ds, v))) := by
+      refine ⟨term_ok_of h hwf.1 hwf.2.1 hfacts, ?_, ?_, fun x hx => Or.inl (hfree x ?_)⟩
+      · simpa [append_dummies, ctxOf] using hctxv
+      · simpa [append_dummies, ctxOf, depTypeOf] using hvok
+      · simpa [append_dummies, ctxOf] using hx
+    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_term h hd hfacts hdd hdok)
+    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp.1,
+      by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hdd, hrest]
   | ax ss ns nt nh dc body hd hok _ ih =>
     intro E h
@@ -262,8 +294,9 @@ theorem stmts_sound {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f 
       unfold thmDeclOf
       rw [hd]
       simp [hdec]
-    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_thm h hd hdec (Or.inl rfl) (env.proof'.ax h.pf))
-    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp⟩
+    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_thm h hd hdec (Or.inl rfl) (env.proof'.ax h.pf) (thm_stmt_wf h.has rfl hok hdec))
+    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp.1,
+      by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hdd, hrest]
   | thm ss ns nt nh dc isLocal body hd hok _ ih =>
     intro E h
@@ -273,20 +306,26 @@ theorem stmts_sound {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f 
       unfold thmDeclOf
       rw [hd]
       simp [hdec]
-    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_thm h hd hdec (Or.inr rfl) (env.proof'.thm hctx hproof h.pf))
-    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp⟩
+    obtain ⟨rest, hrest, hp⟩ := ih _ (inv_thm h hd hdec (Or.inr rfl) (env.proof'.thm hctx hproof h.pf)
+      (thm_stmt_wf h.has rfl hok hdec))
+    refine ⟨_ :: rest, ?_, by simpa [List.append_assoc] using hp.1,
+      by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hdd, hrest]
 
 /-- **Soundness of the machine** (milestone V3): a proof file the machine accepts
 declares an environment, and every theorem of it is proved in the environment of the
 statements before it — `env.proof'` of the formal semantics. -/
-theorem file_sound {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.proof' E := by
+theorem file_valid {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.ok E ∧ env.proof' E := by
   have hinv : PInv f [] 0 0 0 :=
     ⟨⟨fun s sd h => by simp [ctxAt] at h, fun s sd h => by simp [env.get_sd] at h,
       fun t d h => by simp [ctxAt] at h, fun t a r o h => by cases h <;> simp_all,
       fun h' d h => by simp [ctxAt] at h, fun t d h => by simp [ctxAt] at h,
-      fun t d h => by simp [ctxAt] at h, fun t d us v ds h => by simp [ctxAt] at h⟩, env.proof'.nil⟩
-  obtain ⟨rest, hrest, hp⟩ := stmts_sound h [] hinv
-  exact ⟨rest, hrest, by simpa [List.append_assoc] using hp⟩
+      fun t d h => by simp [ctxAt] at h, fun t d us v ds h => by simp [ctxAt] at h⟩, env.proof'.nil, env.ok.nil⟩
+  obtain ⟨rest, hrest, hok, hp⟩ := stmts_valid h [] hinv
+  exact ⟨rest, hrest, by simpa using hok, by simpa using hp⟩
+
+theorem file_sound {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.proof' E := by
+  obtain ⟨E, hE, _, hp⟩ := file_valid h
+  exact ⟨E, hE, hp⟩
 
 end Verifier

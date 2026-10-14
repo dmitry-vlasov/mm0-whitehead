@@ -3,7 +3,7 @@ Free variables (milestone V3b): a free variable of a well-typed expression is a 
 variable of the context, and free variables are carried along an injective renaming of
 variables that keeps the binders.
 -/
-import Verifier.Extend
+import Verifier.StmtSound
 
 namespace Verifier
 

@@ -313,4 +313,81 @@ theorem term_stmt_wf {E : env} {c : Ctx} {allTerms : List TermDecl} (hE : EnvHas
   rw [← hkx]
   exact Finset.mem_image_of_mem _ hkret
 
+/-! ### A theorem statement -/
+
+/-- The hypotheses so far have provable sorts. -/
+def HypsProvable (c : Ctx) (st : State) : Prop :=
+  ∀ p ∈ st.hyps, ∃ ty sd, st.ty p = some ty ∧ c.sorts[ty.sort]? = some sd ∧ sd.provable = true
+
+theorem step_hypsProvable {c : Ctx} {cmd : ProofCmd} {st st' : State} (hs : Step c cmd st st')
+    (h : HypsProvable c st) : HypsProvable c st' := by
+  have hx := step_ext hs
+  have hlift : ∀ p, (∃ ty sd, st.ty p = some ty ∧ c.sorts[ty.sort]? = some sd ∧ sd.provable = true) →
+      ∃ ty sd, st'.ty p = some ty ∧ c.sorts[ty.sort]? = some sd ∧ sd.provable = true := by
+    rintro p ⟨ty, sd, hty, hsd, hprov⟩
+    have hty' : st'.ty p = (st.withStore st'.store).ty p := rfl
+    exact ⟨ty, sd, by rw [hty']; exact ty_prefix hx.store hty, hsd, hprov⟩
+  cases hs
+  case hyp e S ty sd hdef hsd hprov hstk hty =>
+    intro p hp
+    simp only [List.mem_append, List.mem_singleton] at hp
+    rcases hp with hp | rfl
+    · exact hlift p (h p hp)
+    · exact hlift p ⟨ty, sd, hty, hsd, hprov⟩
+  all_goals exact fun p hp => hlift p (h p hp)
+
+theorem run_hypsProvable {c : Ctx} : ∀ {cmds : List ProofCmd} {st st' : State}, Run c cmds st st' →
+    HypsProvable c st → HypsProvable c st'
+  | _, _, _, Run.nil _, h => h
+  | _, _, _, Run.cons _ _ _ _ _ hs hr, h => run_hypsProvable hr (step_hypsProvable hs h)
+
+theorem thm_stmt_wf {E : env} {c : Ctx} {allTerms : List TermDecl} (hE : EnvHas E c allTerms)
+    (hdef : c.isDef = false) {decl : ThmDecl} {isAx : Bool} {body : List ProofCmd}
+    (h : ThmOk c decl isAx body) {concl : sexpr} {hl : List sexpr}
+    (hdec : decodeThm allTerms decl.args.length decl.unify = some (concl, hl)) :
+    axiom_ok E (decl.args.map (Binder.toMm0 decl.args)) hl concl := by
+  have hc : { c with isDef := false } = c := by cases c; simp_all
+  obtain ⟨st, st', e, ty, sd, hload, hrun, hstk, hty, hsd, hprov, hU⟩ := h
+  rw [hc] at hrun hU
+  have hL := loadArgs_loading hload (by simp) (loading_empty c decl.args)
+  have hbwf := loaded_bindersWF hL
+  have hst : StateOk E decl.args [] c.isDef st := loaded_stateOk hL
+  have hT := loaded_storeTerms hL
+  set D := dummiesOf body
+  have hfin : StateOk E decl.args D c.isDef st' := by simpa using run_stateOk_exact hE hbwf hrun hst
+  have hx := run_ext hrun
+  have hT' := storeTerms_run hrun hT
+  rw [argsUheap_eq hL hx.heap] at hU
+  obtain ⟨concl', hl', hdec', hsx, hvl, hall⟩ := unify_end hfin.store.wf hT' hE.terms_prefix hU
+  simp only [List.length_range] at hdec' hvl hall
+  rw [hdec] at hdec'
+  simp only [Option.some.injEq, Prod.mk.injEq] at hdec'
+  obtain ⟨rfl, rfl⟩ := hdec'
+  have hctx0 := ctxOk_loaded hE hL
+  have hargs : decl.args.map (Binder.toMm0 decl.args) = ctxOf decl.args [] := by simp [ctxOf]
+  have hsplit : ctxOf decl.args D = ctxOf decl.args [] ++ D.map binder.bound := by simp [ctxOf]
+  have hlen0 : (ctxOf decl.args []).length = decl.args.length := by simp [ctxOf_length]
+  -- a node of the final store whose expression has variables below the binders
+  have hnode : ∀ p ty', st'.ty p = some ty' → (∃ sd', c.sorts[ty'.sort]? = some sd' ∧ sd'.provable = true) →
+      sexpr.VarsLt (toSexpr st'.store p) decl.args.length → sexpr.ok_prov E (ctxOf decl.args []) (toSexpr st'.store p) := by
+    intro p ty' hty' ⟨sd', hsd', hprov'⟩ hvl'
+    obtain ⟨n0, hn0, rfl⟩ := State.ty_some hty'
+    have hok := (hfin.store.nodes p n0 hn0).ok
+    rw [hsplit] at hok
+    exact ⟨n0.ty.sort, sd', ok'_shrink (by rw [hlen0]; exact hvl') hok, hE.sorts _ _ hsd', hprov'⟩
+  have hHP := run_hypsProvable hrun (by intro p hp; rw [hL.hyps] at hp; simp at hp)
+  rw [hargs]
+  refine ⟨hctx0, fun x hx' => ?_⟩
+  have hid : (List.range decl.args.length).map (toSexpr st'.store) = (List.range decl.args.length).map sexpr.var :=
+    range_map_toSexpr hL hx.store
+  rcases List.mem_cons.1 hx' with rfl | hxh
+  · have hxe : toSexpr st'.store e = x := by rw [hsx, hid, subst_id_of_varsLt hvl]
+    rw [← hxe]
+    exact hnode e ty hty ⟨sd, hsd, hprov⟩ (by rw [hxe]; exact hvl)
+  · obtain ⟨p, hp, hph⟩ := forall₂_mem_right hall x hxh
+    have hpx : toSexpr st'.store p = x := by rw [hph.1, hid, subst_id_of_varsLt hph.2]
+    obtain ⟨ty', sd', hty', hsd', hprov'⟩ := hHP p (List.mem_reverse.1 hp)
+    rw [← hpx]
+    exact hnode p ty' hty' ⟨sd', hsd', hprov'⟩ (by rw [hpx]; exact hph.2)
+
 end Verifier

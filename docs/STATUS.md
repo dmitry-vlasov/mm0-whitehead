@@ -86,9 +86,13 @@ statement on every fixture, every corpus file and 24,168 mutants (`lake exe
 verify-diff`, V5); the test found a modelling error in the machine's `Hyp` and a
 fault in the conversion, both fixed. The match with the specification is proved the
 same way (`spec_proved`, V6: a file accepted and matched proves the specification,
-`env.proof`), and agrees with `matchSpec` on every corpus pair and 652 mutants. Open:
-well-formedness of the proof file's environment (`env.ok`, V3b), the remaining part
-of `mm0.mm0`'s `ValidEnv`.
+`env.proof`), and agrees with `matchSpec` on every corpus pair and 652 mutants. And
+the proof file's environment is well-formed (`file_valid`, V3b), so that a file
+accepted and matched gives `mm0.mm0`'s `ValidEnv` of the specification but for the
+specification's own well-formedness, which the front end establishes (`spec_valid`).
+All milestones of the verifier's verification are reached; `cd theory && lake build`
+has no `sorry`. Trusted: Lean's kernel, the port of the semantics (four deviations,
+recorded), the `.mm0` front end, the byte reader, and the two conversions.
 
 ### Phase 1 acceptance
 
