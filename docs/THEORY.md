@@ -696,8 +696,9 @@ its proofs, not its nodes.
     themselves (`judgeK`): a name inside a metavariable's value, which a node above
     can still identify with a name of the condition's expression, was judged settled
     and the condition dropped; both now take the images of the visible variables, the
-    metavariables' values included (`visibleVars`, `imageVars`). The fixtures and the
-    corpus samples agree at every node in every metavariable mode after the change.
+    metavariables' values included (`visibleVars`, `imageVars`). After the change the
+    fixtures agree at every node in every metavariable mode, and the corpus samples of
+    milestone 15 (`peano`, `mm0`, `x86`, set.mm, 2 rounds) at every node.
     Only `propext`, `Classical.choice` and `Quot.sound` are used; `lake build` has no
     `sorry`. Milestones 13 and 14 keep their general postulate and their weaker
     statement up to instance each way; the exact statement subsumes them for an
