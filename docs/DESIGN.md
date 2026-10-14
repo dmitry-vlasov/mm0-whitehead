@@ -795,7 +795,15 @@ Each of these is also noted in the file it concerns.
    restriction only when the finished proof is verified. Here the two binders of a pair
    are looked up through `outer` and then `theta`, and what is still open is carried
    (above). An assertion without premises is checked too when its node is expanded;
-   `ruExpandProp` records its proof without looking at the pairs.
+   `ruExpandProp` records its proof without looking at the pairs. A condition is
+   settled when its name is a variable that no node above can replace: since
+   2026-10-14 the variables a node above can replace are those of the parent's
+   expression under `theta` *and of the metavariables' values* under it
+   (`visibleVars`), a metavariable's binding going up with every proof; before, a
+   name inside a metavariable's value was judged settled and its condition dropped,
+   though a node above could identify it with a name of the condition's expression.
+   Found by the proof of the keyed engine with conditions (`docs/THEORY.md`,
+   milestone 16), not by the tests.
 4. **`ruMakeFresherSubst`** records, as the variables of the image `v'` of `v`, the set
    `{v}`; here `{v'}`, as for every other entry (`Subst.lean`). In Russell the entry is
    then not updated when `v'` is bound later, and the statement of a step keeps `v'`
