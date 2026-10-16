@@ -167,9 +167,10 @@ and each has a fixture (`tests/fixtures/disputed`, `tests/fixtures/verify`). Of 
 mutants that both accept, mm0-c rejects 74: all are an `END` byte with data-width bits,
 point 21. No mutant made the verifier index out of bounds (`LEAN_ABORT_ON_PANIC=1`).
 
-The same comparison on hand-written files: 48 proof files, one per rule
+The same comparison on hand-written files: 50 proof files, one per rule
 (`tests/fixtures/verify`). We agree with mm0-c (its build without the `.mm0` parser,
-`mm0-c-np`) on all 48; `mm0-rs` accepts 11 that we reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed files that
+`mm0-c-np`) on 49 of them, all but `many_sorts` (130 sorts, point 22); `mm0-rs` accepts
+11 that we reject, by points 8, 10, 11 and 20. mm0-c in turn accepts two of the disputed files that
 `mm0-rs` and we reject (points 1 and 7): it is not the reference.
 
 > `mm0-rs` [...] has no command that checks a `.mmb` against a `.mm0`. That step follows
@@ -364,7 +365,7 @@ corpus of `scripts/build-corpus.sh` built — 921 checks, 0 failures, in 18 seco
 - `.mmb` corpus: 16 proof files decode, round-trip and dump. Of the 21 mutated files of
   the MM0 repository, the reader rejects the 14 it should and decodes the 7 that are
   wrong only for a verifier.
-- Verifier, hand-written: `small.mmb` and the 7 disputed files; 48 files with one rule
+- Verifier, hand-written: `small.mmb` and the 7 disputed files; 50 files with one rule
   each, with our verdict and those of `mm0-rs` and mm0-c (`mm0-c-np`); 18 specification
   cases.
 - Verifier, corpus: 15 valid proof files accepted, 1 invalid file and 7 mutants rejected.

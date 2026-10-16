@@ -95,7 +95,7 @@ structure ConvRules where
   foldS : Std.HashMap Nat Nat := {}
   deriving Inhabited
 
-/-- The type of a judgment `a ≡ b`: a sort that no file has. -/
+/-- The type of a judgment `a ≡ b`: sort 127, which no file that `Db.ofFile` accepts has. -/
 def judgmentTy : Nat := Ty.mk 127 false
 
 /-- `a ≡ b` (`strict`: `a ≡' b`) in sort `s`. -/
@@ -292,6 +292,8 @@ def convRules (f : MmbFile) (terms : Array TermInfo) (termAfter : Array Nat) (as
 /-- The assertions and terms of a proof file. -/
 def Db.ofFile (f : MmbFile) : Except String Db := do
   if f.terms.size ≥ Node.constBase then throw "more than 2^23 terms"
+  -- sort 127 is the judgments' (`judgmentTy`), which a file of 128 sorts or more has
+  if f.sorts.size ≥ 128 then throw "128 sorts or more: sort 127 is reserved for the conversion judgments"
   let mut terms := (Array.range f.terms.size).map fun t =>
     ({ name := f.termName t, ty := Ty.mk (f.termRet t).sort false, args := (f.termArgs t).map argTy } : TermInfo)
   -- the values of the defs, which refer to the terms before them

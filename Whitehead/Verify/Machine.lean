@@ -449,6 +449,10 @@ def stepOther (c : Ctx) (isDef : Bool) (op : UInt8) (data : Nat) : M Unit := do
     -- Dummy s: a new bound variable, on the stack and on the heap
     let m ← get
     if data ≥ m.numSorts then fail s!"Dummy: sort {data} is not declared before this statement"
+    -- A type word holds 7 bits of sort, as a binder does: a dummy of a sort ≥ 128 could
+    -- be the argument of no term or theorem, and would be taken for sort `data % 128`
+    -- (MMB-NOTES section 9, point 22).
+    if data ≥ 128 then fail s!"Dummy: sort {data} is the sort of no binder (sorts in types are 7 bits)"
     if c.sortMods[data]! &&& 10 != 0 then fail s!"Dummy: sort {data} is strict or free"
     if m.nextBv ≥ 55 then fail "more than 55 bound variables"
     let e ← allocVar (Ty.mk data true (Ty.bit m.nextBv))

@@ -37,6 +37,8 @@ ret_bound	marked as a bound variable	R	R
 ret_deps	the return type depends	R	R	
 pure_result	pure sort	R	R	
 many_bound	more than 55 bound variables	A	R	point 10
+many_sorts	OK	A	R	point 22
+dummy_sort_high	the sort of no binder	R	R	point 22
 sort_forward	sort 1 is not declared before this statement	R	R	
 axiom_two_on_stack	exactly one element	A	R	point 8
 axiom_with_proof	must leave its statement, an expression	A	R	point 8

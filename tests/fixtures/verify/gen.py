@@ -97,6 +97,19 @@ def term(args, ret, unify=None, body=None):
     return build(terms=[(args, ret, True, unify + END)], stmts=[stmt(STMT_TERM, body + END)])
 
 
+def many_sorts(dummy_sort, n=130):
+    """`dummy_thm` in a file of `n` sorts, its dummy of sort `dummy_sort`."""
+    stmts = BASE_STMTS[:5] + [stmt(STMT_SORT)] * (n - 5) + BASE_STMTS[5:] + [stmt(STMT_THM, (
+        R(0) + cmd(HYP) + R(0) + T(ALLSELF) + R(1)
+        + cmd(DUMMY, dummy_sort) + R(0)
+        + R(0) + R(2) + R(0) + TS(AL) + T(IMP)
+        + cmd(THM, AX5)
+        + R(0) + R(3) + R(3) + cmd(THM, MP)
+        + cmd(CONV) + R(3) + cmd(UNFOLD) + cmd(REFL)) + END)]
+    return assemble(SORTS + [0] * (n - 5), BASE_TERMS,
+                    BASE_THMS + [(A, UT(ALLSELF) + UR(0) + cmd(UHYP) + UR(0) + END)], stmts)
+
+
 A = [reg(WFF)]          # (a: wff)
 X_PH = [bound(SET, 0), reg(WFF, 1)]   # {x: set} (ph: wff x)
 
@@ -245,6 +258,10 @@ CASES = [
     ('many_bound', term([bound(SET, i) for i in range(55)] + [(1 << 63) | (SET << 56) | (1 << 55)],
                         reg(WFF)),
      'more than 55 bound variables', 'A', 'R', 'point 10'),
+    # 130 sorts: more than mm0-c's 128, fewer than the header's 256
+    ('many_sorts', many_sorts(SET), OK, 'A', 'R', 'point 22'),
+    # a dummy of sort 129 = 128 + SET where `al` wants a bound `set`
+    ('dummy_sort_high', many_sorts(SET + 128), 'the sort of no binder', 'R', 'R', 'point 22'),
     ('sort_forward',
      assemble([PROVABLE, 0], [([reg(1)], reg(0), False, None)], [],
               [stmt(STMT_SORT), stmt(STMT_TERM), stmt(STMT_SORT)]),

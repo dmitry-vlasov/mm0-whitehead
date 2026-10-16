@@ -149,8 +149,9 @@ V5. The differential test: the reference verifier against `Whitehead/Verify`
     `tests/mutate`; what it finds is fixed or recorded. (V5b, optional: the byte
     decoder against the encoder, decode after encode the identity.) **Reached on
     2026-10-14**: `lake exe verify-diff` (`theory/VDiff.lean`; the conversion of the
-    reader's output, `Verifier/OfMmb.lean`, is trusted). Results: the 49 verifier
-    fixtures agree, each rejection at the same statement; every corpus file agrees
+    reader's output, `Verifier/OfMmb.lean`, is trusted). Results: the verifier
+    fixtures agree (48 then; 50 since point 22 of `MMB-NOTES.md`, whose
+    `dummy_sort_high` the fast verifier accepted until 2026-10-16), each rejection at the same statement; every corpus file agrees
     (set.mm translation, peano, peano_hex, hol, set, mm0, x86, compiler,
     hello_mmc accepted by both; hello_assembler rejected by both at its `Sorry`);
     the mutant campaign of phase 2 — 31,800 mutants of six files, at its counts and

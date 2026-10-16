@@ -35,7 +35,7 @@ stream and unify stream in them decodes and every length field matches.
 - Tables are 8-byte aligned. The two command streams are byte-aligned.
 - `cstr` is a NUL-terminated UTF-8 string.
 - Identifiers: sorts, terms and theorems are referred to by **index** in order of
-  declaration (`sort_id` < 128, `term_id`, `thm_id` are `u32`). Names exist only in the
+  declaration (`sort_id` in a binder or return type is 7 bits, so < 128; `term_id`, `thm_id` are `u32`). Names exist only in the
   optional index (section 7).
 
 ## 2. File layout
@@ -72,7 +72,7 @@ to be multiples of 8, because it reads those tables in place through 8-aligned t
 | ------ | ---- | ----- | ------- |
 | 0  | 4 | `magic` | the bytes `4D 4D 30 42` = `"MM0B"` (as a `u32`: `0x42304D4D`) |
 | 4  | 1 | `version` | `1` |
-| 5  | 1 | `num_sorts` | number of sorts, at most 128 |
+| 5  | 1 | `num_sorts` | number of sorts (mmb.md: at most 128; see section 9, point 22) |
 | 6  | 2 | `reserved` | `0` |
 | 8  | 4 | `num_terms` | number of `term`s and `def`s together |
 | 12 | 4 | `num_thms` | number of `axiom`s and `theorem`s together |
@@ -563,7 +563,7 @@ layout, the framing and the index, `mm0-rs`; mm0-c is listed for comparison.
 
 Each row marked with a fixture was checked by running both implementations on a
 hand-assembled file from `tests/fixtures/disputed/` (`gen.py` there), `mm0-rs` as
-`mm0-rs compile x.mmb` and mm0-c as `mm0-c x.mmb < x.mm0`. Points 8, 10, 11 and 20 have
+`mm0-rs compile x.mmb` and mm0-c as `mm0-c x.mmb < x.mm0`. Points 8, 10, 11, 20 and 22 have
 fixtures among the files of `tests/fixtures/verify/` as well (`cases.tsv` names the
 point). Rows without a fixture were checked on throwaway files in the same way, or on
 the mutants in `tests/mmb/` of the MM0 repository.
@@ -591,6 +591,7 @@ the mutants in `tests/mmb/` of the MM0 repository.
 | 19 | fixed capacity limits | none | none | stack, heap, store, 256 hypotheses | none |
 | 20 | fewer statements than table entries | — | **accepts** | rejects | reject |
 | 21 | an `END` whose first byte has data-width bits (`0x40`, `0x80`, `0xC0`) | — (mmb.md: `END` is `0x00`) | accepts | rejects | accept |
+| 22 | more than 128 sorts (`many_sorts`); a `Dummy` of a sort ≥ 128 (`dummy_sort_high`) | no limit; a dummy of any sort | accepts up to 255; rejects | rejects the file; rejects | accept; reject the `Dummy` |
 
 What the implementations did with the fixtures (exit codes):
 
@@ -676,6 +677,19 @@ data. As the last byte of a statement it is an `END` whose data byte would be th
 byte of the next statement. `mm0-rs` takes it as the `END` (it looks at the opcode and at
 where the command starts), mm0-c computes a wrong statement length from it and rejects.
 Nothing depends on the choice; the reference implementation is followed.
+
+**22. The number of sorts.** The formal semantics put no bound on the sorts (`sortid`
+is `ℕ`). mmb.md and the `mm0-rs` writer limit a file to 128 sorts, because a binder or a
+return type holds its sort in 7 bits; the header's `num_sorts` is a `u8`. The `mm0-rs`
+reader accepts any count the header can hold, mm0-c rejects more than 128. We follow the
+reader: 130 sorts (`many_sorts`) are accepted. A sort ≥ 128 can then be named only by
+`Dummy` and `UDummy`, and such a dummy can never be used: no binder and no return type
+has its sort. Our type word holds 7 bits of sort as a binder does, so `Dummy` rejects a
+sort ≥ 128 (`dummy_sort_high`, a dummy of sort 129 given where `al` wants a bound `set`,
+was accepted before, being taken for sort 1; the reference checker of
+`docs/VERIFIER-THEORY.md` rejected it). `UDummy` compares the whole sort number and needs
+no such check. The prover keeps sort 127 for its conversion judgments and refuses a file
+of 128 sorts or more (`Db.ofFile`).
 
 Noticed in passing, in the formal specification: in `VerifyProofThm` (`mm0.mm0`) and
 `safe_subst` (`mm0.lean`) the test "`u` is a bound variable" looks `u` up in the *proof
