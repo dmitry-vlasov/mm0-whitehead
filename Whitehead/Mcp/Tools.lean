@@ -153,11 +153,15 @@ def getOpen (args : Json) : ToolM (Nat × Open) := do
 def putOpen (k : Nat) (o : Open) : ToolM Unit :=
   modify fun st => { st with sessions := st.sessions.set! k (some o) }
 
-/-- What a goal node is: its number, its statement, its variants, and whether it is proved. -/
+/-- What a goal node is: its number, its statement, its variants, and its proofs. A goal
+with variables is proved for an instance: `proved_as` shows the instances of a few of its
+proofs, which need not fit together with those of its siblings. -/
 def goalJson (o : Open) (h : Nat) : Json :=
   let hyp := o.session.env.hyps[h]!
-  .obj #[("node", Json.ofNat h), ("statement", o.render hyp.expr), ("variants", Json.ofNat hyp.children.size),
-         ("proved", .bool !hyp.proofs.isEmpty)]
+  let instances := (hyp.proofs.extract 0 3).map fun p => Json.str (o.render p.expr)
+  .obj (#[("node", Json.ofNat h), ("statement", o.render hyp.expr), ("variants", Json.ofNat hyp.children.size),
+         ("proofs", Json.ofNat hyp.proofs.size)] ++
+       (if hyp.expr.hasVars && !hyp.proofs.isEmpty then #[("proved_as", Json.arr instances)] else #[]))
 
 /-- The state of a session after a step: proved or not, and the size of the tree. -/
 def statusJson (o : Open) (start now : Nat) : Array (String × Json) :=
@@ -192,7 +196,7 @@ def start (c : Ctx) (args : Json) : ToolM Json := do
 def goals (args : Json) : ToolM Json := do
   let (_, o) ← getOpen args
   let n ← liftE (argNatD args "n" 20)
-  let opens := o.session.openGoals
+  let opens := o.session.openGoals.filter fun h => !o.session.hints.contains h
   return .obj #[("open", Json.ofNat opens.size), ("goals", .arr ((opens.extract 0 n).map (goalJson o))),
     ("intermediate", .arr (o.session.hints.map (goalJson o))),
     ("proved", .bool o.session.found.isSome), ("nodes", Json.ofNat o.session.env.props.size)]
@@ -214,12 +218,19 @@ def variants (c : Ctx) (args : Json) : ToolM Json := do
     | "random" => pure false
     | "used" => pure true
     | o => throw s!"`order` is random or used, not `{o}`"
+  let compact ← liftE (argBoolD args "compact" false)
   let (count, sample) ← liftE (o.session.select node f n seed byUses)
   let items := sample.map fun v =>
     let view := o.session.env.propView v.prop
-    Json.obj #[("variant", Json.ofNat v.prop), ("name", v.name), ("premises", Json.ofNat view.premises),
-      ("used", Json.ofNat view.uses), ("expanded", .bool v.expanded),
-      ("new_goals", .arr (view.goals.get.map fun e => Json.str (o.showForRule c v.step e)))]
+    let proves := o.showForRule c v.step (o.session.env.propInstance v.prop)
+    let goals := view.goals.get.map (o.showForRule c v.step)
+    if compact then
+      Json.str s!"{v.prop} {v.name} (used {view.uses}{if v.expanded then ", chosen" else ""}): \
+        {if goals.isEmpty then "closes" else " ; ".intercalate goals.toList} => {proves}"
+    else
+      Json.obj #[("variant", Json.ofNat v.prop), ("name", v.name), ("premises", Json.ofNat view.premises),
+        ("used", Json.ofNat view.uses), ("expanded", .bool v.expanded), ("proves", Json.str proves),
+        ("new_goals", .arr (goals.map Json.str))]
   return .obj #[("node", Json.ofNat node), ("count", Json.ofNat count), ("sample", .arr items),
     ("ms", Json.ofNat ((← IO.monoMsNow) - t0))]
 
@@ -244,12 +255,22 @@ def run (c : Ctx) (args : Json) : ToolM Json := do
   let text ← liftE (argStr args "tactic")
   let ms ← liftE (argNatD args "ms" 1000)
   let nodes ← liftE (argNatD args "nodes" 1000000)
+  let node? := args.get? "node" |>.bind (·.nat?)
+  if let some h := node? then
+    if !o.session.isGoal h then throw s!"{h} is not a goal node"
+  let before := o.session.openGoals
   let result ← match Dsl.parseTactic (o.session.dslCtx (some c.spec)) text with
-    | .ok t => o.session.run t.strategy { maxProps := nodes, maxMs := ms }
+    | .ok t =>
+      let t := match node? with
+        | some h => t.focus h
+        | none => t
+      o.session.run t.strategy { maxProps := nodes, maxMs := ms }
     | .error e => throw (Dsl.ParseError.show text e)
   let (session, ending, stop) ← liftE result
   let o := { o with session }
   putOpen k o
+  let after := session.openGoals
+  let closed := before.filter fun h => !after.contains h
   let endText := match ending with
     | .proved => "proved"
     | .exhausted => "done"
@@ -257,7 +278,9 @@ def run (c : Ctx) (args : Json) : ToolM Json := do
   let stopText := match stop with
     | some .time => "time" | some .nodes => "nodes" | some .tuples => "tuples" | some .work => "work"
     | some .memory => "memory" | none => ""
-  return .obj (#[("ending", endText), ("limit", stopText)] ++ statusJson o t0 (← IO.monoMsNow))
+  return .obj (#[("ending", endText), ("limit", stopText), ("closed", .arr ((closed.extract 0 10).map (goalJson o))),
+    ("closed_count", Json.ofNat closed.size), ("open_before", Json.ofNat before.size),
+    ("open_after", Json.ofNat after.size)] ++ statusJson o t0 (← IO.monoMsNow))
 
 def goal (c : Ctx) (args : Json) : ToolM Json := do
   let t0 ← IO.monoMsNow
@@ -354,7 +377,8 @@ def tools : Array Tool := #[
     schema #[sessionProp, prop "node" "integer" "the goal node", filterProp,
              prop "n" "integer" "the size of the sample; 5 by default",
              prop "seed" "integer" "the seed of the sample; 0 by default",
-             prop "order" "string" "`random`, a sample drawn from the seed (the default), or `used`: those whose assertions the most proofs before the theorem use, first"] #["session", "node"]⟩,
+             prop "order" "string" "`random`, a sample drawn from the seed (the default), or `used`: those whose assertions the most proofs before the theorem use, first",
+             prop "compact" "boolean" "one line per variant: its number, name, uses, new goals, and what it proves; false by default"] #["session", "node"]⟩,
   ⟨"choose", "Expands chosen variants of a goal node. Their new goals become goal nodes; proofs are carried down by the engine. The variants not chosen stay, and a tactic may still expand them.",
     schema #[sessionProp, prop "node" "integer" "the goal node",
              ("variants", .obj #[("type", "array"), ("items", .obj #[("type", "integer")]),
@@ -362,7 +386,8 @@ def tools : Array Tool := #[
   ⟨"run", "Runs a tactic of the language on the tree as it is, within a time and a size. Limited by `nodes` and not by time, a run is deterministic.",
     schema #[sessionProp, prop "tactic" "string" "a tactic, such as `limited(bfs, depth=3)` or `filter(scope(ax_mp, syl), bfs)`",
              prop "ms" "integer" "the time allowed, in milliseconds; 1000 by default",
-             prop "nodes" "integer" "the largest number of assertion nodes of the tree; 1000000 by default"] #["session", "tactic"]⟩,
+             prop "nodes" "integer" "the largest number of assertion nodes of the tree; 1000000 by default",
+             prop "node" "integer" "only in the subtree of this goal node (as `focus`)"] #["session", "tactic"]⟩,
   ⟨"goal", "Offers an intermediate goal: a statement, in the notation of the specification, that may help. It gets a goal node of its own; once it is proved, by choices, runs or deductions, it is a fact that proves the subgoals it fits and can be deduced from. `_` in it is a metavariable that its proof finds.",
     schema #[sessionProp, prop "statement" "string" "the statement, without the `$`s"] #["session", "statement"]⟩,
   ⟨"facts", "The facts of the forward front of a session: their statements, what made them, and whether they are on the front.",
@@ -378,8 +403,20 @@ def tools : Array Tool := #[
   ⟨"close", "Ends a session and frees its tree.", schema #[sessionProp] #["session"]⟩
 ]
 
-/-- Calls a tool. -/
-def call (c : Ctx) (name : String) (args : Json) : ToolM Json :=
+/-- The names of the arguments that a tool takes. -/
+def Tool.params (t : Tool) : Array String :=
+  match t.input.get? "properties" with
+  | some (.obj kvs) => kvs.map (·.1)
+  | _ => #[]
+
+/-- Calls a tool. An argument that the tool does not take is an error, which names those
+it takes. -/
+def call (c : Ctx) (name : String) (args : Json) : ToolM Json := do
+  if let some t := tools.find? (·.name == name) then
+    if let .obj kvs := args then
+      for (k, _) in kvs do
+        if !t.params.contains k then
+          throw s!"`{name}` has no argument `{k}`; it takes {", ".intercalate (t.params.map (s!"`{·}`")).toList}"
   match name with
   | "language" => return .obj #[("language", Json.str Dsl.help)]
   | "find" => find c args

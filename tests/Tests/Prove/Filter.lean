@@ -75,6 +75,9 @@ def filterTests : TestM Unit := do
   checkEq "filter: a new goal by a pattern" (count "and(name(ax_mp), goal($ _ -> ph -> ch $))") 1
   checkEq "filter: a new goal that is not there" (count "and(name(ax_mp), goal($ ch -> _ $))") 0
   checkEq "filter: scope" (count "scope(ax_mp, a1i)") (count "or(name(ax_mp), name(a1i))")
+  checkEq "filter: a new goal that is a bare variable" (count "and(name(ax_mp), bare)") 1
+  checkEq "filter: a new goal that a premise proves" (count "and(name(ax_mp), hyp)") 1
+  checkEq "filter: neither" (count "and(name(a1i), or(bare, hyp))") 0
   match sel "name(ax_mp)" with
   | .ok (_, vs) => checkEq "filter: the sample is the variant" (vs.map (·.name)) #["ax_mp"]
   | .error msg => check "filter: the sample is the variant" false msg
@@ -229,8 +232,11 @@ def dslTests : TestM Unit := do
   | _ => check "dsl: a term with named arguments" false
   checkEq "dsl: tactics" (#["bfs", "forward", "both", "done", "filter(name(ax_*), bfs)",
       "limited(bfs, 100, 3)", "seq(bfs, limited(filter(not(kind(unfold)), bfs), depth=2))",
-      "filter(and(premises(max=1), scope(ax_mp, a1i)), bfs)", "filter(used(min=3), bfs)"].map tacticError)
-    #["accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted"]
+      "filter(and(premises(max=1), scope(ax_mp, a1i)), bfs)", "filter(used(min=3), bfs)",
+      "focus(0, filter(not(bare), bfs))"].map tacticError)
+    #["accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted",
+      "accepted"]
+  checkEq "dsl: focus needs a node" (tacticError "focus(bfs)") "6: `node` of `focus` is a number"
   checkEq "dsl: unclosed arguments" (tacticError "limited(bfs") "11: the arguments of `limited` are not closed by `)`"
   checkEq "dsl: text after the term" (tacticError "bfs)") "3: expected the end of the text"
   checkEq "dsl: a missing argument" (tacticError "filter(all)") "0: `filter` needs a tactic"

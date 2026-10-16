@@ -1629,6 +1629,35 @@ lists the components.
       to the same expression.
   - **Proofs:** `proof` lists the proof as numbered steps, each with the steps it uses
     and its statement, checked by the verifier.
+  - **The first pilot, 2026-10-16:** a Claude subagent worked three set.mm theorems
+    through the bridge, ones that breadth-first does not prove in 1 s, with a budget of
+    about 40 calls each.
+    - **Results:** all three proved, and the verifier accepted each proof:
+      - `jaob` in 15 calls;
+      - `pm5_32` in 25 calls, with two intermediate goals, both proved and then used;
+      - `baroco` in 10 calls.
+    - **The agent's own caveat:** it chose nearly every step from its memory of
+      set.mm's proofs. The filters let it look up steps it already had in mind; they
+      did not let it find steps it did not know. The one structural filter it relied
+      on, `goal($ wal _ _ $)`, took 717 variants to 1.
+    - **Fixed after it:**
+      - an argument a tool does not take is an error that names those it takes;
+      - each variant shows what it proves, the goal under its unifier, so a closing
+        step shows what it puts for the goal's variables;
+      - a goal node shows its number of proofs and, if it has variables, the instances
+        proved (`proved_as`), in place of a `proved` that meant "some instance";
+      - `run` takes a `node` to work in its subtree (and the language has
+        `focus(N, t)`), and reports the goals it closed and the open goals before and
+        after;
+      - `variants` has a compact mode of one line per variant;
+      - the filters `hyp` (a new goal that a premise proves) and `bare` (a new goal
+        that is a bare variable);
+      - `goals` no longer lists an open intermediate goal twice;
+      - the language says that the depth of `limited` counts from the root.
+    - **Not done, open point 7:** carrying a closed sibling's bindings to the open
+      siblings. In the tree, siblings are independent until their proofs are joined at
+      their parent. So what is consistent shows only at the parent, among its joined
+      proofs, which the agent sees as `proved_as` there.
   - **A bridge for a shell** (`scripts/mcp-bridge.py`): it keeps one server up behind a
     port of 127.0.0.1, and each `call <tool> '<json>'` prints one result. It serves an
     agent that has a shell but no MCP client, and trying the server by hand.
@@ -1735,6 +1764,8 @@ lists the components.
 6. Whether an intermediate goal should be usable before it is proved: whether the
    agent should see that the main goal follows from S while S is still open
    ("Intermediate goals", "Not built").
+7. Whether a choice at one sibling should narrow the variants shown at the others, by
+   the bindings of the proofs joined at their parent ("The first pilot").
 
 ### Order of building (a proposal)
 

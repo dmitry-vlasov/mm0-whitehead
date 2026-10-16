@@ -46,6 +46,12 @@ inductive Filter where
   /-- The assertion is used in at least this many proofs of the theorems before the one
   being proved (`Uses.lean`). -/
   | used (min : Nat)
+  /-- Backward: one of the new goals unifies with a premise of the theorem, which would
+  prove it at once. -/
+  | hyp
+  /-- Backward: one of the new goals is a bare variable, such as the minor premise of
+  modus ponens: anything fits it. -/
+  | bare
   | and (fs : Array Filter)
   | or (fs : Array Filter)
   | not (f : Filter)
@@ -62,6 +68,8 @@ structure View where
   result : Exp
   /-- In how many proofs before the theorem the assertion is used; 0 for an unfolding. -/
   uses : Nat := 0
+  /-- How many of the new goals unify with a premise of the theorem. -/
+  closable : Thunk Nat := Thunk.pure 0
 
 /-- Does `name` match `glob`, in which `*` stands for any characters? -/
 partial def globMatch (glob name : String) : Bool :=
@@ -88,6 +96,8 @@ partial def eval (f : Filter) (v : View) : Bool :=
   | .goal p => v.goals.get.any (·.matchesPattern p)
   | .result p => v.result.matchesPattern p
   | .used n => v.uses ≥ n
+  | .hyp => v.closable.get > 0
+  | .bare => v.goals.get.any (·.isVar)
   | .and fs => fs.all (·.eval v)
   | .or fs => fs.any (·.eval v)
   | .not f => !f.eval v
@@ -115,8 +125,20 @@ def Env.propView (env : Env) (p : Nat) : View :=
       match prop.unif.bind (·.toSubst) with
       | some u => prop.rule.hyps.map u.apply
       | none => prop.rule.hyps.map prop.outer.apply |>.map prop.sub.apply
+  let closable := Thunk.mk fun _ => (goals.get.filter fun g => !(env.premises.unify g).isEmpty).size
   { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size, goals,
-    result := env.hyps[prop.parent]!.expr, uses := env.stepUses prop.step }
+    result := env.hyps[prop.parent]!.expr, uses := env.stepUses prop.step, closable }
+
+/-- The goal of assertion node `p` as the node would prove it: under its unifier, which
+shows what it puts for the goal's variables. -/
+def Env.propInstance (env : Env) (p : Nat) : Exp :=
+  let prop := env.props[p]!
+  let goal := env.hyps[prop.parent]!.expr
+  if prop.expanded then prop.sub.apply goal
+  else
+    match prop.unif.bind (·.toSubst) with
+    | some u => u.apply goal
+    | none => goal
 
 /-- The view of fact `f` as the deduction that made it: the assertion node under it. A
 premise of the task is not a deduction. -/

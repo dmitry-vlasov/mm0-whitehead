@@ -146,6 +146,9 @@ def docs : Array Doc := #[
     "what the step proves matches the pattern: the goal, backward; the fact deduced, forward"⟩,
   ⟨"used", "filter", "used(N) | used(min=N)",
     "the assertion is used in at least N proofs of the theorems before the one being proved"⟩,
+  ⟨"hyp", "filter", "hyp", "backward: one of the new goals unifies with a premise of the theorem, which proves it at once"⟩,
+  ⟨"bare", "filter", "bare",
+    "backward: one of the new goals is a bare variable, which anything fits, such as the minor premise of ax_mp"⟩,
   ⟨"and", "filter", "and(f1, f2, ...)", "every filter passes"⟩,
   ⟨"or", "filter", "or(f1, f2, ...)", "one of the filters passes"⟩,
   ⟨"not", "filter", "not(f)", "the filter does not pass"⟩,
@@ -155,8 +158,9 @@ def docs : Array Doc := #[
   ⟨"done", "tactic", "done", "does nothing"⟩,
   ⟨"filter", "tactic", "filter(f, t)", "t, expanding only the variants that pass the filter f; the others stay leaves"⟩,
   ⟨"limited", "tactic", "limited(t, size=N, depth=N)",
-    "t, until N more assertion nodes are made, and only leaves at depth N or less (0: no limit); the time is a limit of the run"⟩,
-  ⟨"seq", "tactic", "seq(t1, t2, ...)", "each tactic in turn, the next when the one before is done"⟩
+    "t, until N more assertion nodes are made, and only leaves at depth N or less, counted from the root (0: no limit); the time is a limit of the run"⟩,
+  ⟨"seq", "tactic", "seq(t1, t2, ...)", "each tactic in turn, the next when the one before is done"⟩,
+  ⟨"focus", "tactic", "focus(N, t)", "t, only in the subtree of goal node N"⟩
 ]
 
 /-- The list of the components, by sort. -/
@@ -258,6 +262,8 @@ partial def filter (c : Ctx) (a : Ast) : Except ParseError Filter := do
     | "result" =>
       checkNames name args #["pattern"]
       return .result (← pattern c name pos (arg? args "pattern" 0))
+    | "hyp" => return .hyp
+    | "bare" => return .bare
     | "used" =>
       checkNames name args #["min"]
       return .used (← num name "min" pos (arg? args "min" 0))
@@ -294,6 +300,11 @@ partial def tactic (c : Ctx) (a : Ast) : Except ParseError AnyStrategy := do
       let size ← up (numOr name "size" 0 (arg? args "size" 1))
       let depth ← up (numOr name "depth" 0 (arg? args "depth" 2))
       return (← tactic c t).limited size.down depth.down
+    | "focus" =>
+      let _ ← up (checkNames name args #["node", "tactic"])
+      let node ← up (num name "node" pos (arg? args "node" 0))
+      let some t := arg? args "tactic" 1 | fail pos "`focus` needs a tactic"
+      return (← tactic c t).focus node.down
     | "seq" =>
       let _ ← up (checkNames name args #[])
       let some first := args[0]? | fail pos "`seq` needs at least one tactic"

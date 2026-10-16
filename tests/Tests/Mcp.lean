@@ -134,6 +134,23 @@ def serverTests : TestM Unit := do
   let (chosen, err) ← callTool c st 8 "choose" (.obj #[("session", Json.ofNat 0), ("node", Json.ofNat 0),
     ("variants", .arr #[Json.ofNat mp])])
   check "server: choose" (!err && ((chosen.get? "proved").bind (·.bool?)) == some false) chosen.compress
+  -- the minor premise ?0 is proved for instances: the premises
+  let newGoals := (chosen.get? "chosen").bind (·.arr?) |>.bind (·[0]?) |>.bind (·.get? "new_goals") |>.bind (·.arr?)
+  let minor := (newGoals.bind (·[0]?)).getD .null
+  let major := ((newGoals.bind (·[1]?)).bind (·.get? "node") |>.bind (·.nat?)).getD 0
+  check "server: a goal with a variable shows the instances it is proved for"
+    (((minor.get? "proofs").bind (·.nat?)).any (· ≥ 1) &&
+      ((minor.get? "proved_as").map (·.compress)).any (contains · "ph -> ps")) minor.compress
+  -- a closer shows what it puts for the variable: ax_1 at ?0 -> ph -> ch proves ch -> ph -> ch
+  let (vs, _) ← callTool c st 81 "variants" (.obj #[("session", Json.ofNat 0), ("node", Json.ofNat major),
+    ("filter", "name(ax_1)")])
+  checkEq "server: what a closing step proves"
+    ((vs.get? "sample").bind (·.arr?) |>.bind (·[0]?) |>.bind (·.get? "proves") |>.bind (·.str?)) (some "ch -> ph -> ch")
+  let (vs, _) ← callTool c st 82 "variants" (.obj #[("session", Json.ofNat 0), ("node", Json.ofNat major),
+    ("filter", "name(ax_1)"), ("compact", .bool true)])
+  check "server: a compact line per variant"
+    (((vs.get? "sample").bind (·.arr?) |>.bind (·[0]?) |>.bind (·.str?)).any fun line =>
+      contains line "ax_1" && contains line "closes => ch -> ph -> ch") vs.compress
   let (g, err) ← callTool c st 9 "goal" (.obj #[("session", Json.ofNat 0), ("statement", "(ph -> ps) -> ph -> ch")])
   let h := ((g.get? "goal").bind (·.get? "node") |>.bind (·.nat?)).getD 0
   check "server: an intermediate goal" (!err && h > 0) g.compress
@@ -152,6 +169,14 @@ def serverTests : TestM Unit := do
   let (ran, _) ← callTool c st 14 "run" (.obj #[("session", Json.ofNat 1), ("tactic", "limited(bfs, depth=3)"),
     ("nodes", Json.ofNat 100000)])
   checkEq "server: run" ((ran.get? "ending").bind (·.str?)) (some "proved")
+  check "server: run says what it closed" (((ran.get? "closed_count").bind (·.nat?)).any (· ≥ 1) &&
+    ((ran.get? "open_before").bind (·.nat?)).isSome) ran.compress
+  let _ ← callTool c st 141 "start" (.obj #[("theorem", "syl")])
+  let (ran, err) ← callTool c st 142 "run" (.obj #[("session", Json.ofNat 2), ("tactic", "limited(bfs, depth=3)"),
+    ("node", Json.ofNat 0), ("nodes", Json.ofNat 100000)])
+  check "server: run in the subtree of a node" (!err && (ran.get? "ending").bind (·.str?) == some "proved") ran.compress
+  checkEq "server: run at a node that is not one"
+    (← callTool c st 143 "run" (.obj #[("session", Json.ofNat 2), ("tactic", "bfs"), ("node", Json.ofNat 100000)])).2 true
   -- the errors of the tools are results for the agent
   let errText (r : Json × Bool) : String := if r.2 then (r.1.str?).getD "" else "not an error"
   checkEq "server: no such session" (errText (← callTool c st 15 "goals" (.obj #[("session", Json.ofNat 9)])))
@@ -164,6 +189,8 @@ def serverTests : TestM Unit := do
   checkEq "server: an axiom is not a theorem" (errText (← callTool c st 18 "start" (.obj #[("theorem", "ax_1")])))
     "`ax_1` is an axiom: there is nothing to prove"
   checkEq "server: no such tool" (errText (← callTool c st 19 "prove" (.obj #[]))) "there is no tool `prove`"
+  checkEq "server: an argument the tool does not take"
+    (errText (← callTool c st 191 "find" (.obj #[("pattern", "a*")]))) "`find` has no argument `pattern`; it takes `name`, `limit`"
   -- after an error the sessions are still there
   let (gs, err) ← callTool c st 20 "goals" (.obj #[("session", Json.ofNat 0)])
   check "server: the session after the errors" (!err && (gs.get? "proved").bind (·.bool?) == some true) gs.compress

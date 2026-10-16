@@ -33,6 +33,17 @@ def Env.propDepth (env : Env) (p : Nat) : Nat := Id.run do
     | none => return d
   return d
 
+/-- Is assertion node `p` in the subtree of goal node `h`: is `h` its parent, or the parent
+of an assertion node above it? -/
+def Env.isUnder (env : Env) (p h : Nat) : Bool := Id.run do
+  let mut g := env.props[p]!.parent
+  for _ in [0:env.hyps.size] do
+    if g == h then return true
+    match env.hyps[g]!.parent with
+    | some q => g := env.props[q]!.parent
+    | none => return false
+  return false
+
 namespace Strategy
 
 /-- `s`, seeing as leaves only the assertion nodes that `keep` admits (`ruFocusTactic`).
@@ -112,6 +123,9 @@ def limited (a : AnyStrategy) (size depth : Nat) : AnyStrategy :=
   if size == 0 then a else ⟨a.strategy.sized size⟩
 
 def seq (a b : AnyStrategy) : AnyStrategy := ⟨a.strategy.seq b.strategy⟩
+
+/-- `a`, only in the subtree of goal node `h` (Russell's `focus`, with one seed). -/
+def focus (a : AnyStrategy) (h : Nat) : AnyStrategy := ⟨a.strategy.restrict fun env p => env.isUnder p h⟩
 
 end AnyStrategy
 
