@@ -437,6 +437,15 @@ and one search per physical core (12). Run on 2026-10-12 — 153 checks, 0 failu
   known proof failed to unify, and no proof was rejected. The allowance is 5%: the
   whole of set.mm, with two hours, has 2.9% at a limit.
 
+Run again on 2026-10-16, after the search loop was split for sessions (`d53b8de`) and
+`applyForward` took `fillers` (`77a6a0d`): 153 checks, 0 failures, 1 skip, in 29
+minutes, with `--max-mem 24`. The counts bounded by time or memory moved a little:
+search backward 136 of 281, peano 91 of 270, both directions 167 of 281; at a limit 13
+of `mm0` and 103 of set.mm's sample, 4 of them by memory. To tell noise from a change,
+the binaries before and after were run on the same set.mm sample (every 10th theorem
+of the first two parts) with a node limit and no time limit: `bfs`, `both` and
+`forward` give the same result for every theorem, and byte-identical `.mmb` files.
+
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
 with every kind of notation gives the same trees through `mm0-rs` as through our
