@@ -1391,15 +1391,129 @@ Answered on 2026-10-12:
   is `Limits.joinCap`, `--join-cap N|all`, set into `Env.joinCap` when a search starts.
   The defaults are Russell's, 512 and 4. Nothing is open.
 
-## Phase 4: linear subproofs and ranking
+## Phase 4: the interaction layer
 
-Phase 3 was accepted on 2026-10-13. Phase 4 is the research layer of `CLAUDE.md`:
-linear subproofs mined from the set.mm translation and exposed to the prover as
-derived rules; an environment API for learned policies, and a dataset for premise
-ranking. It is designed here before it is built, and the questions at the end come
-first. Only the miner is built.
+Phase 3 was accepted on 2026-10-13. The first design of phase 4 (2026-10-13, kept below
+under "Mining and ranking") listed techniques: chain mining, schemas, macro-actions,
+ranking and a dataset. It did not say what they serve. This design, agreed with the
+author on 2026-10-16, starts from the use instead. Mining and ranking become parts of
+it. Only the miner is built.
 
-### What Russell has
+### Purpose
+
+- **Two uses:** Whitehead is an interactive prover for humans, and one for AI
+  agents, which includes benchmarking. Both follow the same procedure; the front-ends
+  differ in how they present it.
+- **What the engine is for:** to free the layer above it from metavariables,
+  substitutions and unifiers. Above the engine, one reasons about the nodes of the
+  proof variant tree and their variants only.
+- **What an agent does:** it **chooses variants** and **offers intermediate goals**.
+  Tactics do the rest of the expansion. "Clicking on a node" (ARGO talk, slide 7) is a
+  metaphor for choosing a variant; the work with substitutions underneath is the
+  engine's.
+
+### Choosing variants (backward)
+
+- **A variant:** a variant of a goal node (`RuProverRoot`, `RuProverExp`) is one
+  candidate step under it. In Russell that is an assertion node (`RuProverProp`); in
+  the port it may also be an unfolding step (def, occurrence). A path through the tree
+  is chosen node by node, as the backward tree grows from the goal toward the
+  premises.
+- **Narrowing by filters:** a goal has thousands of candidates at set.mm scale
+  (`tree.flow`: about 1,800 for one goal). The agent does not look at each one. It
+  applies a filter and gets back the count and a few samples. Guessing from the
+  samples, it tightens the filter, or loosens it when nothing is left, until a few
+  remain, and then it chooses among them. Example: 30,000 → 300 → 0 (loosen) → 5 →
+  choose 2. The procedure is the same for a human and for an AI.
+- **A choice is a focus:** the chosen variants are expanded and the others stay as
+  leaves. Nothing is pruned, so a fair tactic can still reach every variant, and
+  completeness is untouched.
+- **The forward direction:** how variants are chosen there is not decided. The
+  backward direction comes first.
+
+### Filters
+
+- **What a filter is:** a predicate over the candidate variants of one goal node,
+  built from atoms and combinators. The agent tightens or loosens it through the
+  parameters. A filter reads the tree and never changes it.
+- **First atoms:**
+  - the assertion's name, by pattern;
+  - the scope (as Russell's `scoped` whitelist);
+  - the kind of step (assertion or unfolding);
+  - the number of new goals;
+  - the statements of the new goals, by an expression pattern.
+- **Combinators:** `and`, `or`, `not`, `sample(n)`.
+- **Later atoms:** a rank from a ranking model (top k), and a mined chain that starts
+  with the variant (see "Mining and ranking").
+
+### One DSL for tactics and filters
+
+- **Two sorts in one grammar:** the language extends Russell's tactic DSL
+  (`russell-flow/docs/tactics-language.md`). A tactic may take a filter; a filter
+  never takes a tactic. Illustrative only: `limited(bfs(filter=and(scope(prop),
+  goals(<= 2))), depth=5)`.
+- **Russell's selectors** (`all`, `frontier`, `leaf(id)`, `assertion(name)`, for
+  `focus` and `track`) choose nodes; filters choose the variants of a node.
+  `assertion(name)` serves as both.
+- **In the port:** a `Strategy` expands only the leaves that pass its filter.
+
+### Intermediate goals
+
+- **What it is:** an expression S offered by a user, who may be a human, an AI, or an
+  ML algorithm such as a lemma generator. What S contains is the engine's business.
+- **Its role:** S is a hint that *may* lead to a proof. It may, but need not, be
+  deduced from the premises, and it may, but need not, be used in the proof of the
+  main goal. It does not, in general, split the search into two smaller ones.
+- **Deduced forward from the premises:** S becomes a new fact of the forward frontier.
+- **Used in the proof of the main goal:** S becomes a node of the backward frontier,
+  to be proved backward or reached by the forward frontier.
+- **New:** Russell has no counterpart.
+
+### The session
+
+- **The tree persists between requests,** with stable node numbers. The search loop
+  (`searchCore`) has to pause and resume with its tree, where today it runs to the
+  end.
+- **Operations:**
+  - `variants(node, filter)` returns the count and samples;
+  - `choose(node, variants)` expands the chosen ones;
+  - `goal(S)` offers an intermediate goal;
+  - `run(tactic)` runs a tactic within its limits;
+  - a view of the tree and of the frontier;
+  - `proof()` extracts the proof as `.mmb`, checked by the verifier.
+- **Front-ends:** for AI, a text protocol (MCP or JSON lines) that is deterministic,
+  reports cost, and logs traces. For humans, the same operations in an editor (Russell
+  has an LSP server and a VS Code extension, `russell-flow/docs/vscode-extension.md`).
+
+### Measurement
+
+- **Filter quality on set.mm:** the oracle (`Prove.oracle`) knows which variant the
+  stored proof uses at each node. For a filter, measure how many variants it leaves,
+  and whether the proof's variant is among them.
+
+### Open
+
+1. How variants are chosen in the forward direction.
+2. Which front-end comes first.
+3. The questions of 2026-10-13 below. They concern the chain and rank atoms, and do
+   not block the session.
+
+### Order of building (a proposal)
+
+1. A resumable search and the session operations as a Lean API, tested on the fixtures.
+2. The first filter atoms and combinators, and a `Strategy` that takes a filter.
+3. The DSL for both sorts.
+4. Intermediate goals in the engine.
+5. The front-ends.
+6. Filter quality measured on set.mm.
+
+### Mining and ranking (the design of 2026-10-13)
+
+What follows is the first design, kept as it was written. In the design above, its
+chains and ranking become filter atoms, and its dataset comes from the oracle runs and
+the session traces.
+
+#### What Russell has
 
 Two layers, of different standing (`CLAUDE.md`: the Russell source is the final judge,
 but what Claude Code wrote there is not the author's word).
@@ -1430,7 +1544,7 @@ but what Claude Code wrote there is not the author's word).
   mean reciprocal rank by replaying proofs). `commands/find_linear_chains.flow` counts
   the theorems with a spine of a given depth, offline.
 
-### The model for MM0
+#### The model for MM0
 
 A **chain** is a path of `k` steps in a proof tree, each proving one hypothesis of the
 one above it (`Chains.lean`). With the positions it is a derived rule: compose the
@@ -1484,7 +1598,7 @@ assertion, and whether the node is a step of the known proof. That is the premis
 ranking dataset; it needs no new engine, only an export. A learned policy is then a
 strategy that orders `expand`.
 
-### Questions (2026-10-13)
+#### Questions (2026-10-13)
 
 1. What is a linear subproof for you: any chain of steps, which is what `prove chains`
    counts, or Russell's spine — a chain from a premise of the theorem to its goal with

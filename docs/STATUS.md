@@ -9,9 +9,12 @@ Last updated: 2026-10-16.
 **Phase 3 — prover**: done; accepted on 2026-10-13, with both acceptance tests passed
 (report below). Two known gaps are carried under "Next steps": shared conversions in
 the replay reader, and the checking of a proof found for a task with metavariables.
-**Phase 4 — pattern mining and ranking**: started on 2026-10-13, and paused the same
-day. The design, with its questions, is in `DESIGN.md` ("Phase 4"); the first tool, the
-chain miner (`prove chains`), is built, and its numbers are below.
+**Phase 4 — the interaction layer**: started on 2026-10-13 as pattern mining and
+ranking, and paused the same day. Redesigned on 2026-10-16 around how humans and AI
+agents use the prover: they choose variants by refining composable filters, and they
+offer intermediate goals, while tactics do the rest. Mining and ranking become filter
+atoms. The design is in `DESIGN.md` ("Phase 4"). The chain miner (`prove chains`) is
+built, and its numbers are below.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -499,4 +502,6 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    clock and the memory are now looked at before each forward application and between
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
-4. Phase 4: the design waits on the answers to its questions (`DESIGN.md`, "Phase 4").
+4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
+   starting with a resumable search and the session operations. Open: how variants are
+   chosen forward, and which front-end comes first.
