@@ -1,6 +1,6 @@
 name = "whitehead-theory"
 version = "0.1.0"
-defaultTargets = ["Theory", "Spec", "Verifier"]
+defaultTargets = ["Theory", "Spec", "Verifier", "Mutate", "ref-search", "diff-test", "verify-diff", "certify"]
 
 [leanOptions]
 autoImplicit = false

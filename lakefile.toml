@@ -1,6 +1,6 @@
 name = "mm0-whitehead"
 version = "0.1.0"
-defaultTargets = ["mm0-whitehead"]
+defaultTargets = ["Whitehead", "Tests", "mm0-whitehead", "test", "mutate", "thorough"]
 testDriver = "test"
 
 [leanOptions]
