@@ -29,6 +29,8 @@ structure Ctx where
   hypIndexes : HypIndexes
   vc : Verify.Ctx
   spec : Notation
+  /-- How often each assertion is used in the proofs of the file (`Uses.lean`). -/
+  uses : Uses
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -60,7 +62,8 @@ def Ctx.load (mm0 mmb : System.FilePath) : IO (Except String Ctx) := do
   let nt := Notation.ofSpec st file
   let db := nt.names.foldl (init := db) fun db (i, name) =>
     if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
-  return .ok { db, index := db.index, hypIndexes := db.hypIndexes, vc := Verify.Ctx.ofFile file, spec := nt }
+  return .ok { db, index := db.index, hypIndexes := db.hypIndexes, vc := Verify.Ctx.ofFile file, spec := nt,
+               uses := Uses.ofFile file db.asserts.size }
 
 /-! ### Arguments -/
 
@@ -177,7 +180,7 @@ def start (c : Ctx) (args : Json) : ToolM Json := do
   let thm ← liftE (c.theorem (← liftE (argStr args "theorem")))
   let forward ← liftE (argBoolD args "forward" false)
   let maxFacts ← liftE (argNatD args "max_facts" 512)
-  let env := Env.init c.db c.index (c.db.task thm) c.hypIndexes
+  let env := { Env.init c.db c.index (c.db.task thm) c.hypIndexes with uses := c.uses }
   let session ← Session.startFor c.vc env forward { maxFacts }
   let o : Open := { session, thm, printer := c.spec.printer c.db (c.spec.binderNames thm) }
   let k := (← get).sessions.size
@@ -207,11 +210,15 @@ def variants (c : Ctx) (args : Json) : ToolM Json := do
   let f ← readFilter c o args
   let n ← liftE (argNatD args "n" 5)
   let seed ← liftE (argNatD args "seed" 0)
-  let (count, sample) ← liftE (o.session.select node f n seed)
+  let byUses ← match ← liftE (argStrD args "order" "random") with
+    | "random" => pure false
+    | "used" => pure true
+    | o => throw s!"`order` is random or used, not `{o}`"
+  let (count, sample) ← liftE (o.session.select node f n seed byUses)
   let items := sample.map fun v =>
     let view := o.session.env.propView v.prop
     Json.obj #[("variant", Json.ofNat v.prop), ("name", v.name), ("premises", Json.ofNat view.premises),
-      ("expanded", .bool v.expanded),
+      ("used", Json.ofNat view.uses), ("expanded", .bool v.expanded),
       ("new_goals", .arr (view.goals.get.map fun e => Json.str (o.showForRule c v.step e)))]
   return .obj #[("node", Json.ofNat node), ("count", Json.ofNat count), ("sample", .arr items),
     ("ms", Json.ofNat ((← IO.monoMsNow) - t0))]
@@ -346,7 +353,8 @@ def tools : Array Tool := #[
   ⟨"variants", "The variants of a goal node that pass a filter: how many, and a sample, each with the new goals it would make. Tighten the filter until a few are left, loosen it if none are; then `choose`.",
     schema #[sessionProp, prop "node" "integer" "the goal node", filterProp,
              prop "n" "integer" "the size of the sample; 5 by default",
-             prop "seed" "integer" "the seed of the sample; 0 by default"] #["session", "node"]⟩,
+             prop "seed" "integer" "the seed of the sample; 0 by default",
+             prop "order" "string" "`random`, a sample drawn from the seed (the default), or `used`: those whose assertions the most proofs before the theorem use, first"] #["session", "node"]⟩,
   ⟨"choose", "Expands chosen variants of a goal node. Their new goals become goal nodes; proofs are carried down by the engine. The variants not chosen stay, and a tactic may still expand them.",
     schema #[sessionProp, prop "node" "integer" "the goal node",
              ("variants", .obj #[("type", "array"), ("items", .obj #[("type", "integer")]),

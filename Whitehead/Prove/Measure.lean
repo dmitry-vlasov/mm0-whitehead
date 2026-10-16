@@ -46,19 +46,32 @@ structure NodeCount where
   variants : Nat
   shaped : Array Nat := #[]
   kept : Bool := true
+  /-- The number of premises of the known proof's variant. -/
+  premises : Nat := 0
+  /-- Where the known proof's variant is when the variants are ordered by their uses in
+  the proofs before the theorem (`Session.select` with `byUses`), from 1: among all of
+  them, and among those that pass its description to each depth. -/
+  rankAll : Nat := 0
+  ranks : Array Nat := #[]
   deriving Inhabited
+
+/-- Where variant `p` is among `set`, ordered by uses, the most first, the first made
+first among equals; from 1. -/
+def Env.rankByUses (env : Env) (set : Array Nat) (p : Nat) : Nat :=
+  let u (q : Nat) : Nat := env.stepUses env.props[q]!.step
+  1 + (set.filter fun q => u q > u p || u q == u p && q < p).size
 
 /-- The goal nodes on the path of the known proof of statement `i` of the file, a theorem,
 where a step is chosen: what `NodeCount` says of each. `none` for a proof with a shared
 conversion; and whether the replay stopped at a limit, in which case the nodes are those
 reached. -/
-def nodeCounts (db : Db) (index : Index Nat) (limits : Limits) (depths : Array Nat) (i : Nat) :
-    IO (Option (Array NodeCount × Bool)) := do
+def nodeCounts (db : Db) (index : Index Nat) (limits : Limits) (depths : Array Nat) (i : Nat)
+    (uses : Uses := {}) : IO (Option (Array NodeCount × Bool)) := do
   let s := db.file.stmts[i]!
   match db.skeleton s with
   | .error _ | .ok none => return none
   | .ok (some skel) =>
-    let env := Env.init db index (db.task s.index)
+    let env := { Env.init db index (db.task s.index) with uses }
     let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
     let env := r.env
     let mut seen : Std.HashSet Nat := {}
@@ -69,18 +82,31 @@ def nodeCounts (db : Db) (index : Index Nat) (limits : Limits) (depths : Array N
         seen := seen.insert prop.parent
         let kids := env.hyps[prop.parent]!.children
         let mut shaped := #[]
+        let mut ranks := #[]
         let mut kept := true
         for d in depths do
           let f := env.shapeFilter p d
-          shaped := shaped.push (kids.filter fun q => f.eval (env.propView q)).size
+          let passing := kids.filter fun q => f.eval (env.propView q)
+          shaped := shaped.push passing.size
+          ranks := ranks.push (env.rankByUses passing p)
           kept := kept && f.eval (env.propView p)
-        out := out.push { variants := kids.size, shaped, kept }
+        out := out.push { variants := kids.size, shaped, kept, premises := prop.rule.hyps.size,
+                          rankAll := env.rankByUses kids p, ranks }
     return some (out, r.ending == .limit)
 
 /-- `nodeCounts` without the filters: how many variants each node has. -/
 def variantCounts (db : Db) (index : Index Nat) (limits : Limits) (i : Nat) :
     IO (Option (Array Nat × Bool)) := do
   return (← nodeCounts db index limits #[] i).map fun (cs, limited) => (cs.map (·.variants), limited)
+
+/-- Where the known variants rank: the share of nodes at which it is first, in the first
+5, and in the first 10. -/
+def rankSummary (ranks : Array Nat) : String :=
+  let n := ranks.size
+  if n == 0 then "no nodes" else
+  let pct (k : Nat) : String := s!"{k * 1000 / n / 10}.{k * 1000 / n % 10}%"
+  let within (k : Nat) : Nat := (ranks.filter (· ≤ k)).size
+  s!"{n} nodes; first {pct (within 1)}, in the first 5 {pct (within 5)}, in the first 10 {pct (within 10)}"
 
 /-- A summary of variant counts: how many nodes, the mean, quantiles, the largest, and how
 many fall in each decade (1, 2–10, 11–100, ...). -/

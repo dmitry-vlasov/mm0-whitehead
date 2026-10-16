@@ -5,6 +5,7 @@ not ported (fragments) and without the replaceable functions `RuProverFuncs`: wh
 strategy may restrict is passed to the functions that expand.
 -/
 import Whitehead.Prove.Tree
+import Whitehead.Prove.Uses
 
 namespace Whitehead.Prove
 
@@ -105,6 +106,9 @@ structure Env where
   fresh : Nat := freshBase
   /-- The proofs that reached the root and have not been taken by the driver yet. -/
   rootProofs : Array Proof := #[]
+  /-- How often the assertions are used in the proofs of the file, for the rank of
+  variants (`Uses.lean`); empty unless a front-end gives it. Shared, and only read. -/
+  uses : Uses := {}
   /-- The goal nodes of the intermediate goals, in the order they were offered: nodes
   without a parent, expanded backward like the root (`offerHint`). -/
   hints : Array Nat := #[]

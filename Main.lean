@@ -327,8 +327,9 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
   let index := db.index
   let start ← IO.monoMsNow
   let depths := if args.contains "--shapes" then #[1, 2, 3] else #[]
-  let results ← Prove.runJobs jobs todo.size (fun k => Prove.nodeCounts db index limits depths todo[k]!) progress
-    memLimit logLine
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let results ← Prove.runJobs jobs todo.size (fun k => Prove.nodeCounts db index limits depths todo[k]! uses)
+    progress memLimit logLine
   let nodes := results.foldl (init := #[]) fun acc r => match r with
     | some (c, _) => acc ++ c
     | none => acc
@@ -342,6 +343,14 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
   if !depths.isEmpty then
     IO.println s!"  nodes where the known proof's variant does not pass its description: \
       {(nodes.filter (!·.kept)).size}"
+    -- the order by the uses in the proofs before the theorem: where the known variant is
+    let none0 := nodes.filter (·.premises == 0)
+    IO.println s!"  ordered by uses, the known variant among all: {Prove.rankSummary (nodes.map (·.rankAll))}"
+    for j in [0:depths.size] do
+      IO.println s!"  ordered by uses, among those described to depth {depths[j]!}: \
+        {Prove.rankSummary (nodes.map (·.ranks[j]!))}"
+    IO.println s!"  steps without premises, ordered by uses, among all: {Prove.rankSummary (none0.map (·.rankAll))}; \
+      among those described: {Prove.rankSummary (none0.map (·.ranks.back!))}"
   return 0
 
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/

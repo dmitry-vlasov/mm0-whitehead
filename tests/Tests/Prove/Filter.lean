@@ -183,6 +183,33 @@ def measureTests : TestM Unit := do
     (!all.isEmpty && all.all fun n => n.kept && n.shaped.all (· ≤ n.variants) && n.shaped.all (· ≥ 1))
     s!"{all.size} nodes"
 
+/-- The uses of the assertions in the proofs before a theorem, the `used` atom, and the
+order of a selection by them (`Prove/Uses.lean`). -/
+def usesTests : TestM Unit := do
+  let bytes ← IO.FS.readBinFile logicPath
+  let some file := MmbFile.parse bytes |>.toOption | check "uses: the fixture is read" false; return
+  let some db := Db.ofFile file |>.toOption | check "uses: the fixture becomes a database" false; return
+  let id := thmId db
+  let uses := Uses.ofFile file db.asserts.size
+  -- ax_mp: in a1i, a2i, mpd; ax_2: in a2i, mpd; ax_1: in a1i, id, com12
+  checkEq "uses: none before the first proof" (uses.before (id "ax_mp") (id "a1i")) 0
+  checkEq "uses: a theorem's own proof does not count" (uses.before (id "ax_mp") (id "a2i")) 1
+  checkEq "uses: the proofs before, each once" (uses.before (id "ax_mp") (id "id")) 3
+  checkEq "uses: of a theorem" (uses.before (id "a1i") (id "a2d")) 1
+  checkEq "uses: an axiom that one proof uses, the last" (uses.before (id "sp") 1000) 1
+  -- in a session on syl: the variants of its root, by uses
+  let vc := Whitehead.Verify.Ctx.ofFile file
+  let s ← Session.startFor vc { Env.init db db.index (db.task (id "syl")) with uses }
+  match s.select 0 .all 100 0 true, s.select 0 (.used 2) 100 with
+  | .ok (n, ordered), .ok (k, used) =>
+    let u (v : Variant) : Nat := s.env.stepUses v.step
+    check "uses: ordered, the most used first" (ordered.size == n &&
+      (Array.range (n - 1)).all fun j => u ordered[j]! ≥ u ordered[j + 1]!)
+      s!"{ordered.map fun v => (v.name, u v)}"
+    check "uses: used(2) keeps those used in two proofs or more"
+      (k == (ordered.filter (u · ≥ 2)).size && used.all (u · ≥ 2)) s!"{k}"
+  | _, _ => check "uses: a selection on syl" false
+
 def dslTests : TestM Unit := do
   let bytes ← IO.FS.readBinFile logicPath
   let some db := (MmbFile.parse bytes |>.toOption).bind (Db.ofFile · |>.toOption)
@@ -202,8 +229,8 @@ def dslTests : TestM Unit := do
   | _ => check "dsl: a term with named arguments" false
   checkEq "dsl: tactics" (#["bfs", "forward", "both", "done", "filter(name(ax_*), bfs)",
       "limited(bfs, 100, 3)", "seq(bfs, limited(filter(not(kind(unfold)), bfs), depth=2))",
-      "filter(and(premises(max=1), scope(ax_mp, a1i)), bfs)"].map tacticError)
-    #["accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted"]
+      "filter(and(premises(max=1), scope(ax_mp, a1i)), bfs)", "filter(used(min=3), bfs)"].map tacticError)
+    #["accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted", "accepted"]
   checkEq "dsl: unclosed arguments" (tacticError "limited(bfs") "11: the arguments of `limited` are not closed by `)`"
   checkEq "dsl: text after the term" (tacticError "bfs)") "3: expected the end of the text"
   checkEq "dsl: a missing argument" (tacticError "filter(all)") "0: `filter` needs a tactic"

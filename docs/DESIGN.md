@@ -1695,6 +1695,30 @@ lists the components.
 
     There an agent has to name the assertion (`name`, `scope`), or a ranking has to help:
     the rank atom of "Mining and ranking".
+- **The first rank, built 2026-10-16** (`Prove/Uses.lean`; the atom `used(N)`; `order:
+  used` in the `variants` tool):
+  - **The count:** how many proofs of the theorems before the one being proved use the
+    assertion. Each proof counts once, and only earlier proofs count, so it is out of
+    sample.
+  - **Proofs, not uses:** counting proofs is one answer to question 5 of 2026-10-13,
+    which is still open. Counting uses would let a subproof used thousands of times in
+    a few proofs (`renegcli`) count thousands of times.
+  - **Ordering:** `Session.select` with `byUses` gives the variants that pass a filter,
+    most used first.
+  - **Where the known proof's variant is in that order,** on set.mm, every 40th theorem
+    (42,213 nodes; `prove variants --shapes`):
+
+    | among | first | in the first 5 | in the first 10 |
+    |---|---|---|---|
+    | all variants | 7.9% | 18.5% | 24.6% |
+    | those described to depth 1 | 28.1% | 49.8% | 60.5% |
+    | those described to depth 2 | 44.8% | 69.8% | 76.8% |
+    | those described to depth 3 | 57.0% | 77.0% | 82.2% |
+    | steps without premises (14,516 nodes), described | 29.8% | 49.8% | 57.0% |
+
+  - **What this means:** a description of the next goals to depth 3, with the most used
+    first, puts the known variant among 5 shown at 77% of nodes. Steps without premises
+    are a third of the nodes, and there the order alone does half of that.
 
 ### Open
 

@@ -116,11 +116,17 @@ def sample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) (seed : Nat) : A
     idx := idx.swapIfInBounds i j
   return ((idx.extract 0 (min n xs.size)).qsort (· < ·)).map (xs[·]!)
 
-/-- The variants of goal node `h` that pass filter `f`: how many, and `n` of them. -/
-def select (s : Session) (h : Nat) (f : Filter) (n : Nat) (seed : Nat := 0) :
+/-- The variants of goal node `h` that pass filter `f`: how many, and `n` of them, drawn
+from `seed`; or, with `byUses`, the `n` whose assertions the most proofs before the
+theorem use, the first made first among equals. -/
+def select (s : Session) (h : Nat) (f : Filter) (n : Nat) (seed : Nat := 0) (byUses : Bool := false) :
     Except String (Nat × Array Variant) := do
   if !s.isGoal h then throw s!"{h} is not a goal node"
   let passing := s.env.hyps[h]!.children.filter fun p => f.eval (s.env.propView p)
+  if byUses then
+    let uses (p : Nat) : Nat := s.env.stepUses s.env.props[p]!.step
+    let ordered := passing.qsort fun a b => uses a > uses b || uses a == uses b && a < b
+    return (passing.size, (ordered.extract 0 n).map s.variant)
   return (passing.size, (sample passing n seed).map s.variant)
 
 /-- The facts of `facts` that pass filter `f` as deductions (`Env.factView?`): how many,

@@ -42,6 +42,7 @@ def main : IO UInt32 := do
     Tests.Prove.filterTests
     Tests.Prove.dslTests
     Tests.Prove.measureTests
+    Tests.Prove.usesTests
     Tests.Prove.hintTests
     Tests.Mcp.jsonTests
     Tests.Mcp.serverTests

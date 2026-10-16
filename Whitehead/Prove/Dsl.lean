@@ -144,6 +144,8 @@ def docs : Array Doc := #[
   ⟨"goal", "filter", "goal($ pattern $)", "backward: one of the new goals matches the pattern; _ is a hole"⟩,
   ⟨"result", "filter", "result($ pattern $)",
     "what the step proves matches the pattern: the goal, backward; the fact deduced, forward"⟩,
+  ⟨"used", "filter", "used(N) | used(min=N)",
+    "the assertion is used in at least N proofs of the theorems before the one being proved"⟩,
   ⟨"and", "filter", "and(f1, f2, ...)", "every filter passes"⟩,
   ⟨"or", "filter", "or(f1, f2, ...)", "one of the filters passes"⟩,
   ⟨"not", "filter", "not(f)", "the filter does not pass"⟩,
@@ -256,6 +258,9 @@ partial def filter (c : Ctx) (a : Ast) : Except ParseError Filter := do
     | "result" =>
       checkNames name args #["pattern"]
       return .result (← pattern c name pos (arg? args "pattern" 0))
+    | "used" =>
+      checkNames name args #["min"]
+      return .used (← num name "min" pos (arg? args "min" 0))
     | "and" | "or" =>
       checkNames name args #[]
       if args.isEmpty then fail pos s!"`{name}` needs at least one filter"

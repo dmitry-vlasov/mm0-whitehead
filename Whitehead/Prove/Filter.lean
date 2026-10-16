@@ -43,6 +43,9 @@ inductive Filter where
   | goal (pat : Exp)
   /-- Backward, the goal; forward, the fact deduced: it matches the pattern. -/
   | result (pat : Exp)
+  /-- The assertion is used in at least this many proofs of the theorems before the one
+  being proved (`Uses.lean`). -/
+  | used (min : Nat)
   | and (fs : Array Filter)
   | or (fs : Array Filter)
   | not (f : Filter)
@@ -57,6 +60,8 @@ structure View where
   asks for them. -/
   goals : Thunk (Array Exp)
   result : Exp
+  /-- In how many proofs before the theorem the assertion is used; 0 for an unfolding. -/
+  uses : Nat := 0
 
 /-- Does `name` match `glob`, in which `*` stands for any characters? -/
 partial def globMatch (glob name : String) : Bool :=
@@ -82,11 +87,17 @@ partial def eval (f : Filter) (v : View) : Bool :=
   | .premises lo hi => lo ≤ v.premises && v.premises ≤ hi
   | .goal p => v.goals.get.any (·.matchesPattern p)
   | .result p => v.result.matchesPattern p
+  | .used n => v.uses ≥ n
   | .and fs => fs.all (·.eval v)
   | .or fs => fs.any (·.eval v)
   | .not f => !f.eval v
 
 end Filter
+
+/-- In how many proofs before the theorem being proved the step's assertion is used. -/
+def Env.stepUses (env : Env) : Step → Nat
+  | .assertion id => env.uses.before id env.task.limit
+  | .conv .. => 0
 
 /-- The name of a step: the assertion's, or the def's for an unfolding. -/
 def Env.stepName (env : Env) : Step → String
@@ -105,7 +116,7 @@ def Env.propView (env : Env) (p : Nat) : View :=
       | some u => prop.rule.hyps.map u.apply
       | none => prop.rule.hyps.map prop.outer.apply |>.map prop.sub.apply
   { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size, goals,
-    result := env.hyps[prop.parent]!.expr }
+    result := env.hyps[prop.parent]!.expr, uses := env.stepUses prop.step }
 
 /-- The view of fact `f` as the deduction that made it: the assertion node under it. A
 premise of the task is not a deduction. -/
@@ -114,6 +125,6 @@ def Env.factView? (env : Env) (f : Nat) : Option View := do
   let p ← hyp.children[0]?
   let prop ← env.props[p]?
   return { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size,
-           goals := Thunk.pure #[], result := hyp.expr }
+           goals := Thunk.pure #[], result := hyp.expr, uses := env.stepUses prop.step }
 
 end Whitehead.Prove
