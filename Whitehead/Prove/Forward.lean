@@ -189,8 +189,15 @@ The front has room for `maxFacts` facts. An application cannot make more facts t
 there is room for, so it takes no more candidates for a hypothesis, and no more of the
 tuples that unify. This is a limit on work, like the limit on the front itself: without
 it one assertion with two hypotheses that the trigger leaves open is the square of the
-front. -/
-def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : ProverM (Array Nat) := do
+front.
+
+`fillers`, when given, are the only facts that may fill the other hypotheses: the
+layer above restricts what is made now, as `Only` does in the backward direction. The
+applications it leaves out are made when the fact is the trigger again without a
+restriction, and only those, since the applications made are kept. So a fact that is
+expanded under a restriction stays on the front (`Session.deduce`). -/
+def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) (fillers : Option (Array Nat) := none) :
+    ProverM (Array Nat) := do
   let room := maxFacts - (((← get).forward.map (·.count)).getD 0)
   if room == 0 then return #[]
   let fresh ← freshVars a
@@ -211,7 +218,8 @@ def applyForward (fact : Nat) (a : Assertion) (trig : Nat) (maxFacts : Nat) : Pr
   for j in [0:hyps.size] do
     if j != trig then
       let some fwd := (← get).forward | return #[]
-      let found := ((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).extract 0 room
+      let found := (((fwd.index.unify (sigma.apply hyps[j]!)).map (·.data)).filter fun g =>
+        fillers.all (·.contains g)).extract 0 room
       for g in found do
         if let some (proof, _) ← graft g (first + j) hyps[j]! sigma then
           modify fun env =>

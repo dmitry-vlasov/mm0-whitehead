@@ -109,4 +109,52 @@ def sessionTests : TestM Unit := do
         ((whole.proof.map (proofText db)).getD "none")
       checkEq "session: the same tree as the search without a stop" s.env.props.size whole.env.props.size
 
+/-- Forward in a session: facts chosen, and the deductions from them (`Session.deduce`). -/
+def sessionForwardTests : TestM Unit := do
+  let bytes ← IO.FS.readBinFile logicPath
+  let some db := (MmbFile.parse bytes |>.toOption).bind (Db.ofFile · |>.toOption)
+    | check "session forward: the fixture becomes a database" false; return
+  let id := thmId db
+  let wffTy := Ty.mk 0 false
+  let c (k : Nat) : Exp := ⟨#[Node.const k wffTy]⟩
+  let wi (a b : Exp) : Exp := Exp.mkApp 0 wffTy #[a, b]
+  -- ph -> ps, ps -> ch, ps -> th; the goal ph -> th
+  let task : Task :=
+    { limit := id "a2d", sorts := 1, terms := 2,
+      consts := (Array.range 4).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[wi (c 0) (c 1), wi (c 1) (c 2), wi (c 1) (c 3)], goal := wi (c 0) (c 3) }
+  let s ← Session.start acceptAny (Env.init db db.index task db.hypIndexes) (forward := true) { maxFacts := 64 }
+  let factOf (s : Session) (e : Exp) : Nat := (s.facts.find? fun f => s.env.hyps[f]!.expr == e).getD 0
+  let proofsOf (s : Session) (fs : Array Nat) : Array String :=
+    (fs.map fun f => (s.env.hyps[f]!.factProof.map (proofText db)).getD "?").qsort (· < ·)
+  let phps := factOf s (wi (c 0) (c 1))
+  let psch := factOf s (wi (c 1) (c 2))
+  let psth := factOf s (wi (c 1) (c 3))
+  check "session forward: the premises are facts on the front"
+    (#[phps, psch, psth].all fun f => s.isFact f && s.front.contains f)
+  match ← s.deduce #[0] with
+  | .ok _ => check "session forward: the root is not a fact" false
+  | .error msg => check "session forward: the root is not a fact" (contains msg "not a fact") msg
+  match ← (← startOn db task).deduce #[phps] with
+  | .ok _ => check "session forward: no deduction without a forward front" false
+  | .error msg => check "session forward: no deduction without a forward front" (contains msg "no forward front") msg
+  match ← s.deduce #[phps, psch] with
+  | .error msg => check "session forward: deductions from ph -> ps and ps -> ch" false msg
+  | .ok (s, made) =>
+    check "session forward: from ph -> ps and ps -> ch, ph -> ch, and not ph -> th"
+      ((proofsOf s made).contains "(syl h1 h0)" && !(proofsOf s made).contains "(syl h2 h0)")
+      s!"{proofsOf s made}"
+    check "session forward: the chosen facts stay on the front" (s.front.contains phps && s.front.contains psch)
+    checkEq "session forward: the hypotheses of a deduction are not goals" s.openGoals #[0]
+    check "session forward: not proved yet" s.found.isNone
+    match ← s.deduce #[phps, psth] with
+    | .error msg => check "session forward: deductions from ph -> ps and ps -> th" false msg
+    | .ok (s, made) =>
+      check "session forward: from ph -> ps and ps -> th, ph -> th" ((proofsOf s made).contains "(syl h2 h0)")
+        s!"{proofsOf s made}"
+      checkEq "session forward: ph -> th is the goal, proved by the join with the root"
+        ((s.found.map (proofText db ·.proof)).getD "none") "(syl h2 h0)"
+where
+  startOn (db : Db) (task : Task) : IO Session := Session.start acceptAny (Env.init db db.index task db.hypIndexes)
+
 end Tests.Prove

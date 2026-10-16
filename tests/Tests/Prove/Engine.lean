@@ -258,6 +258,40 @@ def engineTests : TestM Unit := do
     texts.size == (texts.foldl (init := ({} : Std.HashSet String)) (·.insert ·)).size
   check "forward: no proof is made twice" (distinct (factProofs con1Forward.env) && distinct (factProofs fwdVariants.env))
     s!"{(factProofs con1Forward.env).size} and {(factProofs fwdVariants.env).size} facts"
+  -- a restriction of what fills the other hypotheses (`applyForward` with `fillers`):
+  -- ph -> ps triggers syl, whose other hypothesis ps -> ?c both ps -> ch and ps -> th
+  -- fill; restricted to ps -> ch, only ph -> ch is made. The applications it leaves
+  -- out, and only those, are made when the fact is expanded again without it
+  let restrTask : Task :=
+    { limit := id "a2d", sorts := 1, terms := 2,
+      consts := (Array.range 4).map fun _ => { ty := wffTy, names := #[] },
+      premises := #[wi (c 0) (c 1), wi (c 1) (c 2), wi (c 1) (c 3)], goal := c 3 }
+  let seededR := (← (seedForward 64).run (Env.init db index restrTask hypIndexes)).2
+  let factOf (env : Env) (e : Exp) : Nat :=
+    (env.hyps.findIdx? fun h => h.expr == e && h.factProof.isSome).getD 0
+  let phps := factOf seededR (wi (c 0) (c 1))
+  let psch := factOf seededR (wi (c 1) (c 2))
+  let expandFrom (env : Env) (fillers : Option (Array Nat)) : IO (Array Nat × Env) := do
+    let mut env := env
+    let mut made := #[]
+    for (aid, pos) in forwardTriggers env phps do
+      let (new, env') ← (applyForward phps env.db.asserts[aid]! pos 64 fillers).run env
+      env := env'
+      made := made ++ new
+    return (made, env)
+  let proofsOf (env : Env) (fs : Array Nat) : Array String :=
+    (fs.map fun f => (env.hyps[f]!.factProof.map (proofText db)).getD "?").qsort (· < ·)
+  let (restricted, envR) ← expandFrom seededR (some #[phps, psch])
+  let (whole, envW) ← expandFrom seededR none
+  check "forward: without a restriction, syl with ps -> ch and with ps -> th"
+    ((proofsOf envW whole).contains "(syl h1 h0)" && (proofsOf envW whole).contains "(syl h2 h0)")
+    s!"{proofsOf envW whole}"
+  check "forward: under a restriction, only with the chosen facts"
+    ((proofsOf envR restricted).contains "(syl h1 h0)" && !(proofsOf envR restricted).contains "(syl h2 h0)")
+    s!"{proofsOf envR restricted}"
+  let (rest, envR2) ← expandFrom envR none
+  checkEq "forward: then without it, what it left out: the same facts as without a restriction"
+    (proofsOf envR2 (restricted ++ rest)) (proofsOf envW whole)
   -- each use of a fact has its own variables
   let seeded := (← (seedForward 100).run (forwardEnv "id")).2
   let schematic := (seeded.forward.map (·.front)).getD #[] |>.filter fun f => seeded.hyps[f]!.expr.hasVars

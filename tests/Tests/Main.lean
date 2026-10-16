@@ -35,6 +35,7 @@ def main : IO UInt32 := do
     Tests.Prove.defsTests
     Tests.Prove.chainTests
     Tests.Prove.sessionTests
+    Tests.Prove.sessionForwardTests
     Tests.Prove.fullReplayTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests

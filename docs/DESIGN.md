@@ -1428,8 +1428,21 @@ it. Only the miner is built.
 - **A choice is a focus:** the chosen variants are expanded and the others stay as
   leaves. Nothing is pruned, so a fair tactic can still reach every variant, and
   completeness is untouched.
-- **The forward direction:** how variants are chosen there is not decided. The
-  backward direction comes first.
+- **The forward direction (decided 2026-10-16):** the agent chooses several facts of
+  the forward trees, at least one of them on the front. The engine makes every
+  deduction from them, and the agent filters those and chooses some.
+  - The engine's forward API does the work (`forwardTriggers`, `applyForward`), with one
+    change to the engine: `applyForward` takes the facts that may fill the hypotheses
+    other than the trigger (`fillers`), the forward counterpart of `Only`. Without it,
+    every fact that unifies fills them, and the chosen facts restrict nothing.
+  - A fact expanded under a restriction stays on the front. The applications that were
+    left out are made when it is expanded again without one, and only those
+    (`Forward.applied`). Tested: a restricted expansion followed by an unrestricted
+    one gives the same facts as an unrestricted one alone.
+  - A trigger is a hypothesis that is not a bare variable (`Db.hypIndexes`). A bare
+    variable, such as the minor premise of `ax_mp`, unifies with every fact, so it is
+    filled from the front. So `ph -> ps` triggers `ax_mp` and `ph` fills it, never the
+    other way round.
 
 ### Filters
 
@@ -1486,6 +1499,11 @@ it. Only the miner is built.
 - **Operations:**
   - `variants(node, filter)` returns the count and samples;
   - `choose(node, variants)` expands the chosen ones;
+  - `deduce(facts)` makes the deductions from the chosen facts (`Session.deduce`, built
+    2026-10-16). A session that goes forward seeds its front before the root is
+    expanded (`Session.start` with `forward`). A strategy that goes forward is not run
+    in a session yet: a wave that a limit stops leaves the facts it had not expanded
+    off the front;
   - `goal(S)` offers an intermediate goal;
   - `run(tactic)` runs a tactic within its limits;
   - a view of the tree and of the frontier;
@@ -1525,7 +1543,8 @@ it. Only the miner is built.
 
 ### Open
 
-1. How variants are chosen in the forward direction.
+1. How variants are chosen in the forward direction: decided 2026-10-16, see
+   "Choosing variants".
 2. Which front-end comes first.
 3. The questions of 2026-10-13 below. They concern the chain and rank atoms, and do
    not block the session.

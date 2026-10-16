@@ -6,8 +6,10 @@ variants to expand, and it runs strategies on the tree as it is. The engine does
 rest: unification, the substitutions, and the joins of proofs on the way to the root.
 It never asks the agent for a substitution.
 
-Only the backward direction is here. Russell's interactive prover drives its tree in the
-same way (`prove-expand`, `prove-candidates` in `russell-flow/src/ru/prover/commands`).
+Backward, the agent chooses variants of a goal node (`choose`). Forward, it chooses
+facts, at least one of them on the front, and the engine makes every deduction from
+them (`deduce`). Russell's interactive prover drives its backward tree in the same way
+(`prove-expand`, `prove-candidates` in `russell-flow/src/ru/prover/commands`).
 -/
 import Whitehead.Prove.Prove
 
@@ -32,20 +34,29 @@ structure Session where
   found : Option Found := none
   /-- Its number among the searches that are running (`runningSizes`). -/
   sid : Nat
+  /-- The limit of facts of the forward front (`Limits.maxFacts`). -/
+  maxFacts : Nat := 512
 
 namespace Session
 
 /-- A session on the task of `env`: the root is expanded, and nothing else. A goal that is
-one of the premises is proved at once. -/
-def start (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env) : IO Session := do
+one of the premises is proved at once. With `forward`, the forward front is seeded
+first, from the premises and the assertions without hypotheses (`seedForward`): it must
+be there before the root is expanded, so that the subgoals are recorded for the joins.
+The forward direction needs `env` to have the indexes of the hypotheses
+(`Env.init` with `Db.hypIndexes`). -/
+def start (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
+    (forward : Bool := false) (limits : Limits := {}) : IO Session := do
   let sid ← nextSearch.modifyGet fun n => (n, n + 1)
-  match ← searchStart accept env breadthFirst {} (← IO.monoMsNow) sid with
-  | .finished r => return { accept, env := r.env, rej := r.rejections, found := r.found?, sid }
-  | .running env rej => return { accept, env, rej, sid }
+  let strategy := { breadthFirst with forward }
+  let maxFacts := limits.maxFacts
+  match ← searchStart accept env strategy limits (← IO.monoMsNow) sid with
+  | .finished r => return { accept, env := r.env, rej := r.rejections, found := r.found?, sid, maxFacts }
+  | .running env rej => return { accept, env, rej, sid, maxFacts }
 
 /-- `start` for a theorem of the file: a proof counts if the verifier accepts its body. -/
-def startFor (vc : Verify.Ctx) (env : Env) : IO Session :=
-  start (Prove.accept vc) env
+def startFor (vc : Verify.Ctx) (env : Env) (forward : Bool := false) (limits : Limits := {}) : IO Session :=
+  start (Prove.accept vc) env forward limits
 
 def variant (s : Session) (p : Nat) : Variant :=
   let prop := s.env.props[p]!
@@ -54,12 +65,31 @@ def variant (s : Session) (p : Nat) : Variant :=
     | .conv t _ unfold => s!"{if unfold then "unfold" else "fold"} {s.env.db.terms[t]!.name}"
   { prop := p, step := prop.step, name, expanded := prop.expanded, goals := prop.children }
 
-/-- Is `h` a goal node of the backward tree: the root, or a premise of an assertion
-node? (A fact of the forward front is an expression node too, without a parent.) -/
-def isGoal (s : Session) (h : Nat) : Bool :=
-  match s.env.hyps[h]? with
-  | some hyp => h == 0 || hyp.parent.isSome
+/-- Is `h` a goal node of the backward tree: the root, or a premise of an assertion node
+of that tree? A fact of the forward front is an expression node without a parent, and
+the hypotheses of an application forward lead up to a fact, not to the root. -/
+def isGoal (s : Session) (h : Nat) : Bool := Id.run do
+  let mut h := h
+  for _ in [0:s.env.hyps.size] do
+    if h == 0 then return true
+    match s.env.hyps[h]? with
+    | some { parent := some p, .. } => h := s.env.props[p]!.parent
+    | _ => return false
+  return false
+
+/-- Is `f` a fact of the forward front? -/
+def isFact (s : Session) (f : Nat) : Bool :=
+  match s.env.hyps[f]? with
+  | some hyp => hyp.factProof.isSome
   | none => false
+
+/-- The facts, in the order they were made. -/
+def facts (s : Session) : Array Nat :=
+  (Array.range s.env.hyps.size).filter s.isFact
+
+/-- The facts on the front: those not expanded forward yet, without a restriction. -/
+def front (s : Session) : Array Nat :=
+  ((s.env.forward.map (·.front)).getD #[])
 
 /-- The variants of goal node `h`, in the order they were made. -/
 def variants (s : Session) (h : Nat) : Except String (Array Variant) :=
@@ -84,7 +114,7 @@ def choose (s : Session) (h : Nat) (props : Array Nat) : IO (Except String Sessi
     if !children.contains p then return .error s!"{p} is not a variant of goal node {h}"
     if s.env.props[p]!.expanded then return .error s!"variant {p} is expanded already"
   if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
-  let { accept, env, rej, found, sid } := s
+  let { accept, env, rej, found, sid, maxFacts } := s
   let mut env := env
   let mut rej := rej
   let mut found := found
@@ -96,20 +126,52 @@ def choose (s : Session) (h : Nat) (props : Array Nat) : IO (Except String Sessi
       env := env'
       rej := rej'
       found := found <|> f
-  return .ok { accept, env := env.dropExpanded, rej, found, sid }
+  return .ok { accept, env := env.dropExpanded, rej, found, sid, maxFacts }
+
+/-- The deductions from the facts `chosen`, at least one of which is on the front: for
+each chosen fact on the front, every application of an assertion in which it fills a
+hypothesis and the chosen facts fill the others (`applyForward` with `fillers`). Each
+deduction is a new fact, joined with the goal and the subgoals of the backward tree as
+any fact is, every join to its end. The chosen facts stay on the front: the
+applications with facts that were not chosen are made when they are expanded without a
+restriction. Returns the new facts. -/
+def deduce (s : Session) (chosen : Array Nat) : IO (Except String (Session × Array Nat)) := do
+  if s.env.forward.isNone then return .error "the session has no forward front"
+  for f in chosen do
+    if !s.isFact f then return .error s!"{f} is not a fact"
+  let front := s.front
+  let triggers := chosen.filter front.contains
+  if triggers.isEmpty then return .error "none of the chosen facts is on the front"
+  if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
+  let { accept, env, rej, found, sid, maxFacts } := s
+  let mut env := env
+  let mut made : Array Nat := #[]
+  for f in triggers do
+    for (id, pos) in forwardTriggers env f do
+      let (new, env') ← (applyForward f env.db.asserts[id]! pos maxFacts (some chosen)).run env
+      env := env'
+      for g in new do
+        let (targets, env') ← (joinRoot g).run env
+        env := env'
+        for h in targets do
+          env := ((← (joinSubgoal g h).run env)).2
+      made := made ++ new
+  let (f, rej, env') := takeFound accept env rej
+  return .ok ({ accept, env := env', rej, found := found <|> f, sid, maxFacts }, made)
 
 /-- Runs a strategy on the tree as it is, from the strategy's initial state, until it
 accepts a proof, has nothing more to do, or reaches a limit. The time is counted from
 the start of the run; the number of assertion nodes is that of the whole tree. A join is
 always run to its end: one that a budget cut short would keep nothing, and the tree
 would be missing proofs for the runs after it. The forward direction is not supported
-here yet. -/
+here yet: a wave that a limit stops leaves the facts it had not expanded off the front.
+In a session the forward direction is `deduce`. -/
 def run {σ : Type} (s : Session) (strategy : Strategy σ) (limits : Limits) :
     IO (Except String (Session × Ending × Option Stop)) := do
   if strategy.forward then return .error "the forward direction is not supported in a session"
   if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
   let start ← IO.monoMsNow
-  let { accept, env, rej, found, sid } := s
+  let { accept, env, rej, found, sid, maxFacts } := s
   let env := { env.withLimits strategy limits start with
                tupleBudget := 0xFFFFFFFFFFFF, workBudget := 0xFFFFFFFFFFFF, deadline := 0xFFFFFFFFFFFFFFFF }
   let r ← try searchLoop accept env rej strategy limits start sid
@@ -117,7 +179,7 @@ def run {σ : Type} (s : Session) (strategy : Strategy σ) (limits : Limits) :
   let found := found <|> r.found?
   let stop := r.stop
   let ending := r.ending
-  return .ok ({ accept, env := r.env, rej := r.rejections, found, sid }, ending, stop)
+  return .ok ({ accept, env := r.env, rej := r.rejections, found, sid, maxFacts }, ending, stop)
 
 end Session
 

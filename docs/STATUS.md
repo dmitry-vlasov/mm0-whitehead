@@ -362,7 +362,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 947 checks, 0 failures, in 19 seconds:
+corpus of `scripts/build-corpus.sh` built — 959 checks, 0 failures, in 19 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -392,7 +392,10 @@ corpus of `scripts/build-corpus.sh` built — 947 checks, 0 failures, in 19 seco
   variant of the node, or is expanded already, is refused; the variants not chosen
   stay leaves; a run of breadth-first on a session; a choice and then a run; and a
   search stopped at its node limit and resumed, which gives the same proof and the
-  same tree as the search without a stop.
+  same tree as the search without a stop. Forward: the deductions from chosen facts
+  (`deduce`), restricted to them, with the chosen facts left on the front, and a goal
+  proved by a deduction; and in the engine, a restricted expansion followed by an
+  unrestricted one makes the same facts as an unrestricted one alone.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -510,7 +513,7 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
-   The resumable search and the session operations are done; next come the filters
-   and a `Strategy` that takes one. Open: how variants are chosen forward, which
-   front-end comes first, how a human moves about in a huge tree, and whether a
-   session is recorded as a file.
+   The resumable search and the session operations are done, backward (`choose`)
+   and forward (`deduce`). Next come the filters and a `Strategy` that takes one.
+   Open: which front-end comes first, how a human moves about in a huge tree, and
+   whether a session is recorded as a file.
