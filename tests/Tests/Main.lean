@@ -17,6 +17,7 @@ import Tests.Prove.Engine
 import Tests.Prove.Defs
 import Tests.Prove.Chains
 import Tests.Prove.Session
+import Tests.Prove.Filter
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -36,6 +37,9 @@ def main : IO UInt32 := do
     Tests.Prove.chainTests
     Tests.Prove.sessionTests
     Tests.Prove.sessionForwardTests
+    Tests.Prove.filterTests
+    Tests.Prove.dslTests
+    Tests.Prove.measureTests
     Tests.Prove.fullReplayTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests

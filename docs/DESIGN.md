@@ -1446,29 +1446,70 @@ it. Only the miner is built.
 
 ### Filters
 
-- **What a filter is:** a predicate over the candidate variants of one goal node,
-  built from atoms and combinators. The agent tightens or loosens it through the
+Built on 2026-10-16 (`Prove/Filter.lean`, `Prove/Pattern.lean`).
+
+- **What a filter is:** a predicate over what an agent chooses among. Backward, that is
+  the variants of one goal node; forward, the deductions that `deduce` made. Both are
+  seen through a `View`: the step, its name, the number of its premises, the new goals
+  it makes, and what it proves. The agent tightens or loosens a filter through its
   parameters. A filter reads the tree and never changes it.
-- **First atoms:**
-  - the assertion's name, by pattern;
-  - the scope (as Russell's `scoped` whitelist);
-  - the kind of step (assertion or unfolding);
-  - the number of new goals;
-  - the statements of the new goals, by an expression pattern.
-- **Combinators:** `and`, `or`, `not`, `sample(n)`.
+- **Atoms:**
+  - `name(G)`: the step's name, `*` standing for any characters (the def's name, for
+    an unfolding);
+  - `scope(a1, ...)`: an assertion among these (Russell's `scoped` whitelist);
+  - `kind(assertion | unfold | fold)`;
+  - `premises(N)`, `premises(min=, max=)`: the number of premises of the step. That is
+    the number of new goals backward; forward, the hypotheses the deduction used;
+  - `goal($ pattern $)`: backward, one of the new goals matches the pattern;
+  - `result($ pattern $)`: what the step proves matches the pattern. That is the goal
+    backward, and the fact deduced forward.
+- **Combinators:** `and`, `or`, `not`, and `all` for every variant. A sample is not a
+  filter: `Session.select` returns the count and `n` variants drawn by a pseudo-random
+  permutation from a seed, so a replay of the session draws the same sample.
+- **Patterns, in `.mm0` notation (decided 2026-10-16):**
+  - A pattern is a formula of the specification with holes, such as
+    `$ _ -> ( _ -> _ ) $`, read by our `.mm0` parser.
+  - A hole is `_`. It fits any argument and needs no coercion; it is switched on only
+    for patterns (`MathCtx.hole`), so a specification is read exactly as before.
+  - The theorem's variables are what they are in its task (`Db.binderImage`).
+  - A pattern matches a statement at its top, node for node, the holes aside. Nothing
+    is unified: a variable of the statement that is not the theorem's is matched by a
+    hole only.
+  - The specification and the proof file number terms differently, since the proof file
+    also has the local definitions. `Notation.ofSpec` finds the correspondence by the
+    walk of `matchSpec`.
 - **Later atoms:** a rank from a ranking model (top k), and a mined chain that starts
   with the variant (see "Mining and ranking").
 
 ### One DSL for tactics and filters
 
-- **Two sorts in one grammar:** the language extends Russell's tactic DSL
-  (`russell-flow/docs/tactics-language.md`). A tactic may take a filter; a filter
-  never takes a tactic. Illustrative only: `limited(bfs(filter=and(scope(prop),
-  goals(<= 2))), depth=5)`.
-- **Russell's selectors** (`all`, `frontier`, `leaf(id)`, `assertion(name)`, for
-  `focus` and `track`) choose nodes; filters choose the variants of a node.
-  `assertion(name)` serves as both.
-- **In the port:** a `Strategy` expands only the leaves that pass its filter.
+Built on 2026-10-16 (`Prove/Dsl.lean`, `Prove/Combinators.lean`); `mm0-whitehead dsl`
+lists the components.
+
+- **Grammar:** Russell's (`russell-flow/docs/tactics-language.md`), with formulas
+  between `$`s:
+  - `term ::= name ( '(' arg ( ',' arg )* ')' )?`;
+  - `arg ::= name '=' value | value`;
+  - `value ::= number | '$' formula '$' | term`.
+
+  Every parameter can be given by position or by name. Errors give the position and say
+  what was expected.
+- **Two sorts:** a tactic may take a filter; a filter never takes a tactic. A filter in
+  a tactic's place, or a tactic in a filter's, is an error that names both sorts.
+- **Tactics:**
+  - `bfs`, `forward`, `both`, `done`;
+  - `filter(f, t)`: `t`, expanding only the variants that pass `f`;
+  - `limited(t, size=, depth=)`: Russell's limiter. The size is a number of assertion
+    nodes added, and the depth that of the leaves expanded;
+  - `seq(t1, t2, ...)`: each in turn.
+- **A restricted tactic** is handed a tree whose leaves are only those that pass, as
+  Russell's `focus` does (`Strategy.restrict`). It works as it always does, and the
+  leaves left out stay leaves: nothing is pruned. What the restriction says of a node
+  is asked once.
+- **Time is not a tactic's business:** a strategy's step reads the tree and has no
+  clock, so the time is a limit of the run (`Limits.maxMs`).
+- **Russell's selectors** (`all`, `frontier`, `leaf(id)`, `assertion(name)`, for `focus`
+  and `track`) choose nodes; filters choose the variants of a node. They are not ported.
 
 ### Intermediate goals
 
@@ -1508,7 +1549,9 @@ it. Only the miner is built.
   - `run(tactic)` runs a tactic within its limits;
   - a view of the tree and of the frontier;
   - `proof()` extracts the proof as `.mmb`, checked by the verifier.
-- **Front-ends (decided 2026-10-16):** one binary serves both.
+- **Front-ends (decided 2026-10-16):** one binary serves both. The simpler one comes
+  first (decided 2026-10-16). That is the MCP mode: a server alone, where the human
+  front-end needs a VS Code extension and a webview besides.
   - For humans, an LSP server driven by VS Code: the `.mm0` features, plus custom
     requests for the session operations.
   - For AI, an MCP mode that offers the same operations as tools. It is
@@ -1539,13 +1582,27 @@ it. Only the miner is built.
 
 - **Filter quality on set.mm:** the oracle (`Prove.oracle`) knows which variant the
   stored proof uses at each node. For a filter, measure how many variants it leaves,
-  and whether the proof's variant is among them.
+  and whether the proof's variant is among them. That needs someone who writes the
+  filters, an agent, so it comes with the front-ends.
+- **The baseline, built 2026-10-16 (`prove variants`, `Prove/Measure.lean`):** how many
+  variants a filter has to narrow. A known proof is replayed over the full expansion
+  with no other variants, so every goal node on its path is expanded against the whole
+  database, and each node where a step is chosen is counted. On set.mm, every 20th
+  theorem (2,391 theorems, 84,703 nodes, 10 s each, 148 stopped at the limit with
+  their nodes up to there counted):
+  - per node: mean 3,394 variants, median 988, 90th percentile 8,967, 99th 33,275,
+    largest 48,940;
+  - by size: 1.6% of nodes have 11–100, 48.6% have 101–1,000, 41.5% have
+    1,001–10,000, and 8.2% have more than 10,000.
+
+  On the propositional and predicate calculus parts, every 10th theorem, the median
+  is 203 and the largest 2,760.
 
 ### Open
 
 1. How variants are chosen in the forward direction: decided 2026-10-16, see
    "Choosing variants".
-2. Which front-end comes first.
+2. Which front-end comes first: decided 2026-10-16, the simpler one, MCP.
 3. The questions of 2026-10-13 below. They concern the chain and rank atoms, and do
    not block the session.
 4. How a human moves about in a huge tree. The goal panel is a first variant only.
@@ -1554,8 +1611,9 @@ it. Only the miner is built.
 ### Order of building (a proposal)
 
 1. A resumable search and the session operations as a Lean API, tested on the fixtures.
-2. The first filter atoms and combinators, and a `Strategy` that takes a filter.
-3. The DSL for both sorts.
+2. The first filter atoms and combinators, and a `Strategy` that takes a filter: done
+   2026-10-16.
+3. The DSL for both sorts: done 2026-10-16.
 4. Intermediate goals in the engine.
 5. The front-ends.
 6. Filter quality measured on set.mm.

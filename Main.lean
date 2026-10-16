@@ -24,6 +24,11 @@ def usage : String :=
                                  1,000,000 by default), each next with F (4) times those, on the
                                  theorems stopped at a limit; --max-steps N: proofs of more than N
                                  steps are left out
+  dsl                            list the tactics and filters of the language of sessions
+  prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
+                                 how many variants the goal nodes on the paths of the known
+                                 proofs have, each node expanded against the whole database:
+                                 what a filter has to narrow
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
                [--verbose]
@@ -287,6 +292,46 @@ def jobOptions (args : List String) : IO (Nat × Bool × Nat) := do
   let jobs ← if jobs == 0 then processors else pure jobs
   return (max 1 jobs, !args.contains "--quiet", numOption args "--max-mem" 32 * 1000000000)
 
+/-- `prove variants`: how many variants the goal nodes on the paths of the known proofs
+have (`Prove/Measure.lean`). -/
+def proveVariants (path : String) (args : List String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let (jobs, progress, memLimit) ← jobOptions args
+  let first := numOption args "--from" 0
+  let last := numOption args "--to" 1000000000
+  let every := max 1 (numOption args "--every" 1)
+  let limits : Prove.Limits :=
+    { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 60000,
+      maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
+  let todo := (Array.range file.stmts.size).filter fun i =>
+    let s := file.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+  let index := db.index
+  let start ← IO.monoMsNow
+  let results ← Prove.runJobs jobs todo.size (fun k => Prove.variantCounts db index limits todo[k]!) progress memLimit
+    logLine
+  let counts := results.foldl (init := #[]) fun acc r => match r with
+    | some (c, _) => acc ++ c
+    | none => acc
+  let limited := (results.filter fun r => r.any (·.2)).size
+  let left := (results.filter (·.isNone)).size
+  IO.println s!"{path}: {todo.size} theorems, {left} with a shared conversion left out, {limited} stopped at a limit \
+    (their nodes up to there counted), in {(← IO.monoMsNow) - start} ms"
+  IO.println s!"  {Prove.variantSummary counts}"
+  return 0
+
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/
 def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
@@ -474,9 +519,13 @@ def main (args : List String) : IO UInt32 := do
   | ["verify", path] => verifyMmb path
   | ["verify", mm0, mmb] => verifyPair mm0 mmb
   | ["prove", "db", path] => proveDb path
+  | ["dsl"] =>
+    IO.print Prove.Dsl.help
+    return 0
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: "search" :: path :: rest => proveSearch path rest
   | "prove" :: "chains" :: path :: rest => proveChains path rest
+  | "prove" :: "variants" :: path :: rest => proveVariants path rest
   | _ =>
     IO.eprintln usage
     return 2

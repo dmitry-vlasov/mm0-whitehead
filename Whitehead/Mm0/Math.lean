@@ -173,6 +173,10 @@ structure MathCtx where
   tokens : Array MathToken
   /-- The file offset of the closing `$`, where "the formula ends here" is reported. -/
   endPos : Nat
+  /-- For a pattern of the prover (`Prove/Pattern.lean`): `_` is a hole, read as the
+  variable with this index, which fits any argument and needs no coercion. `none` in
+  a specification, where `_` is not an expression. -/
+  hole : Option Nat := none
 
 /-- The sort an expression must have. -/
 inductive Target where
@@ -219,9 +223,15 @@ def isIdent (s : String) : Bool :=
   let b := s.toUTF8
   b.size > 0 && Lexer.isIdentStart (b.get! 0) && b.foldl (fun ok ch => ok && Lexer.isIdentRest ch) true
 
+/-- Is `e` the hole of a pattern? -/
+def isHole (c : MathCtx) (e : Expr) : Bool :=
+  match c.hole, e with
+  | some h, .var v => v == h
+  | _, _ => false
+
 /-- Applies the coercions that lead from sort `s` to sort `target`. -/
 def coerce (c : MathCtx) (pos : Nat) (e : Expr) (s target : Nat) : MathM Expr :=
-  if s == target then pure e
+  if s == target || isHole c e then pure e
   else
     match c.env.coes[(s, target)]? with
     | some path => pure (path.foldl (fun e t => Expr.app t #[e]) e)
@@ -230,7 +240,8 @@ def coerce (c : MathCtx) (pos : Nat) (e : Expr) (s target : Nat) : MathM Expr :=
 
 /-- An expression of sort `s` as the argument for the binder `b`. -/
 def coerceArg (c : MathCtx) (pos : Nat) (e : Expr) (s : Nat) (b : VarDecl) : MathM Expr :=
-  if b.bound then
+  if isHole c e then pure e
+  else if b.bound then
     match e with
     | .var v =>
       if s == b.sort && (c.vars[v]?.map (·.bound)).getD false then pure e
@@ -292,6 +303,8 @@ partial def leading (c : MathCtx) (p : Prec) : MathM (Expr × Nat × Prec) := do
   | none =>
     if tk.text == ")" then
       fail tk.pos "expected an expression, found `)`"
+    if let some h := c.hole then
+      if tk.text == "_" then return (.var h, 0, .max)
     if !isIdent tk.text then
       fail tk.pos s!"unknown token `{tk.text}`"
     -- a variable shadows a term of the same name
@@ -345,6 +358,7 @@ def parseMath (c : MathCtx) (m : MathString) (target : Target) : Except ParseErr
     if let some t ← MathParser.peek c then
       MathParser.fail t.pos s!"expected the end of the formula, found `{t.text}`"
     let start := (c.tokens[0]?.map (·.pos)).getD base
+    if MathParser.isHole c e then return e
     match target with
     | .any => return e
     | .sort t => MathParser.coerce c start e s t

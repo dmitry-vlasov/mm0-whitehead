@@ -16,7 +16,12 @@ offer intermediate goals, while tactics do the rest. Mining and ranking become f
 atoms. The design is in `DESIGN.md` ("Phase 4"). Built: the chain miner (`prove
 chains`, its numbers below), and the first step of the design, a session
 (`Prove/Session.lean`). A session is a tree kept between requests, on which variants are
-chosen and strategies run, and a search stopped at a limit resumes there.
+chosen and strategies run, and a search stopped at a limit resumes there. Then the
+second and third steps: filters over variants and deductions, with patterns in `.mm0`
+notation, and one language for tactics and filters (`Prove/Filter.lean`,
+`Prove/Dsl.lean`). And the baseline of what filters have to narrow: on set.mm the median
+goal node on a known proof's path has 988 variants, and 1% have over 33,000
+(`prove variants`, `DESIGN.md`, "Measurement").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -362,7 +367,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 959 checks, 0 failures, in 19 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,008 checks, 0 failures, in 19 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -396,6 +401,12 @@ corpus of `scripts/build-corpus.sh` built — 959 checks, 0 failures, in 19 seco
   (`deduce`), restricted to them, with the chosen facts left on the front, and a goal
   proved by a deduction; and in the engine, a restricted expansion followed by an
   unrestricted one makes the same facts as an unrestricted one alone.
+- Prover, filters and the language: patterns in the notation of `logic.mm0`, a fixture
+  that `logic.mmb` proves, with holes, and their errors; every filter atom and
+  combinator on the variants of a goal node and on deductions; the sample that a seed
+  fixes; tactics restricted by a scope, by a size and by a depth, and in sequence; the
+  reading of the language, with 14 malformed texts and their messages; and the count
+  of the variants on a known proof's path.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -445,6 +456,9 @@ of `mm0` and 103 of set.mm's sample, 4 of them by memory. To tell noise from a c
 the binaries before and after were run on the same set.mm sample (every 10th theorem
 of the first two parts) with a node limit and no time limit: `bfs`, `both` and
 `forward` give the same result for every theorem, and byte-identical `.mmb` files.
+After the filters and the language (holes in the formula parser, `Db.binderImage`
+taken out of `Db.task`), run again: 153 checks, 0 failures, 1 skip, and the counts back
+at those of 2026-10-12 (backward 138 of 281, peano 90 of 270, both 167 of 281).
 
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
@@ -522,7 +536,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
-   The resumable search and the session operations are done, backward (`choose`)
-   and forward (`deduce`). Next come the filters and a `Strategy` that takes one.
-   Open: which front-end comes first, how a human moves about in a huge tree, and
-   whether a session is recorded as a file.
+   Done: the resumable search and the session operations, backward (`choose`) and
+   forward (`deduce`); the filters; and the language. Next: intermediate goals in the
+   engine (step 4), then the MCP front-end, the simpler one, which comes first.
+   Open: how a human moves about in a huge tree, and whether a session is recorded as
+   a file.

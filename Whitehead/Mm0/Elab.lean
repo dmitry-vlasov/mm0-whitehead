@@ -308,13 +308,19 @@ def elabString (src : String) : Except ParseError Env := do
   let st ← stmts.foldlM Elab.elabStmt {}
   return st.env
 
-/-- Elaborates a loaded specification. An error is reported in the file it occurs in. -/
-def elaborate (spec : Spec) : Except LoadError Env := do
+/-- Elaborates a loaded specification, keeping the state: the notations and the names,
+with which more formulas can be read (`Prove/Pattern.lean`). An error is reported in the
+file it occurs in. -/
+def elaborateState (spec : Spec) : Except LoadError ElabState := do
   let mut st : ElabState := {}
   for s in spec.stmts do
     match Elab.elabStmt st s.stmt with
     | .ok st' => st := st'
     | .error e => throw (.parse spec.sources[s.file]! e)
-  return st.env
+  return st
+
+/-- Elaborates a loaded specification. An error is reported in the file it occurs in. -/
+def elaborate (spec : Spec) : Except LoadError Env :=
+  return (← elaborateState spec).env
 
 end Whitehead.Mm0

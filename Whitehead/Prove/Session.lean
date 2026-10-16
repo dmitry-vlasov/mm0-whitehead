@@ -11,7 +11,7 @@ facts, at least one of them on the front, and the engine makes every deduction f
 them (`deduce`). Russell's interactive prover drives its backward tree in the same way
 (`prove-expand`, `prove-candidates` in `russell-flow/src/ru/prover/commands`).
 -/
-import Whitehead.Prove.Prove
+import Whitehead.Prove.Dsl
 
 namespace Whitehead.Prove
 
@@ -95,6 +95,40 @@ def front (s : Session) : Array Nat :=
 def variants (s : Session) (h : Nat) : Except String (Array Variant) :=
   if !s.isGoal h then .error s!"{h} is not a goal node"
   else .ok (s.env.hyps[h]!.children.map s.variant)
+
+/-- `n` of `xs`, chosen by a pseudo-random permutation that `seed` fixes, in the order of
+`xs`: a sample that a replay of the session draws again. -/
+def sample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) (seed : Nat) : Array α := Id.run do
+  let mut idx := Array.range xs.size
+  let mut x : UInt64 := seed.toUInt64 * 0x9E3779B97F4A7C15 + 0x2545F4914F6CDD1D
+  for i in [0:min n xs.size] do
+    x := x ^^^ (x <<< 13)
+    x := x ^^^ (x >>> 7)
+    x := x ^^^ (x <<< 17)
+    let j := i + (x % (xs.size - i).toUInt64).toNat
+    idx := idx.swapIfInBounds i j
+  return ((idx.extract 0 (min n xs.size)).qsort (· < ·)).map (xs[·]!)
+
+/-- The variants of goal node `h` that pass filter `f`: how many, and `n` of them. -/
+def select (s : Session) (h : Nat) (f : Filter) (n : Nat) (seed : Nat := 0) :
+    Except String (Nat × Array Variant) := do
+  if !s.isGoal h then throw s!"{h} is not a goal node"
+  let passing := s.env.hyps[h]!.children.filter fun p => f.eval (s.env.propView p)
+  return (passing.size, (sample passing n seed).map s.variant)
+
+/-- The facts of `facts` that pass filter `f` as deductions (`Env.factView?`): how many,
+and `n` of them. A fact that is not a deduction, such as a premise, does not pass. -/
+def selectFacts (s : Session) (facts : Array Nat) (f : Filter) (n : Nat) (seed : Nat := 0) : Nat × Array Nat :=
+  let passing := facts.filter fun g => (s.env.factView? g).any f.eval
+  (passing.size, sample passing n seed)
+
+/-- What the DSL needs to read filters and tactics for this session: its database, the
+specification if there is one, and the variables of its theorem, `metas` being the
+binders marked as metavariables in its task (`Db.task`). -/
+def dslCtx (s : Session) (spec : Option Notation := none) (metas : Array Nat := #[]) : Dsl.Ctx :=
+  let db := s.env.db
+  let thm := s.env.task.limit
+  { db, spec, thm, vars := fun i => db.binderImage thm metas (db.asserts[thm]!.vars[i]?.getD 0) }
 
 /-- The goal nodes that have no proof yet. -/
 def openGoals (s : Session) : Array Nat :=

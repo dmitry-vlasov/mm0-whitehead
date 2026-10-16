@@ -453,6 +453,19 @@ def Db.metasFault (db : Db) (thm : Nat) (metas : Array Nat) : Option String :=
     | none => some s!"theorem {a.name} has no binder {k}: it has {a.binders.size}"
     | some b => if b.bound then some s!"binder {k} of theorem {a.name} is a bound variable" else none
 
+/-- The binders of theorem `thm` that `Db.task` marks as metavariables: those of `metas`
+that are not bound. -/
+def Db.marked (db : Db) (thm : Nat) (metas : Array Nat) : Array Nat :=
+  let a := db.asserts[thm]!
+  (Array.range a.binders.size).filter fun k => metas.contains k && !a.binders[k]!.bound
+
+/-- What a variable `v` of theorem `thm` is in its task (`Db.task`): the constant for it,
+or, for a binder marked as a metavariable, the variable that stands for it. -/
+def Db.binderImage (db : Db) (thm : Nat) (metas : Array Nat) (v : Nat) : Exp :=
+  match (db.marked thm metas).findIdx? (· == Node.varId v) with
+  | some j => Exp.ofVar (Node.var (freshBase + j) (Node.ty v))
+  | none => ⟨#[Node.const (Node.varId v) (Node.ty v)]⟩
+
 /-- `ruConstProverTask`, for a theorem of the file: prove its conclusion from its
 hypotheses, with what comes before it. The variables of the theorem are free variables,
 and become constants. The binders with the numbers `metas` are marked as metavariables
@@ -465,11 +478,8 @@ metavariables proves an instance of the theorem, which is not a statement of the
 it is reported, and not written or checked (`acceptAny` in `Prove.lean`). -/
 def Db.task (db : Db) (thm : Nat) (metas : Array Nat := #[]) : Task :=
   let a := db.asserts[thm]!
-  let marked := (Array.range a.binders.size).filter fun k => metas.contains k && !a.binders[k]!.bound
-  let image (v : Nat) : Exp :=
-    match marked.findIdx? (· == Node.varId v) with
-    | some j => Exp.ofVar (Node.var (freshBase + j) (Node.ty v))
-    | none => ⟨#[Node.const (Node.varId v) (Node.ty v)]⟩
+  let marked := db.marked thm metas
+  let image := db.binderImage thm metas
   let s : Subst := { map := a.vars.foldl (init := {}) fun m v => m.insert (Node.varId v) (SubExp.mk' v (image v)) }
   { limit := thm, sorts := a.sortsBefore, terms := a.termsBefore, consts := constInfos a.binders,
     premises := a.hyps.map s.apply, goal := s.apply a.concl,
