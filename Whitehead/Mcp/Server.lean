@@ -21,14 +21,18 @@ def instructions : String :=
    Start a session for a theorem (`start`); its goal is node 0. A goal node has variants: \
    the assertions that could conclude it, each with the new goals it would make. There are \
    often thousands: narrow them with a filter (`variants`; see `language`), tightening it \
-   until a few are left and loosening it when none are, then `choose` some. The engine does \
+   until a few are left and loosening it when none are, then `choose` some. A new goal \
+   without metavariables is closed at once by the assertions without premises that prove \
+   it. The engine does \
    all the unification: a variable it made is printed `?` and a number, and you never give \
    a value for one. Between the choices, let tactics expand the tree (`run`, such as \
    `limited(bfs, depth=3)`). Offer an intermediate goal you believe is true and useful \
    (`goal`); once proved it is used wherever it fits. With `forward`, you can also choose \
    facts and deduce from them (`facts`, `deduce`). When `proved` is true, `proof` gives \
    the proof, checked by the verifier. Statements are in the notation of the \
-   specification; in a filter's pattern and in an intermediate goal, `_` is a hole."
+   specification; in a filter's pattern and in an intermediate goal, `_` is a hole. A \
+   pattern in `goal` matches a new goal exactly; in `fits`, a metavariable of the new goal \
+   matches anything; `proves` matches what the step would prove."
 
 def rpcResult (id result : Json) : Json :=
   .obj #[("jsonrpc", "2.0"), ("id", id), ("result", result)]

@@ -76,8 +76,20 @@ def filterTests : TestM Unit := do
   checkEq "filter: a new goal that is not there" (count "and(name(ax_mp), goal($ ch -> _ $))") 0
   checkEq "filter: scope" (count "scope(ax_mp, a1i)") (count "or(name(ax_mp), name(a1i))")
   checkEq "filter: a new goal that is a bare variable" (count "and(name(ax_mp), bare)") 1
-  checkEq "filter: a new goal that a premise proves" (count "and(name(ax_mp), hyp)") 1
+  -- ax_mp's minor premise ?ph fits every premise, but a bare variable does not count
+  checkEq "filter: a bare new goal is not one that a premise proves" (count "and(name(ax_mp), hyp)") 0
   checkEq "filter: neither" (count "and(name(a1i), or(bare, hyp))") 0
+  -- ax_mp's major premise ?ph -> ph -> ch: as a pattern it is not ph -> ph -> ch, but could become it
+  checkEq "filter: goal matches exactly" (count "and(name(ax_mp), goal($ ph -> ph -> ch $))") 0
+  checkEq "filter: fits lets a metavariable become anything" (count "and(name(ax_mp), fits($ ph -> ph -> ch $))") 1
+  checkEq "filter: what a step proves" (count "proves($ ph -> ch $)") all
+  checkEq "filter: the goal has no variable" (count "ground") all
+  -- syl: mpd's new goal ph -> ?ps is proved by the premise ph -> ps
+  let syl ← startOn "syl"
+  match Dsl.parseFilter (syl.dslCtx (some spec)) "and(name(mpd), hyp)", syl.select 0 .all 0 with
+  | .ok f, .ok _ =>
+    checkEq "filter: a new goal that a premise proves" ((syl.select 0 f 1).toOption.map (·.1)) (some 1)
+  | _, _ => check "filter: hyp on syl" false
   match sel "name(ax_mp)" with
   | .ok (_, vs) => checkEq "filter: the sample is the variant" (vs.map (·.name)) #["ax_mp"]
   | .error msg => check "filter: the sample is the variant" false msg

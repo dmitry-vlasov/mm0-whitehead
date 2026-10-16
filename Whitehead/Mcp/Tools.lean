@@ -160,6 +160,15 @@ def getOpen (args : Json) : ToolM (Nat × Open) := do
 def putOpen (k : Nat) (o : Open) : ToolM Unit :=
   modify fun st => { st with sessions := st.sessions.set! k (some o) }
 
+/-- Takes session `k` out of the state, for an operation that changes it: the state then
+does not hold its tree as well, and the operation changes it in place instead of copying
+it. The operation's checks are made before (`Session.chooseError?` and the others), so
+that it does not fail; it is put back with `putOpen`. -/
+def takeOpen (k : Nat) : ToolM Open := do
+  let some (some o) := (← get).sessions[k]? | throw s!"there is no session {k}"
+  modify fun st => { st with sessions := st.sessions.set! k none }
+  return o
+
 /-- What a goal node is: its number, its statement, its variants, and its proofs. A goal
 with variables is proved for an instance: `proved_as` shows the instances of a few of its
 proofs, which need not fit together with those of its siblings. -/
@@ -246,10 +255,13 @@ def choose (args : Json) : ToolM Json := do
   let (k, o) ← getOpen args
   let node ← liftE (argNat args "node")
   let chosen ← liftE (argNats args "variants")
-  let session ← match ← o.session.choose node chosen with
+  let close ← liftE (argBoolD args "close" true)
+  if let some e := o.session.chooseError? node chosen then throw e
+  let { session, thm, printer } ← takeOpen k
+  let session ← match ← session.choose node chosen close with
     | .ok s => pure s
     | .error e => throw e
-  let o := { o with session }
+  let o : Open := { session, thm, printer }
   putOpen k o
   let items := chosen.map fun p =>
     Json.obj #[("variant", Json.ofNat p),
@@ -266,12 +278,16 @@ def run (c : Ctx) (args : Json) : ToolM Json := do
   if let some h := node? then
     if !o.session.isGoal h then throw s!"{h} is not a goal node"
   let before := o.session.openGoals
+  let size := o.session.env.props.size
   let result ← match Dsl.parseTactic (o.session.dslCtx (some c.spec)) text with
     | .ok t =>
       let t := match node? with
         | some h => t.focus h
         | none => t
-      o.session.run t.strategy { maxProps := nodes, maxMs := ms }
+      if let some e := o.session.runError? t.strategy then throw e
+      -- the nodes this run may add
+      let { session, .. } ← takeOpen k
+      session.run t.strategy { maxProps := size + nodes, maxMs := ms }
     | .error e => throw (Dsl.ParseError.show text e)
   let (session, ending, stop) ← liftE result
   let o := { o with session }
@@ -293,10 +309,14 @@ def goal (c : Ctx) (args : Json) : ToolM Json := do
   let t0 ← IO.monoMsNow
   let (k, o) ← getOpen args
   let text ← liftE (argStr args "statement")
-  let (session, h) ← match ← o.session.goalText c.spec text with
+  let close ← liftE (argBoolD args "close" true)
+  let _ ← liftE (o.session.readGoal c.spec text)
+  if o.session.env.overBudget then throw "a join of this tree was cut short: it is missing proofs"
+  let { session, thm, printer } ← takeOpen k
+  let (session, h) ← match ← session.goalText c.spec text (close := close) with
     | .ok r => pure r
     | .error e => throw e
-  let o := { o with session }
+  let o : Open := { session, thm, printer }
   putOpen k o
   return .obj (#[("goal", goalJson o h)] ++ statusJson o t0 (← IO.monoMsNow))
 
@@ -328,10 +348,12 @@ def deduce (c : Ctx) (args : Json) : ToolM Json := do
   let n ← liftE (argNatD args "n" 10)
   let seed ← liftE (argNatD args "seed" 0)
   let f ← readFilter c o args
-  let (session, made) ← match ← o.session.deduce chosen with
+  if let some e := o.session.deduceError? chosen then throw e
+  let { session, thm, printer } ← takeOpen k
+  let (session, made) ← match ← session.deduce chosen with
     | .ok r => pure r
     | .error e => throw e
-  let o := { o with session }
+  let o : Open := { session, thm, printer }
   putOpen k o
   let (count, sample) := session.selectFacts made f n seed
   return .obj (#[("made", Json.ofNat made.size), ("count", Json.ofNat count),
@@ -389,14 +411,16 @@ def tools : Array Tool := #[
   ⟨"choose", "Expands chosen variants of a goal node. Their new goals become goal nodes; proofs are carried down by the engine. The variants not chosen stay, and a tactic may still expand them.",
     schema #[sessionProp, prop "node" "integer" "the goal node",
              ("variants", .obj #[("type", "array"), ("items", .obj #[("type", "integer")]),
-               ("description", "the variants to expand, as `variants` numbered them")])] #["session", "node", "variants"]⟩,
+               ("description", "the variants to expand, as `variants` numbered them")]),
+             prop "close" "boolean" "close every new goal that has no metavariable by its variants without premises; true by default"] #["session", "node", "variants"]⟩,
   ⟨"run", "Runs a tactic of the language on the tree as it is, within a time and a size. Limited by `nodes` and not by time, a run is deterministic.",
     schema #[sessionProp, prop "tactic" "string" "a tactic, such as `limited(bfs, depth=3)` or `filter(scope(ax_mp, syl), bfs)`",
              prop "ms" "integer" "the time allowed, in milliseconds; 1000 by default",
-             prop "nodes" "integer" "the largest number of assertion nodes of the tree; 1000000 by default",
+             prop "nodes" "integer" "how many assertion nodes the run may add to the tree; 1000000 by default",
              prop "node" "integer" "only in the subtree of this goal node (as `focus`)"] #["session", "tactic"]⟩,
   ⟨"goal", "Offers an intermediate goal: a statement, in the notation of the specification, that may help. It gets a goal node of its own; once it is proved, by choices, runs or deductions, it is a fact that proves the subgoals it fits and can be deduced from. `_` in it is a metavariable that its proof finds.",
-    schema #[sessionProp, prop "statement" "string" "the statement, without the `$`s"] #["session", "statement"]⟩,
+    schema #[sessionProp, prop "statement" "string" "the statement, without the `$`s",
+             prop "close" "boolean" "if it has no metavariable, close it by its variants without premises; true by default"] #["session", "statement"]⟩,
   ⟨"facts", "The facts of the forward front of a session: their statements, what made them, and whether they are on the front.",
     schema #[sessionProp, filterProp, prop "n" "integer" "the size of the sample; 10 by default",
              prop "seed" "integer" "the seed of the sample; 0 by default"] #["session"]⟩,

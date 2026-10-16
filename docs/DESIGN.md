@@ -1658,6 +1658,40 @@ lists the components.
       siblings. In the tree, siblings are independent until their proofs are joined at
       their parent. So what is consistent shows only at the parent, among its joined
       proofs, which the agent sees as `proved_as` there.
+  - **The second pilot, 2026-10-16, anonymous:** a Claude subagent worked four set.mm
+    theorems with the assertions known only by number: `jaob` again, and `pm5_17`,
+    `biadanid` and `_3ianor`.
+    - **Results:** all four proved, and the verifier accepted each proof:
+      - `jaob` in 13 calls, two of its leaves closed by `run`;
+      - `pm5_17` in 24 calls, with intermediate goals and one subtree by `run`;
+      - `biadanid` in 25 calls, by hand;
+      - `_3ianor` in 23 calls, by hand.
+    - **How the agent chose:** by recognizing familiar rules in their statements, which
+      is still prior knowledge of set.mm, but not of names. It also came to know a few
+      numbers by the third theorem.
+    - **What made the decisions:**
+      - shape filters on the new goals (`goal($ ... _ ... $)`), which usually took
+        hundreds of variants to 1–4;
+      - `premises(0)`, for the steps without premises;
+      - intermediate goals in place of choosing middle terms;
+      - the `used` order helped it find its way, but was not what decided.
+    - **Fixed after it:**
+      - a new goal without metavariables is closed at once by its variants without
+        premises (`Session.closeGround`; `close` in `choose` and `goal`, on by default),
+        since such a variant proves the goal itself and is not a decision;
+      - the filters `proves($ p $)`, on what the step proves, `fits($ p $)`, where a
+        metavariable of a new goal matches anything, and `ground`;
+      - `hyp` no longer counts a bare-variable goal, which every premise fits;
+      - `run`'s `nodes` is what the run may add, not the size of the whole tree;
+      - a tool that changes a session takes it out of the server's state while it works
+        (`takeOpen`), so the tree is held once and changed in place;
+      - each operation's checks are split from its work (`Session.chooseError?` and the
+        others), so that an error leaves the session as it was.
+    - **Times:** a choice on a tree of 1.1M nodes takes about 15 ms. The 450–650 ms the
+      agent saw on a 2M-node tree were the expansions of new goals such as
+      `wb ?a ?b`, which unify with thousands of assertions.
+    - **Not done:** a tactic that tries short chains of facts without premises. On
+      `pm5_17`, breadth-first missed a two-step chain within 3 s.
   - **Anonymous mode** (`mcp ... --anonymous`): every assertion is shown, filtered and
     listed as `A` and its number, except that `start` takes the theorem's real name. An
     agent then chooses by the statements, the filters and the ranks, and cannot look a

@@ -189,6 +189,18 @@ def serverTests : TestM Unit := do
   checkEq "server: an axiom is not a theorem" (errText (← callTool c st 18 "start" (.obj #[("theorem", "ax_1")])))
     "`ax_1` is an axiom: there is nothing to prove"
   checkEq "server: no such tool" (errText (← callTool c st 19 "prove" (.obj #[]))) "there is no tool `prove`"
+  -- an intermediate goal without metavariables, closed at once by an axiom; or not
+  let _ ← callTool c st 192 "start" (.obj #[("theorem", "mpd")])
+  let (g, _) ← callTool c st 193 "goal" (.obj #[("session", Json.ofNat 3), ("statement", "ph -> ps -> ph")])
+  checkEq "server: a ground goal closed by an axiom" ((g.get? "goal").bind (·.get? "proofs") |>.bind (·.nat?)) (some 1)
+  let (g, _) ← callTool c st 194 "goal" (.obj #[("session", Json.ofNat 3), ("statement", "ch -> ps -> ch"),
+    ("close", .bool false)])
+  checkEq "server: or not, if asked" ((g.get? "goal").bind (·.get? "proofs") |>.bind (·.nat?)) (some 0)
+  -- the nodes a run may add: counted from the tree as it is
+  let (before, _) ← callTool c st 195 "goals" (.obj #[("session", Json.ofNat 3)])
+  let (ran, _) ← callTool c st 196 "run" (.obj #[("session", Json.ofNat 3), ("tactic", "bfs"), ("nodes", Json.ofNat 5)])
+  check "server: a run's nodes are those it adds"
+    ((ran.get? "nodes").bind (·.nat?) |>.any fun n => n > ((before.get? "nodes").bind (·.nat?)).getD 0) ran.compress
   checkEq "server: an argument the tool does not take"
     (errText (← callTool c st 191 "find" (.obj #[("pattern", "a*")]))) "`find` has no argument `pattern`; it takes `name`, `limit`"
   -- after an error the sessions are still there

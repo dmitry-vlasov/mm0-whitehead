@@ -146,7 +146,12 @@ def docs : Array Doc := #[
     "what the step proves matches the pattern: the goal, backward; the fact deduced, forward"⟩,
   ⟨"used", "filter", "used(N) | used(min=N)",
     "the assertion is used in at least N proofs of the theorems before the one being proved"⟩,
-  ⟨"hyp", "filter", "hyp", "backward: one of the new goals unifies with a premise of the theorem, which proves it at once"⟩,
+  ⟨"fits", "filter", "fits($ pattern $)",
+    "backward: one of the new goals could become the pattern: as goal, but a metavariable of the new goal matches anything"⟩,
+  ⟨"proves", "filter", "proves($ pattern $)", "what the step proves, the goal under its unifier, matches the pattern"⟩,
+  ⟨"ground", "filter", "ground", "the goal has no metavariable"⟩,
+  ⟨"hyp", "filter", "hyp",
+    "backward: one of the new goals, not a bare metavariable, unifies with a premise of the theorem, which proves it at once"⟩,
   ⟨"bare", "filter", "bare",
     "backward: one of the new goals is a bare variable, which anything fits, such as the minor premise of ax_mp"⟩,
   ⟨"and", "filter", "and(f1, f2, ...)", "every filter passes"⟩,
@@ -262,6 +267,13 @@ partial def filter (c : Ctx) (a : Ast) : Except ParseError Filter := do
     | "result" =>
       checkNames name args #["pattern"]
       return .result (← pattern c name pos (arg? args "pattern" 0))
+    | "fits" =>
+      checkNames name args #["pattern"]
+      return .fits (← pattern c name pos (arg? args "pattern" 0))
+    | "proves" =>
+      checkNames name args #["pattern"]
+      return .proves (← pattern c name pos (arg? args "pattern" 0))
+    | "ground" => return .ground
     | "hyp" => return .hyp
     | "bare" => return .bare
     | "used" =>

@@ -124,11 +124,13 @@ end Notation
 /-! ### Matching -/
 
 /-- Matches the subexpression of pattern `p` at node `i` with that of `e` at node `j`.
-Returns where both end, or `none`. -/
-partial def matchAt (p e : Exp) (i j : Nat) : Option (Nat × Nat) := do
+Returns where both end, or `none`. With `loose`, a variable of `e` matches anything in
+the pattern, as it could become it. -/
+partial def matchAt (p e : Exp) (i j : Nat) (loose : Bool := false) : Option (Nat × Nat) := do
   let pn ← p.nodes[i]?
   let en ← e.nodes[j]?
   if Node.isVar pn && Node.varId pn == holeId then return (i + 1, j + Node.len en + 1)
+  if loose && Node.isVar en then return (i + Node.len pn + 1, j + 1)
   if Node.isVar pn || Node.isVar en then
     if pn == en then return (i + 1, j + 1) else none
   if Node.appId pn != Node.appId en || Node.ty pn != Node.ty en then none
@@ -137,7 +139,7 @@ partial def matchAt (p e : Exp) (i j : Nat) : Option (Nat × Nat) := do
   let mut pi := i + 1
   let mut ej := j + 1
   while pi < pEnd do
-    let (pi', ej') ← matchAt p e pi ej
+    let (pi', ej') ← matchAt p e pi ej loose
     pi := pi'
     ej := ej'
   if ej == eEnd then return (pEnd, eEnd) else none
@@ -145,6 +147,13 @@ partial def matchAt (p e : Exp) (i j : Nat) : Option (Nat × Nat) := do
 /-- Does pattern `p` match the expression `e`? -/
 def Exp.matchesPattern (e p : Exp) : Bool :=
   match matchAt p e 0 0 with
+  | some (i, j) => i == p.size && j == e.size
+  | none => false
+
+/-- Could `e` become what pattern `p` describes: does it match, a variable of `e` matching
+anything? -/
+def Exp.fitsPattern (e p : Exp) : Bool :=
+  match matchAt p e 0 0 true with
   | some (i, j) => i == p.size && j == e.size
   | none => false
 

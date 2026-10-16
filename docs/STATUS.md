@@ -37,7 +37,10 @@ the known variant among the first 5 at 77% of nodes. A first pilot followed: a C
 subagent proved three set.mm theorems through the server, ones that breadth-first does
 not prove in 1 s. By its own account it chose the steps from memory, and the filters
 only looked them up. Eight interface fixes came out of its report (`DESIGN.md`, "The
-first pilot").
+first pilot"). A second pilot, with the assertions known only by number, proved four
+theorems. Its steps were chosen by recognizing rules in their statements, by shape
+filters and by `premises(0)`. Six more fixes followed, among them the closing of ground
+goals by the steps without premises (`DESIGN.md`, "The second pilot").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -383,7 +386,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,094 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,105 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -573,9 +576,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    Done: the resumable search and the session operations, backward (`choose`) and
    forward (`deduce`); the filters; the language; intermediate goals; and the MCP
    server; what a description of the next goals narrows on set.mm; and the first
-   rank, by uses; and a first pilot, three theorems proved by an agent. Next: a pilot
-   on theorems the agent does not know by heart, which would measure what filters and
-   ranks give when memory cannot; and the human front-end. Open: how a human moves
+   rank, by uses; and two pilots, seven theorems proved by an agent, the second with
+   the names hidden. Next: the human front-end; and a pilot at a larger scale, with
+   counts per decision, for the dataset. Open: how a human moves
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one
    sibling should narrow the variants shown at the others.

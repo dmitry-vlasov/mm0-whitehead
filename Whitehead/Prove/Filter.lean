@@ -46,8 +46,15 @@ inductive Filter where
   /-- The assertion is used in at least this many proofs of the theorems before the one
   being proved (`Uses.lean`). -/
   | used (min : Nat)
-  /-- Backward: one of the new goals unifies with a premise of the theorem, which would
-  prove it at once. -/
+  /-- Backward: one of the new goals could become what the pattern describes: as `goal`,
+  but a variable of the new goal matches anything. -/
+  | fits (pat : Exp)
+  /-- What the step proves, the goal under its unifier, matches the pattern. -/
+  | proves (pat : Exp)
+  /-- The goal has no variable. -/
+  | ground
+  /-- Backward: one of the new goals that is not a bare variable unifies with a premise of
+  the theorem, which would prove it at once. -/
   | hyp
   /-- Backward: one of the new goals is a bare variable, such as the minor premise of
   modus ponens: anything fits it. -/
@@ -68,8 +75,11 @@ structure View where
   result : Exp
   /-- In how many proofs before the theorem the assertion is used; 0 for an unfolding. -/
   uses : Nat := 0
-  /-- How many of the new goals unify with a premise of the theorem. -/
+  /-- How many of the new goals that are not bare variables unify with a premise of the
+  theorem. -/
   closable : Thunk Nat := Thunk.pure 0
+  /-- What the step proves: the goal under its unifier. -/
+  inst : Thunk Exp := Thunk.pure default
 
 /-- Does `name` match `glob`, in which `*` stands for any characters? -/
 partial def globMatch (glob name : String) : Bool :=
@@ -96,6 +106,9 @@ partial def eval (f : Filter) (v : View) : Bool :=
   | .goal p => v.goals.get.any (·.matchesPattern p)
   | .result p => v.result.matchesPattern p
   | .used n => v.uses ≥ n
+  | .fits p => v.goals.get.any (·.fitsPattern p)
+  | .proves p => v.inst.get.matchesPattern p
+  | .ground => !v.result.hasVars
   | .hyp => v.closable.get > 0
   | .bare => v.goals.get.any (·.isVar)
   | .and fs => fs.all (·.eval v)
@@ -114,21 +127,6 @@ def Env.stepName (env : Env) : Step → String
   | .assertion id => env.db.asserts[id]!.name
   | .conv t _ _ => env.db.terms[t]!.name
 
-/-- The view of assertion node `p`. Its new goals are its children's expressions once it
-is expanded; before, the premises of its rule under the unifier of the candidate, with
-the variables of the rule that the unifier leaves free as they are. -/
-def Env.propView (env : Env) (p : Nat) : View :=
-  let prop := env.props[p]!
-  let goals : Thunk (Array Exp) := Thunk.mk fun _ =>
-    if prop.expanded then prop.children.map fun h => env.hyps[h]!.expr
-    else
-      match prop.unif.bind (·.toSubst) with
-      | some u => prop.rule.hyps.map u.apply
-      | none => prop.rule.hyps.map prop.outer.apply |>.map prop.sub.apply
-  let closable := Thunk.mk fun _ => (goals.get.filter fun g => !(env.premises.unify g).isEmpty).size
-  { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size, goals,
-    result := env.hyps[prop.parent]!.expr, uses := env.stepUses prop.step, closable }
-
 /-- The goal of assertion node `p` as the node would prove it: under its unifier, which
 shows what it puts for the goal's variables. -/
 def Env.propInstance (env : Env) (p : Nat) : Exp :=
@@ -140,6 +138,22 @@ def Env.propInstance (env : Env) (p : Nat) : Exp :=
     | some u => u.apply goal
     | none => goal
 
+/-- The view of assertion node `p`. Its new goals are its children's expressions once it
+is expanded; before, the premises of its rule under the unifier of the candidate, with
+the variables of the rule that the unifier leaves free as they are. -/
+def Env.propView (env : Env) (p : Nat) : View :=
+  let prop := env.props[p]!
+  let goals : Thunk (Array Exp) := Thunk.mk fun _ =>
+    if prop.expanded then prop.children.map fun h => env.hyps[h]!.expr
+    else
+      match prop.unif.bind (·.toSubst) with
+      | some u => prop.rule.hyps.map u.apply
+      | none => prop.rule.hyps.map prop.outer.apply |>.map prop.sub.apply
+  let closable := Thunk.mk fun _ => (goals.get.filter fun g => !g.isVar && !(env.premises.unify g).isEmpty).size
+  { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size, goals,
+    result := env.hyps[prop.parent]!.expr, uses := env.stepUses prop.step, closable,
+    inst := Thunk.mk fun _ => env.propInstance p }
+
 /-- The view of fact `f` as the deduction that made it: the assertion node under it. A
 premise of the task is not a deduction. -/
 def Env.factView? (env : Env) (f : Nat) : Option View := do
@@ -147,6 +161,7 @@ def Env.factView? (env : Env) (f : Nat) : Option View := do
   let p ← hyp.children[0]?
   let prop ← env.props[p]?
   return { step := prop.step, name := env.stepName prop.step, premises := prop.rule.hyps.size,
-           goals := Thunk.pure #[], result := hyp.expr, uses := env.stepUses prop.step }
+           goals := Thunk.pure #[], result := hyp.expr, uses := env.stepUses prop.step,
+           inst := Thunk.pure hyp.expr }
 
 end Whitehead.Prove

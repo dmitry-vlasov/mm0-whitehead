@@ -151,16 +151,20 @@ def openGoals (s : Session) : Array Nat :=
 def statement (s : Session) (h : Nat) : String :=
   s.env.db.showExp s.env.hyps[h]!.expr
 
-/-- Expands the variants `props` of goal node `h`, in that order, and carries the proofs
-that this makes down to the root. The variants that are not chosen stay leaves, which a
-strategy may still expand: a choice prunes nothing. -/
-def choose (s : Session) (h : Nat) (props : Array Nat) : IO (Except String Session) := do
-  if !s.isGoal h then return .error s!"{h} is not a goal node"
+/-- Why `choose h props` cannot be done, if it cannot. The checks read the session only, so
+that a front-end can make them before it gives up its hold on the session's tree. -/
+def chooseError? (s : Session) (h : Nat) (props : Array Nat) : Option String := Id.run do
+  if !s.isGoal h then return some s!"{h} is not a goal node"
   let children := s.env.hyps[h]!.children
   for p in props do
-    if !children.contains p then return .error s!"{p} is not a variant of goal node {h}"
-    if s.env.props[p]!.expanded then return .error s!"variant {p} is expanded already"
-  if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
+    if !children.contains p then return some s!"{p} is not a variant of goal node {h}"
+    if s.env.props[p]!.expanded then return some s!"variant {p} is expanded already"
+  if s.env.overBudget then return some "a join of this tree was cut short: it is missing proofs"
+  return none
+
+/-- `choose` without its checks: the assertion nodes `props` expanded, and the proofs that
+this makes carried down. -/
+def expandAll (s : Session) (props : Array Nat) : IO Session := do
   let { accept, env, rej, found, sid, maxFacts } := s
   let mut env := env
   let mut rej := rej
@@ -173,7 +177,31 @@ def choose (s : Session) (h : Nat) (props : Array Nat) : IO (Except String Sessi
       env := env'
       rej := rej'
       found := found <|> f
-  return .ok { accept, env := env.dropExpanded, rej, found, sid, maxFacts }
+  return { accept, env, rej, found, sid, maxFacts }
+
+/-- The goal nodes of `nodes` that have no variable and no proof, each closed by every one
+of its variants without premises: a step that is not a decision, since such a variant
+proves the goal itself, and nothing else. -/
+def closeGround (s : Session) (nodes : Array Nat) : IO Session := do
+  let mut closers := #[]
+  for h in nodes do
+    let hyp := s.env.hyps[h]!
+    if s.isGoal h && !hyp.expr.hasVars && hyp.proofs.isEmpty then
+      closers := closers ++ hyp.children.filter fun p =>
+        !s.env.props[p]!.expanded && s.env.props[p]!.rule.hyps.isEmpty
+  if closers.isEmpty then return s
+  s.expandAll closers
+
+/-- Expands the variants `props` of goal node `h`, in that order, and carries the proofs
+that this makes down to the root. The variants that are not chosen stay leaves, which a
+strategy may still expand: a choice prunes nothing. With `close`, the new goals without
+variables are closed by their variants without premises (`closeGround`). -/
+def choose (s : Session) (h : Nat) (props : Array Nat) (close : Bool := false) : IO (Except String Session) := do
+  if let some e := s.chooseError? h props then return .error e
+  let s ← s.expandAll props
+  if !close then return .ok s
+  let goals := props.foldl (init := #[]) fun acc p => acc ++ s.env.props[p]!.children
+  return .ok (← s.closeGround goals)
 
 /-- The deductions from the facts `chosen`, at least one of which is on the front: for
 each chosen fact on the front, every application of an assertion in which it fills a
@@ -182,14 +210,17 @@ deduction is a new fact, joined with the goal and the subgoals of the backward t
 any fact is, every join to its end. The chosen facts stay on the front: the
 applications with facts that were not chosen are made when they are expanded without a
 restriction. Returns the new facts. -/
-def deduce (s : Session) (chosen : Array Nat) : IO (Except String (Session × Array Nat)) := do
-  if s.env.forward.isNone then return .error "the session has no forward front"
+def deduceError? (s : Session) (chosen : Array Nat) : Option String := Id.run do
+  if s.env.forward.isNone then return some "the session has no forward front"
   for f in chosen do
-    if !s.isFact f then return .error s!"{f} is not a fact"
-  let front := s.front
-  let triggers := chosen.filter front.contains
-  if triggers.isEmpty then return .error "none of the chosen facts is on the front"
-  if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
+    if !s.isFact f then return some s!"{f} is not a fact"
+  if !(chosen.any s.front.contains) then return some "none of the chosen facts is on the front"
+  if s.env.overBudget then return some "a join of this tree was cut short: it is missing proofs"
+  return none
+
+def deduce (s : Session) (chosen : Array Nat) : IO (Except String (Session × Array Nat)) := do
+  if let some e := s.deduceError? chosen then return .error e
+  let triggers := chosen.filter s.front.contains
   let { accept, env, rej, found, sid, maxFacts } := s
   let mut env := env
   let mut made : Array Nat := #[]
@@ -221,25 +252,30 @@ def _root_.Whitehead.Prove.Env.withForward (env : Env) : Env := Id.run do
 like the root, and returned. Every proof it gets, by choices, runs and deductions,
 becomes a fact, joined with the goal and the subgoals of the main tree. A session
 without a forward front gets an empty one. -/
-def goal (s : Session) (expr : Exp) : IO (Except String (Session × Nat)) := do
+def goal (s : Session) (expr : Exp) (close : Bool := false) : IO (Except String (Session × Nat)) := do
   if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
   let { accept, env, rej, found, sid, maxFacts } := s
   let (h, env) ← (offerHint expr).run env.withForward
   let (_, env) ← takeHints.run env
   let (f, rej, env) := takeFound accept env rej
-  return .ok ({ accept, env, rej, found := found <|> f, sid, maxFacts }, h)
+  let s : Session := { accept, env, rej, found := found <|> f, sid, maxFacts }
+  return .ok (← if close then s.closeGround #[h] else pure s, h)
 
 /-- `goal` for a statement in the notation of the specification, the inside of
 `$ ... $`; a hole `_` is a new metavariable. `metas` are the binders of the theorem
 marked as metavariables in its task. -/
-def goalText (s : Session) (spec : Notation) (text : String) (metas : Array Nat := #[]) :
-    IO (Except String (Session × Nat)) := do
+def readGoal (s : Session) (spec : Notation) (text : String) (metas : Array Nat := #[]) :
+    Except String (Exp × Nat) :=
   let ctx := s.dslCtx (some spec) metas
-  match spec.formula ctx.thm ctx.vars text 0 s.env.fresh with
-  | .error e => return .error (Dsl.ParseError.show text e)
+  (spec.formula ctx.thm ctx.vars text 0 s.env.fresh).mapError (Dsl.ParseError.show text)
+
+def goalText (s : Session) (spec : Notation) (text : String) (metas : Array Nat := #[]) (close : Bool := false) :
+    IO (Except String (Session × Nat)) := do
+  match s.readGoal spec text metas with
+  | .error e => return .error e
   | .ok (expr, holes) =>
     let s := { s with env := { s.env with fresh := s.env.fresh + holes } }
-    s.goal expr
+    s.goal expr close
 
 /-- Runs a strategy on the tree as it is, from the strategy's initial state, until it
 accepts a proof, has nothing more to do, or reaches a limit. The time is counted from
@@ -248,10 +284,14 @@ always run to its end: one that a budget cut short would keep nothing, and the t
 would be missing proofs for the runs after it. The forward direction is not supported
 here yet: a wave that a limit stops leaves the facts it had not expanded off the front.
 In a session the forward direction is `deduce`. -/
+def runError? {σ : Type} (s : Session) (strategy : Strategy σ) : Option String :=
+  if strategy.forward then some "the forward direction is not supported in a session"
+  else if s.env.overBudget then some "a join of this tree was cut short: it is missing proofs"
+  else none
+
 def run {σ : Type} (s : Session) (strategy : Strategy σ) (limits : Limits) :
     IO (Except String (Session × Ending × Option Stop)) := do
-  if strategy.forward then return .error "the forward direction is not supported in a session"
-  if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
+  if let some e := s.runError? strategy then return .error e
   let start ← IO.monoMsNow
   let { accept, env, rej, found, sid, maxFacts } := s
   let env := { env.withLimits strategy limits start with
