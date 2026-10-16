@@ -1658,6 +1658,10 @@ lists the components.
       siblings. In the tree, siblings are independent until their proofs are joined at
       their parent. So what is consistent shows only at the parent, among its joined
       proofs, which the agent sees as `proved_as` there.
+  - **Anonymous mode** (`mcp ... --anonymous`): every assertion is shown, filtered and
+    listed as `A` and its number, except that `start` takes the theorem's real name. An
+    agent then chooses by the statements, the filters and the ranks, and cannot look a
+    step up by its name. It is for measuring what the tools give when memory cannot.
   - **A bridge for a shell** (`scripts/mcp-bridge.py`): it keeps one server up behind a
     port of 127.0.0.1, and each `call <tool> '<json>'` prints one result. It serves an
     agent that has a shell but no MCP client, and trying the server by hand.

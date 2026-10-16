@@ -196,5 +196,20 @@ def serverTests : TestM Unit := do
   check "server: the session after the errors" (!err && (gs.get? "proved").bind (·.bool?) == some true) gs.compress
   let (_, err) ← callTool c st 21 "close" (.obj #[("session", Json.ofNat 0)])
   check "server: close" (!err && (← callTool c st 22 "goals" (.obj #[("session", Json.ofNat 0)])).2)
+  -- anonymous: the assertions are A and their number, but for `start`
+  let some a := (← Ctx.load Prove.logicSpecPath Prove.logicPath (anonymous := true)).toOption
+    | check "server: the anonymous fixture is loaded" false; return
+  let st ← IO.mkRef ({} : State)
+  let (found, _) ← callTool a st 1 "find" (.obj #[("name", "ax_*")])
+  checkEq "server: anonymous, no assertion has its name" ((found.get? "count").bind (·.nat?)) (some 0)
+  let (found, _) ← callTool a st 2 "find" (.obj #[("name", "A3")])
+  checkEq "server: anonymous, by number" ((found.get? "assertions").map (·.compress))
+    (some "[{\"name\":\"A3\",\"kind\":\"axiom\",\"statement\":\"$ ph $ > $ ph -> ps $ > $ ps $\"}]")
+  let (_, err) ← callTool a st 3 "start" (.obj #[("theorem", "syl")])
+  let (ran, _) ← callTool a st 4 "run" (.obj #[("session", Json.ofNat 0), ("tactic", "limited(bfs, depth=3)")])
+  let (pf, _) ← callTool a st 5 "proof" (.obj #[("session", Json.ofNat 0)])
+  check "server: anonymous, a session by the theorem's name, and a proof by numbers"
+    (!err && (ran.get? "ending").bind (·.str?) == some "proved" &&
+      ((pf.get? "steps").map (·.compress)).any fun t => contains t "A6" && !contains t "mpd") pf.compress
 
 end Tests.Mcp

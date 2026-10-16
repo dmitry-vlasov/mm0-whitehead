@@ -3,7 +3,7 @@
 127.0.0.1, and each `call` sends it one tool call and prints the result. For an agent
 that has a shell but no MCP client, and for trying the server by hand.
 
-    scripts/mcp-bridge.py serve <file.mm0> <file.mmb> --port P [--log FILE]
+    scripts/mcp-bridge.py serve <file.mm0> <file.mmb> --port P [--log FILE] [--anonymous]
     scripts/mcp-bridge.py call <tool> '<arguments as JSON>' --port P
     scripts/mcp-bridge.py stop --port P
 
@@ -30,8 +30,8 @@ def option(args, name, default=None):
     return default
 
 
-def serve(mm0, mmb, port, log):
-    command = [BINARY, "mcp", mm0, mmb] + (["--log", log] if log else [])
+def serve(mm0, mmb, port, log, anonymous):
+    command = [BINARY, "mcp", mm0, mmb] + (["--log", log] if log else []) + (["--anonymous"] if anonymous else [])
     server = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     next_id = 1
 
@@ -95,12 +95,15 @@ def main():
     args = sys.argv[1:]
     port = option(args, "--port")
     log = option(args, "--log")
+    anonymous = "--anonymous" in args
+    if anonymous:
+        args.remove("--anonymous")
     if not args or port is None:
         print(__doc__, file=sys.stderr)
         return 2
     port = int(port)
     if args[0] == "serve" and len(args) == 3:
-        serve(args[1], args[2], port, log)
+        serve(args[1], args[2], port, log, anonymous)
         return 0
     if args[0] == "stop":
         send(port, {"stop": True})

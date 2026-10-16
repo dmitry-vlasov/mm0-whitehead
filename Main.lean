@@ -25,10 +25,11 @@ def usage : String :=
                                  theorems stopped at a limit; --max-steps N: proofs of more than N
                                  steps are left out
   dsl                            list the tactics and filters of the language of sessions
-  mcp <file.mm0> <file.mmb> [--log FILE]
+  mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous]
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
-                                 message
+                                 message; --anonymous: assertions are shown as A and their
+                                 number, but for the theorem a session starts on
   prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--shapes]
                                  how many variants the goal nodes on the paths of the known
                                  proofs have, each node expanded against the whole database:
@@ -527,7 +528,7 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
 
 /-- `mcp`: the MCP server for an agent, on stdin and stdout (`Mcp/Server.lean`). -/
 def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
-  match ← Mcp.Ctx.load mm0 mmb with
+  match ← Mcp.Ctx.load mm0 mmb (anonymous := args.contains "--anonymous") with
   | .error msg =>
     IO.eprintln msg
     return 1

@@ -31,6 +31,9 @@ structure Ctx where
   spec : Notation
   /-- How often each assertion is used in the proofs of the file (`Uses.lean`). -/
   uses : Uses
+  /-- The names of the assertions, by which `start` finds a theorem. With `anonymous`,
+  every other tool knows an assertion only as `A` and its number. -/
+  realNames : Array String := #[]
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -43,8 +46,10 @@ structure State where
   deriving Inhabited
 
 /-- Loads `mm0` and `mmb`, checks that the proof file proves the specification, and names
-the assertions by the specification. -/
-def Ctx.load (mm0 mmb : System.FilePath) : IO (Except String Ctx) := do
+the assertions by the specification. With `anonymous`, the assertions are shown as `A`
+and their number everywhere but in `start`, so that an agent cannot look a step up by
+its name: what it chooses, it chooses by the statements, the filters and the ranks. -/
+def Ctx.load (mm0 mmb : System.FilePath) (anonymous : Bool := false) : IO (Except String Ctx) := do
   let spec ← match ← Mm0.load mm0 with
     | .error e => return .error e.format
     | .ok spec => pure spec
@@ -62,8 +67,10 @@ def Ctx.load (mm0 mmb : System.FilePath) : IO (Except String Ctx) := do
   let nt := Notation.ofSpec st file
   let db := nt.names.foldl (init := db) fun db (i, name) =>
     if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
+  let realNames := db.asserts.map (·.name)
+  let db := if anonymous then { db with asserts := db.asserts.map fun a => { a with name := s!"A{a.id}" } } else db
   return .ok { db, index := db.index, hypIndexes := db.hypIndexes, vc := Verify.Ctx.ofFile file, spec := nt,
-               uses := Uses.ofFile file db.asserts.size }
+               uses := Uses.ofFile file db.asserts.size, realNames }
 
 /-! ### Arguments -/
 
@@ -129,7 +136,7 @@ def Open.showForRule (o : Open) (c : Ctx) (step : Step) (e : Exp) : String :=
 
 /-- The number of the theorem named `name` in the proof file. -/
 def Ctx.theorem (c : Ctx) (name : String) : Except String Nat := do
-  let some id := (Array.range c.db.asserts.size).find? (c.db.asserts[·]!.name == name)
+  let some id := (Array.range c.db.asserts.size).find? (c.realNames[·]? == some name)
     | throw s!"no assertion is named `{name}`"
   let isThm := c.db.file.stmts.any fun s => s.index == id && match s.kind with | .thm _ => true | _ => false
   if !isThm then throw s!"`{name}` is an axiom: there is nothing to prove"
