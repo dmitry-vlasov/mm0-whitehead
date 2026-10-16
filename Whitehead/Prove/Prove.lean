@@ -414,11 +414,67 @@ def forwardWave (env : Env) (limits : Limits) (start : Nat) (sid : Nat) : IO (En
       env ← joinFacts env' made limits start sid
   return (env, !((env.forward.map (·.front.isEmpty)).getD true))
 
-/-- The search of `searchWith`; `sid` is its number among the searches that are running
-(`runningSizes`). -/
-partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
-    (strategy : Strategy σ) (limits : Limits) (sid : Nat) : IO Result := do
-  let start ← IO.monoMsNow
+/-- What the verifier said about the proofs that reached the root and were not accepted:
+how many, its message for the last of them, and the last. -/
+structure Rejections where
+  count : Nat := 0
+  last : String := ""
+  proof : Option ProofTree := none
+  deriving Inhabited
+
+/-- A proof that reached the root and was accepted: the tree, the body, the goal as it is
+proved, and the values of the metavariables. -/
+structure Found where
+  proof : ProofTree
+  body : ByteArray
+  answer : Exp
+  values : Array Exp
+
+/-- The result of a search that has ended. -/
+def Rejections.result (rej : Rejections) (env : Env) (ending : Ending) (found : Option Found := none)
+    (stop : Option Stop := none) : Result :=
+  { ending, proof := found.map (·.proof), body := found.map (·.body), answer := found.map (·.answer),
+    values := (found.map (·.values)).getD #[], rejected := rej.count, rejection := rej.last,
+    rejectedProof := rej.proof, stop, env }
+
+/-- The proof of a result, if it has one. -/
+def Result.found? (r : Result) : Option Found := do
+  return { proof := ← r.proof, body := ← r.body, answer := ← r.answer, values := r.values }
+
+/-- The rejections of a result. -/
+def Result.rejections (r : Result) : Rejections :=
+  { count := r.rejected, last := r.rejection, proof := r.rejectedProof }
+
+/-- `takeRootProofs`, with the rejections counted. -/
+def takeFound (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env) (rej : Rejections) :
+    Option Found × Rejections × Env :=
+  let (found, rs, env) := takeRootProofs accept env
+  let rej := { rej with count := rej.count + rs.size }
+  let rej := match rs.back? with
+    | some (msg, tree) => { rej with last := msg, proof := some tree }
+    | none => rej
+  (found.map fun (proof, body, answer, values) => { proof, body, answer, values }, rej, env)
+
+/-- The limits of a run that the engine looks at itself, in a join, set into the tree;
+`start` is when the run started. -/
+def Env.withLimits {σ : Type} (env : Env) (strategy : Strategy σ) (limits : Limits) (start : Nat) : Env :=
+  { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork,
+             joinCap := limits.joinCap,
+             deadline := match limits.deadline with
+               | some d => min d (start + limits.maxMs)
+               | none => start + limits.maxMs }
+
+/-- How a search has started: with a proof found at once, or with the tree to go on
+from. -/
+inductive Begun where
+  | finished (result : Result)
+  | running (env : Env) (rej : Rejections)
+
+/-- The start of `ruProve`, before its loop: a goal that is one of the premises, the
+limits, the forward front if the strategy uses it, and the expansion of the root. `sid`
+is the search's number among the searches that are running (`runningSizes`). -/
+def searchStart {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
+    (strategy : Strategy σ) (limits : Limits) (start sid : Nat) : IO Begun := do
   -- a goal that is one of the premises needs no assertion; Russell's root is not matched
   -- with the premises. With metavariables: a goal that unifies with one.
   let direct := (env.premises.unify env.task.goal).filter fun u =>
@@ -428,27 +484,29 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     | none => true
   for u in direct.qsort (·.data < ·.data) do
     if let .ok body := accept env (.hyp u.data) #[] then
-      return { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
-               values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
-  let mut env := { env with admitJoin := strategy.admitJoin, tupleBudget := limits.maxTuples, workBudget := limits.maxWork,
-                             joinCap := limits.joinCap,
-                             deadline := match limits.deadline with
-                               | some d => min d (start + limits.maxMs)
-                               | none => start + limits.maxMs }
-  let mut rejected := 0
-  let mut rejection := ""
-  let mut rejectedProof : Option ProofTree := none
+      return .finished { ending := .proved, proof := some (.hyp u.data), body := some body, answer := some u.expr,
+                         values := env.task.metas.map fun m => u.sub.apply (Exp.ofVar m), env }
+  let mut env := env.withLimits strategy limits start
+  let mut rej : Rejections := {}
   -- the forward front is seeded before the root is expanded (`ruSeedForwardFront`), and
   -- a seed may be the goal
   if strategy.forward then
     let (seeds, env') ← (seedForward limits.maxFacts).run env
-    env ← joinFacts env' seeds limits start sid
-    let (found, r, env') := takeRootProofs accept env
+    let (found, rej', env') := takeFound accept (← joinFacts env' seeds limits start sid) rej
     env := env'
-    rejected := rejected + r.size
-    if let some (tree, body, answer, values) := found then
-      return { ending := .proved, proof := some tree, body := some body, answer := some answer, values, rejected, env }
+    rej := rej'
+    if let some found := found then return .finished (rej.result env .proved found)
   env := ((← (expandHyp 0 strategy.root).run env)).2
+  return .running env rej
+
+/-- The loop of `ruProve`, from the tree `env` as it is: the strategy's decisions, from its
+initial state, until a proof is accepted, the strategy has nothing more to do, or a limit
+is reached. A search that stopped at a limit between two steps can go on from where it
+stopped. One that stopped inside a join cannot (`Env.overBudget`): the join kept nothing. -/
+partial def searchLoop {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
+    (rej : Rejections) (strategy : Strategy σ) (limits : Limits) (start sid : Nat) : IO Result := do
+  let mut env := env
+  let mut rej := rej
   let mut st := strategy.init
   -- a wave that leaves no front lets the strategy decide once more; two in a row end
   -- the search (`ruProveRec`)
@@ -459,46 +517,39 @@ partial def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond �
     match decision with
     | .done =>
       -- a join that the budget stopped leaves the tree without some of its proofs
-      return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
-               rejected, rejection, rejectedProof, env }
+      return rej.result env (if env.overBudget then .limit else .exhausted) (stop := env.stop)
     | .forward =>
       let (env', more) ← forwardWave env limits start sid
+      let (found, rej', env') := takeFound accept env' rej
       env := env'
-      let (found, r, env') := takeRootProofs accept env
-      env := env'
-      rejected := rejected + r.size
-      if let some (msg, tree) := r.back? then
-        rejection := msg
-        rejectedProof := some tree
-      if let some (tree, body, answer, values) := found then
-        return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
-                 rejected, rejection, rejectedProof, env }
-      if let some stop ← overNow env limits start sid then
-        return { ending := .limit, stop, rejected, rejection, rejectedProof, env }
+      rej := rej'
+      if let some found := found then return rej.result env .proved found
+      if let some stop ← overNow env limits start sid then return rej.result env .limit (stop := stop)
       if more then dry := false
       else if !dry then dry := true
-      else return { ending := .exhausted, rejected, rejection, rejectedProof, env }
+      else return rej.result env .exhausted
     | .expand items =>
       dry := false
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
-        if let some stop ← overNow env limits start sid then
-          return { ending := .limit, stop, rejected, rejection, rejectedProof, env }
+        if let some stop ← overNow env limits start sid then return rej.result env .limit (stop := stop)
         let (_, env') ← (proveProp p only).run env
         env := env'
         if !env.rootProofs.isEmpty then
-          let (found, r, env') := takeRootProofs accept env
+          let (found, rej', env') := takeFound accept env rej
           env := env'
-          rejected := rejected + r.size
-          if let some (msg, tree) := r.back? then
-            rejection := msg
-            rejectedProof := some tree
-          if let some (tree, body, answer, values) := found then
-            return { ending := .proved, proof := some tree, body := some body, answer := some answer, values,
-                     rejected, rejection, rejectedProof, env }
-  return { ending := if env.overBudget then .limit else .exhausted, stop := env.stop,
-           rejected, rejection, rejectedProof, env }
+          rej := rej'
+          if let some found := found then return rej.result env .proved found
+  return rej.result env (if env.overBudget then .limit else .exhausted) (stop := env.stop)
+
+/-- The search of `searchWith`: its start, then its loop. -/
+def searchCore {σ : Type} (accept : Env → ProofTree → Array Cond → Except String ByteArray) (env : Env)
+    (strategy : Strategy σ) (limits : Limits) (sid : Nat) : IO Result := do
+  let start ← IO.monoMsNow
+  match ← searchStart accept env strategy limits start sid with
+  | .finished r => return r
+  | .running env rej => searchLoop accept env rej strategy limits start sid
 
 /-- `ruProve`: searches for a proof of the task of `env` with a strategy. A proof that
 reaches the root is given to `accept`, which says whether it counts. -/

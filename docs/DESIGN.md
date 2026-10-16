@@ -1471,9 +1471,18 @@ it. Only the miner is built.
 
 ### The session
 
-- **The tree persists between requests,** with stable node numbers. The search loop
-  (`searchCore`) has to pause and resume with its tree, where today it runs to the
-  end.
+- **The tree persists between requests,** with stable node numbers. Built on
+  2026-10-16 (`Prove/Session.lean`): `searchCore` is split into `searchStart` (a goal
+  that is a premise, the forward front, the root) and `searchLoop`, which runs a
+  strategy on the tree as it is. A search stopped at a limit between two steps resumes
+  where it stopped. Breadth-first expands the assertion nodes in the order they were
+  made, so a resumed search expands what an uninterrupted one does and finds the same
+  proof (`tests/Tests/Prove/Session.lean`).
+- **Joins are not cut in a session.** A join that a budget cuts short (`addProof`:
+  time, tuples, work or memory) keeps nothing, and the joins after it are skipped
+  (`Env.overBudget`). The tree is then missing proofs, and a search resumed on it could
+  miss a proof. So a session run checks its time and node limits between steps only,
+  and runs every join to its end. A tree with `overBudget` set is not resumed.
 - **Operations:**
   - `variants(node, filter)` returns the count and samples;
   - `choose(node, variants)` expands the chosen ones;
@@ -1481,9 +1490,32 @@ it. Only the miner is built.
   - `run(tactic)` runs a tactic within its limits;
   - a view of the tree and of the frontier;
   - `proof()` extracts the proof as `.mmb`, checked by the verifier.
-- **Front-ends:** for AI, a text protocol (MCP or JSON lines) that is deterministic,
-  reports cost, and logs traces. For humans, the same operations in an editor (Russell
-  has an LSP server and a VS Code extension, `russell-flow/docs/vscode-extension.md`).
+- **Front-ends (decided 2026-10-16):** one binary serves both.
+  - For humans, an LSP server driven by VS Code: the `.mm0` features, plus custom
+    requests for the session operations.
+  - For AI, an MCP mode that offers the same operations as tools. It is
+    deterministic, reports cost, and logs traces.
+  - Both use JSON-RPC 2.0 over stdio, through a small JSON module of our own; Lean
+    core's `Lean.Data.Json` is not used, to keep the binary independent of `Lean`.
+  - The server prints expressions in `.mm0` notation.
+  - The human UI is chosen for its UX, not copied from Russell's tree view.
+- **The human UI, a first variant (decided 2026-10-16): a goal panel.** It is a webview
+  beside the editor that shows one goal node at a time:
+  - the path from the root, which is also the way back;
+  - the goal in notation;
+  - a filter box, with the count and samples of what is left, where the variants are
+    chosen;
+  - the goals that the chosen variants make, where a click moves the panel;
+  - the open goals and the proofs found;
+  - a field for an intermediate goal.
+
+  A tree view does not fit: a node may have thousands of variants, goal and step
+  levels alternate, and a label holds one line. The author doubts that one goal at a
+  time is the best way to move about in a huge tree (open point 4).
+- **A session file (proposed, not decided):** each action (`choose`, `goal`, `run`) is
+  recorded as a line of the DSL. Replaying the file rebuilds the tree, since the search
+  is deterministic, and editing a line is the undo. The traces of an AI over MCP would
+  take the same form.
 
 ### Measurement
 
@@ -1497,6 +1529,8 @@ it. Only the miner is built.
 2. Which front-end comes first.
 3. The questions of 2026-10-13 below. They concern the chain and rank atoms, and do
    not block the session.
+4. How a human moves about in a huge tree. The goal panel is a first variant only.
+5. Whether a session is recorded as a file of DSL lines.
 
 ### Order of building (a proposal)
 

@@ -13,8 +13,10 @@ the replay reader, and the checking of a proof found for a task with metavariabl
 ranking, and paused the same day. Redesigned on 2026-10-16 around how humans and AI
 agents use the prover: they choose variants by refining composable filters, and they
 offer intermediate goals, while tactics do the rest. Mining and ranking become filter
-atoms. The design is in `DESIGN.md` ("Phase 4"). The chain miner (`prove chains`) is
-built, and its numbers are below.
+atoms. The design is in `DESIGN.md` ("Phase 4"). Built: the chain miner (`prove
+chains`, its numbers below), and the first step of the design, a session
+(`Prove/Session.lean`). A session is a tree kept between requests, on which variants are
+chosen and strategies run, and a search stopped at a limit resumes there.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -360,7 +362,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 928 checks, 0 failures, in 18 seconds:
+corpus of `scripts/build-corpus.sh` built — 947 checks, 0 failures, in 19 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -386,6 +388,11 @@ corpus of `scripts/build-corpus.sh` built — 928 checks, 0 failures, in 18 seco
   direction and both in turn, conditions on bound variables, one proof per key kept in
   the tree and in the forward front and none made twice, variables marked as
   metavariables and the values found for them).
+- Prover, the session: variants chosen by hand prove `a1i`; a choice that is not a
+  variant of the node, or is expanded already, is refused; the variants not chosen
+  stay leaves; a run of breadth-first on a session; a choice and then a run; and a
+  search stopped at its node limit and resumed, which gives the same proof and the
+  same tree as the search without a stop.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -503,5 +510,7 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
-   starting with a resumable search and the session operations. Open: how variants are
-   chosen forward, and which front-end comes first.
+   The resumable search and the session operations are done; next come the filters
+   and a `Strategy` that takes one. Open: how variants are chosen forward, which
+   front-end comes first, how a human moves about in a huge tree, and whether a
+   session is recorded as a file.
