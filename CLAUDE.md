@@ -204,15 +204,32 @@ Acceptance:
   time budget; report the fraction proved and the proof lengths. This is the baseline
   for all later ranking work.
 
-## Phase 4 — pattern mining and ranking (research layer)
+## Phase 4 — the interaction layer
 
-- Mine **linear subproofs** (chains of single-rule steps from a premise to a goal)
-  across the set.mm translation; anti-unify occurrences into generalized schemas with
-  frequencies; expose them to the prover as macro-actions (derived rules with one
-  unifier each). Measure coverage and out-of-sample replay success.
-- A clean environment API (state = tree frontier, action = (node, variant)) for learned
-  policies; dataset export for training premise-ranking models.
-Design only after phase 3's search baseline exists.
+Whitehead is an interactive prover for humans and for AI agents, including for
+benchmarking. The design is in `docs/DESIGN.md`, "Phase 4". Its principles:
+
+- **The engine frees the layer above it from metavariables, substitutions and
+  unifiers.** Above the engine, one reasons about the nodes of the proof variant tree
+  and their variants only. Never design an interface that asks for a substitution or
+  for the value of a metavariable: unification decides those.
+- **An agent does two things.** The agent may be a human, an AI or an ML algorithm. It
+  **chooses variants** of a goal node and **offers intermediate goals**. Tactics do the
+  rest. "Clicking on a node" is a metaphor for choosing a variant.
+- **Variants are chosen by filters.** A filter is a composable, configurable predicate
+  over the candidate variants of one node. The agent tightens or loosens it until a few
+  remain, then chooses among them. A choice is a focus: the other variants stay in the
+  tree, and nothing is pruned.
+- **One DSL for tactics and filters,** extending Russell's tactic DSL. Tactics may use
+  filters; filters never use tactics.
+- **An intermediate goal is any expression, offered as a hint that may lead to a
+  proof.** If it is deduced from the premises, it joins the forward frontier. If it is
+  used in the proof of the main goal, it becomes a node of the backward frontier.
+- **Backward first.** How variants are chosen in the forward direction is not decided.
+- **A session:** the tree persists between requests, and one engine API serves the
+  front-ends for humans and for AI.
+- **Mining and ranking are filter atoms:** linear subproofs mined from the set.mm
+  translation, and premise ranking (`DESIGN.md`, "Mining and ranking").
 
 ## How to work
 
