@@ -9,6 +9,18 @@ import Theory.Convert
 
 open Theory
 
+/-- The full answer of a tree, as the reference engine computes it: at a leaf the
+unifier of the node's expression with the hypothesis (`leafEntries`), at an assertion
+node the join of `θ_a` with the children's answers (`anodeEntries`). A keyed entry
+keeps its answer restricted to the visible variables; its proof needs the full one. -/
+def treeSub (U : Unification) (st : Statement) (s : State) : SptTree → Option Subst
+  | .leaf i h => U.mgu [(s.enodes[i]!.expr, st.hyps[h]!)]
+  | .node j cs => do U.joinAll (s.anodes[j]!.sub :: (← treeSubs U st s cs))
+where
+  treeSubs (U : Unification) (st : Statement) (s : State) : List SptTree → Option (List Subst)
+    | [] => some []
+    | t :: ts => do return (← treeSub U st s t) :: (← treeSubs U st s ts)
+
 def main (args : List String) : IO UInt32 := do
   let keyed := args.contains "--keyed"
   match args.filter (· != "--keyed") with
@@ -49,7 +61,10 @@ def main (args : List String) : IO UInt32 := do
       let done ← IO.monoMsNow
       IO.println s!"  keyed: {kroot.length} entries at the root, one per key, in {done - start} ms"
       for K in kroot do
-        IO.println s!"  {Convert.proofText names terms (State.proofOf dbm s K.sub K.tree)} with \
+        let some θ := treeSub Unify.postulate st s K.tree
+          | IO.eprintln "  a keyed tree with no answer"
+            return 1
+        IO.println s!"  {Convert.proofText names terms (State.proofOf dbm s θ K.tree)} with \
           {Convert.expText terms (K.sub.apply st.concl)}, {K.conds.length} pending"
     return 0
   | _ =>
