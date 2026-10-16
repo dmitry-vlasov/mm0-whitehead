@@ -48,9 +48,10 @@ transitivity rule, where the primary specification has the certificate `CTrans`
 (`mm0.mm0`, `VerifyConvTrans`); the `Unfold` command of a proof file replaces an
 obligation on an application by one on its unfolding, which `conv'.unfold` alone
 cannot justify (it concludes the unfolding from the application, not the converse);
-so the port adds `conv'.trans`, its one deviation, as the judge is the primary
+so the port adds `conv'.trans`, its first deviation, as the judge is the primary
 specification. `env.extend.defn_def` builds on `E2` on both sides where `E1` was
-presumably meant (ported as written; see milestone V6). `sexpr.ok_bi'` is defined but
+meant; the port corrects it to `mm0.mm0`'s `EnvExtendDef` (the fourth deviation,
+milestone V6). `sexpr.ok_bi'` is defined but
 not used (ported as written).
 
 ## Conventions
@@ -58,13 +59,14 @@ not used (ported as written).
 - The port is literal: the same names (snake case, as the original, so that the two
   files can be read side by side), the same order, Lean 3's `list.nth` as `[i]?`,
   `inth` as `getD`, `list.forall₂` as `List.Forall₂`, `set` as `Set`. Nothing but
-  `conv'.trans` and the corrections of `safe_subst` and `sexpr.free'` is changed in
-  `Spec/Mm0.lean`; whatever the proofs need about the
+  `conv'.trans` and the corrections of `safe_subst`, `sexpr.free'` and
+  `env.extend.defn_def` is changed in `Spec/Mm0.lean`; whatever the proofs need about the
   semantics is in separate files.
-- What stays trusted at the end: Lean's kernel, the fidelity of the port (400 lines,
+- What stays trusted at the end: Lean's kernel, the fidelity of the port (263 lines,
   reviewed side by side), the `.mm0` front end (lexer, parser, elaborator: the text
   grammar has no formalization, and a proof against our own grammar would only move the
-  trust), and, unless milestone V5b is done, the byte decoder.
+  trust), the two conversions into the theory's data (`Verifier/OfMmb.lean`,
+  `Verifier/OfMm0.lean`), and, unless milestone V5b is done, the byte decoder.
 
 ## Milestones
 
@@ -76,7 +78,7 @@ V2. The machine semantics (`Verifier/Machine.lean`): `mm0b.lean`'s relations com
     ones, dummies fresh, the theorem's disjointness conditions at `Thm` and the def's
     at `Unfold`, hypotheses and the final unification — over decoded commands, as the
     reader produces them. Each check cites the rule of the notes it implements; the
-    gaps of `mm0b.lean` are recorded in `MMB-NOTES.md`, section 9.
+    gaps of `mm0b.lean` are those listed above, under "The sources".
 V3. Soundness of the machine for the logic: a proof stream the machine accepts for a
     theorem gives `mm0.proof` of the theorem's statement in its context, and a proof
     file whose every statement the machine accepts gives `mm0.env.proof'` of the
@@ -84,6 +86,11 @@ V3. Soundness of the machine for the logic: a proof stream the machine accepts f
     `Verifier/FileSound.lean`, `file_sound : FileOk f → ∃ E, toEnv f = some E ∧
     env.proof' E`, with only `propext`, `Classical.choice` and `Quot.sound`. The
     argument, file by file:
+    - `Sexpr`, `Sexpr2`: facts about the semantics' expressions alone — curried
+      application, longer contexts, inversion and uniqueness of typing, substitution
+      and renaming.
+    - `Vars`: the numbering of bound variables — a bound-variable number's variable,
+      the context of a declaration, the number `LoadArgs` gives a bound binder.
     - `Translate`: the machine's data as the semantics' — bound-variable numbers to
       variables, binders, nodes to expressions, unify streams decoded to statements
       and def values, a file to an `env`.
@@ -98,6 +105,8 @@ V3. Soundness of the machine for the logic: a proof stream the machine accepts f
       segment); its three uses — `Unfold` and the end of a def, `Thm`, the end of a
       theorem.
     - `Disjoint`: the machine's disjointness checks at `Thm` give `safe_subst`.
+    - `RunFacts`: what a step extends, the dummies a run makes, the terms in the
+      store, the machine's checks carried to a longer store.
     - `World`, `StepSound`, `RunSound`: the stack invariant, judged in the world of
       the statement's end (its final store, context with all dummies, hypotheses): an
       element is valid assuming the obligations above it, since `Conv` pushes a proof
@@ -116,7 +125,7 @@ V3. Soundness of the machine for the logic: a proof stream the machine accepts f
     well-formed (`env.ok`: the definitions' free-variable condition, the terms'
     result sorts not pure, and so on) — the machine checks these, and the facts are
     proved on the way (`TermFacts`), but not assembled into `env.ok`; that is
-    milestone V3b.
+    milestone V3b, since reached.
 V3b. Well-formedness: a file the machine accepts declares an `env.ok` environment.
     **Reached on 2026-10-14**: `file_valid : FileOk f → ∃ E, toEnv f = some E ∧
     env.ok E ∧ env.proof' E`, and with the matcher `spec_valid : … → ∃ E', env.ok E' ∧
@@ -126,11 +135,11 @@ V3b. Well-formedness: a file the machine accepts declares an `env.ok` environmen
     return type, a result sort not pure); `axiom_ok` (the statement and hypotheses
     well-typed in the binders' context at provable sorts, the hypotheses' sorts kept
     through the run, `HypsProvable`); and `defn_ok`, whose free-variable condition is
-    the substance (`WF.lean`, `term_stmt_wf`). A def's value is the one its stream
+    the substance (`WF.lean`, `term_stmt_wf`; `thm_stmt_wf` for a theorem's statement). A def's value is the one its stream
     decodes, over its binders and the stream's own dummies; the node the machine
     checked is that value renamed into the body's context. Free variables are carried
     along an injective renaming that keeps the binders (`Free.lean`, `free_rename`),
-    and the renaming is injective because of `UDummy`'s freshness check — the dummies'
+    and the renaming is injective because of `UDummy`'s freshness check (the machine's `Unify.dummy` rule) — the dummies'
     nodes are fresh against the arguments and against each other, which the unify
     lemma now carries (`DummyNodes`) and which, with the meaning of the type words,
     makes their variables distinct from each other and from the binders. A free
@@ -138,15 +147,18 @@ V3b. Well-formedness: a file the machine accepts declares an `env.ok` environmen
     the node's dependencies contain it, and the machine bounds those by the return
     type's.
 V4. The reference verifier: an executable `check` over decoded statements, proved sound
-    and complete for the machine relation; with V3, a verified checker of `.mmb` proofs.
+    and complete for the machine relation (as reached: sound; completeness is replaced
+    by the differential test, V5); with V3, a verified checker of `.mmb` proofs.
 V4 is **reached on 2026-10-14**: `Verifier/Check.lean`, `checkFile`, with every
-    function proved sound for its relation, and `checkFile_correct : checkFile f = true
+    function proved sound for its relation (`checkFile_sound`: `checkFile f = true →
+    FileOk f`), and `checkFile_correct : checkFile f = true
     → ∃ E, toEnv f = some E ∧ env.proof' E`, a verified checker of decoded `.mmb`
     files (standard axioms only). It is not fast — lists and finite sets — but it
     checks the set.mm translation in 39 s.
 V5. The differential test: the reference verifier against `Whitehead/Verify`
     (`checkProofs`) statement by statement, on the corpus and on the mutants of
-    `tests/mutate`; what it finds is fixed or recorded. (V5b, optional: the byte
+    `tests/Tests/Mutate/Engine.lean` (copied to `theory/Mutate/Engine.lean`, the
+    `Mutate` library, for `verify-diff`); what it finds is fixed or recorded. (V5b, optional: the byte
     decoder against the encoder, decode after encode the identity.) **Reached on
     2026-10-14**: `lake exe verify-diff` (`theory/VDiff.lean`; the conversion of the
     reader's output, `Verifier/OfMmb.lean`, is trusted). Results: the verifier
@@ -170,7 +182,7 @@ V6. The match with the specification: `matchSpec` of `Whitehead/Verify/Spec.lean
     accepts only when `env.extend` holds between the specification's environment and
     the proof file's. **Reached on 2026-10-14** in the form of milestones V4 and V5:
     a reference matcher (`Verifier/Extend.lean`, `extendRev`) proved sound for
-    `env.extend`, and the end-to-end theorem `spec_proved : checkFile f = true →
+    `env.extend` (`extendRev_sound`), and the end-to-end theorem `spec_proved : checkFile f = true →
     toEnv f = some E → extendRev S.reverse E.reverse L = true → env.proof S` (standard
     axioms only). `env.extend.defn_def` is corrected in the port to `mm0.mm0`'s
     `EnvExtendDef` (the fourth deviation: the original builds the abstract def on the
@@ -185,7 +197,8 @@ V6. The match with the specification: `matchSpec` of `Whitehead/Verify/Spec.lean
     matched by both, 173 rejected by both).
     What `spec_proved` gives is `EnvExtend` and `EnvFull` of `mm0.mm0`'s top-level
     `ValidEnv spec := Env spec ∧ ∃ e, Env e ∧ EnvExtend spec e ∧ EnvFull e`; `Env e`,
-    the well-formedness of the proof file's environment, is milestone V3b, and
+    the well-formedness of the proof file's environment, is milestone V3b (reached:
+    `spec_valid`), and
     `Env spec` is the front end's (trusted).
 
 ## The prover's soundness (2026-10-14)

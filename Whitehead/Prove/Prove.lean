@@ -170,7 +170,8 @@ partial def sameShape (t : ProofTree) (s : Skeleton) : Bool :=
 /-! ### Closing and accepting a proof -/
 
 /-- What a regular variable that is left in a proof may be replaced by: a new name, if
-the sort has bound variables; a term without arguments; a variable of the theorem. -/
+the sort may have a dummy (neither `strict` nor `free`); a term without arguments; a
+variable of the theorem. -/
 def closers (env : Env) (ty : Nat) (freshId : Nat) : Array Exp := Id.run do
   let db := env.db
   let sort := Ty.sort ty

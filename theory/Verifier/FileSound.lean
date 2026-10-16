@@ -312,9 +312,10 @@ theorem stmts_valid {f : File} : ∀ {ss : List Stmt} {ns nt nh : ℕ}, Stmts f 
       by simpa [List.append_assoc] using hp.2⟩
     simp [toEnvAux, hdd, hrest]
 
-/-- **Soundness of the machine** (milestone V3): a proof file the machine accepts
-declares an environment, and every theorem of it is proved in the environment of the
-statements before it — `env.proof'` of the formal semantics. -/
+/-- **Soundness of the machine** (milestones V3 and V3b): a proof file the machine
+accepts declares an environment, which is well-formed (`env.ok`), and every theorem of
+it is proved in the environment of the statements before it — `env.proof'` of the
+formal semantics. -/
 theorem file_valid {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.ok E ∧ env.proof' E := by
   have hinv : PInv f [] 0 0 0 :=
     ⟨⟨fun s sd h => by simp [ctxAt] at h, fun s sd h => by simp [env.get_sd] at h,
@@ -324,6 +325,7 @@ theorem file_valid {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.o
   obtain ⟨rest, hrest, hok, hp⟩ := stmts_valid h [] hinv
   exact ⟨rest, hrest, by simpa using hok, by simpa using hp⟩
 
+/-- `file_valid` without the well-formedness: the statement of milestone V3. -/
 theorem file_sound {f : File} (h : FileOk f) : ∃ E, toEnv f = some E ∧ env.proof' E := by
   obtain ⟨E, hE, _, hp⟩ := file_valid h
   exact ⟨E, hE, hp⟩

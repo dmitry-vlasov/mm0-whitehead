@@ -65,7 +65,7 @@ record of the decisions; the formal development is the Lake package `theory/`.
 
 What is formalized, in the draft's terms, specialized to MM0.
 
-- **Terms.** Sorts; a type is a sort with a bit for "names only" (`Ty` of `Exp.lean`): a
+- **Terms.** Sorts; a type is a sort with a bit for "names only" (`Ty`, `Term.lean`): a
   bound binder `{x: s}` is a variable of the type of names of `s`, a regular binder of
   the type of `s`, and an argument position declared with braces takes names. A term
   symbol has argument types and a result sort. An expression is a variable or an
@@ -132,9 +132,9 @@ For a database, a statement and the reference engine after `n` rounds (`Theorems
 metavariables, decision 7):
 
 - **Soundness** (paper's Theorem 1, draft's 4.4): the proof of every entry at the root
-  is valid for the statement under the answer and proves its conclusion; and it has an
-  instance that is a proof of the statement — the variables it leaves open given
-  distinct fresh names.
+  is valid for the statement under the answer and proves its conclusion; and, when the
+  sorts of the variables it leaves open allow dummies, it has an instance that is a
+  proof of the statement — those variables given distinct fresh names (decision 8).
 - **Generality** (Theorem 2, 4.5): the proof of a root entry is more general than any
   proof of the statement congruent to it.
 - **Completeness** (Theorem 3, 4.6): for every proof of the statement there is a number
@@ -146,7 +146,8 @@ metavariables, decision 7):
 
 Soundness here is validity in the model. That the model's valid proofs are the proofs
 `mm0.lean` accepts is the verifier's own correctness, a separate track (`CLAUDE.md`,
-phase 2: "structurally close to the MM0 semantics formalization").
+phase 2: "structurally close to the MM0 semantics formalization"), in
+`docs/VERIFIER-THEORY.md`.
 
 ## The link to the production engine
 
@@ -158,8 +159,8 @@ engine has at the root must be an instance of a reference entry, and each refere
 entry's key must be among the production engine's. This is the same method as the
 unifier's test against its reference unifier.
 
-`lake exe diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J]
-[--max-tuples N] [--max-nodes N] [--assertions K] [--verbose] [--dump]`
+`lake exe diff-test <file.mmb> <rounds> [--from A] [--to B] [--every K] [--meta I,J,...]
+[--max-tuples N] [--max-nodes N] [--assertions K] [--keyed] [--nodes] [--verbose]`
 (`theory/Diff.lean`) runs it.
 The production engine is driven round by round there, since its search stops at the
 first proof accepted: the root is expanded, then each round expands every assertion
@@ -202,7 +203,7 @@ and are left out.
    build` (Mathlib v4.34.1, our toolchain; `lake exe cache get` for its oleans) builds
    the model, the engine, the four theorem statements (`sorry`), and a first-order
    unifier (`Unify`) whose postulate is carried with `sorry` until milestone 7.
-   `lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2` finds `(ax_mp h ax_1)`
+   `lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2` finds `(ax_mp h ax_1)` (printed today as `(ax_mp [h0: c0] ax_1)`)
    as the production engine does; `mpcom` in 2 rounds gives `(com12 id)`, in 3 rounds
    36 proofs at the root from 369 entries; `alrimi`, with conditions on a bound
    variable, 1 proof in 2 rounds and 83 in 3. A converter (`Convert`) maps the
@@ -244,7 +245,8 @@ and are left out.
    proof into the graph (`treeOf`), each needed node shown to exist because a
    substitution solving its equation exists (`override`, `treeOf_at`); the entry for
    that variant exists at the depth the tree needs (`entry_exists`, with the join most
-   general and the conditions kept under the answer, `holds_of_instance`), and the
+   general and the conditions kept under the answer, `holds_of_instance` in
+   `General.lean`), and the
    depth is within the state (`fuel_le`); generality's argument then gives the
    instance. To make instances equalities, the model changed along the way: leaves
    carry their hypothesis, step substitutions stay on the binders, bases follow node
@@ -344,8 +346,8 @@ and are left out.
    condition by `IsName`; so the result exists and the solution is its instance. The
    theorems of milestone 4 are now unconditional.
 
-Later: the forward direction; the production engine; the verifier against `mm0.lean`;
-the fragment of Lean.
+Later: the forward direction; the fragment of Lean. (The production engine is the
+third variant below; the verifier against `mm0.lean` is `docs/VERIFIER-THEORY.md`.)
 
 ## Definitions (the second variant; started 2026-10-13)
 
@@ -406,11 +408,12 @@ judgment — rather than only as assertions". The second variant adds them so.
     which is what any `.mmb` proof has. Whether the engine should also rename dummies
     is a question for the production engine, not the theory.
 
-### The model (`Theory/Defs.lean`)
+### The model (`Theory/Defs.lean`, with `Rules.lean`, `ToD.lean` and `OfD.lean`)
 
 - A definition: the term, its result type, its arguments and dummies as variables,
   and its value over them (`Def`); well-formed when the value is over them, the
-  dummies are name-typed, and all are distinct. A database carries its definitions
+  dummies are name-typed and occur in the value, the result is not name-typed, and all
+  are distinct (`Def.WF`). A database carries its definitions
   beside its assertions (`Database.defs`); the engine never reads them.
 - A certificate (`CTree`) as in decision 9, and its validity `CValid db sig c k e₁ e₂`,
   "`k` converts `e₁` to `e₂`", over the signature for the typing of a congruence and
@@ -418,12 +421,12 @@ judgment — rather than only as assertions". The second variant adds them so.
 - An MM0 proof (`DTree`): a hypothesis, an assertion step, or a conversion `conv e k t`
   proving `e` from `t` by `k : t.expr = e`; its shape, conditions, variables; a proof of
   the statement (`IsProofD`) as `IsProof` with conversions.
-- What the translations assume beyond validity: the language fits the database and
-  the statement (`Language.WF`: the judgment sort is none of the file's, no assertion
+- What the translations assume beyond validity: the language (`Language`, `Rules.lean`)
+  fits the database and the statement (`Language.WF`, `ToD.lean`: the judgment sort is none of the file's, no assertion
   or hypothesis is a judgment at its root); every dummy of a definition occurs in its
   value, and the value is of the result's sort (`Def.WF`); the bound variables of the
-  statement depend on nothing (`Consts.NameDeps`); and, for an MM0 proof to be
-  translated, that it fits the language (`DTree.Fits`): every expression is over the
+  statement depend on nothing (`Consts.NameDeps`, `OfD.lean`); and, for an MM0 proof to be
+  translated, that it fits the language (`DTree.Fits`, `OfD.lean`): every expression is over the
   file's sorts and terms with their declared types, every conclusion has a provable
   sort, and every certificate is of the `.mmb` format.
 
@@ -457,7 +460,7 @@ judgment — rather than only as assertions". The second variant adds them so.
    database followed by `toD_isProof`, the language fitting the instance of the
    statement since the answer and the closing are typed.
 10. The translation from MM0 proofs to proofs over the extended database
-    (`ofD_isProof`), with the lemmas of decision 11; `completeness_defs`. **Reached on
+    (`DTree.toP_isProof`), with the lemmas of decision 11; `completeness_defs`. **Reached on
     2026-10-13** (`OfD.lean`, `Theorems.lean`; the translation is `DTree.toP`, with
     `CTree.toTree` and `CTree.toTreeR` for a certificate in the two directions). The
     lemmas of decision 11 came out simpler than planned: with transitivity excluded
@@ -587,7 +590,13 @@ its proofs, not its nodes.
     the key compared exactly). On the logic fixture at 3 rounds the keyed engine has
     1, 4, 3 and 4 entries at the roots of `a1i`, `mpcom`, `alrimi` and `dummy` where the
     reference engine has 1, 36, 83 and 2,079 — and the production engine 1, 4, 3 and
-    4. `diff-test --keyed` compares the production engine's root proofs with the
+    4. ("One entry per key" is per assertion node: the root's list is the leaf entries
+    and those of each assertion node below it, not deduplicated across them.) The
+    settled test described here is the first one; milestone 16 replaced it. A keyed
+    entry keeps only the restricted answer, so `ref-search --keyed` prints its proof
+    under the full answer recomputed from the tree by the reference engine's rules
+    (`treeSub` in `theory/Main.lean`, since 2026-10-16); on the logic fixture at 3
+    rounds every keyed proof is then among the reference engine's. `diff-test --keyed` compares the production engine's root proofs with the
     keyed engine's entries by their *keys* — the answer with the pending conditions,
     renamed by first occurrence — as sets: which proof is kept per key depends on
     the order of enumeration, and how many entries share a key up to renaming on
@@ -609,7 +618,7 @@ its proofs, not its nodes.
     already does. And the argument is not `spt_restrict` alone: a member's variables
     that are not visible at its child are inside that child's block (`KInv`, `Member`,
     `block_apart`), hence apart from `θ_a` and from the other children's members,
-    which is what `joinAll_restrict_*` and `joinAll_sameOn` need; a chain over the
+    which is what `joinAll_restrict_*` (`Engine.lean`) and `joinAll_sameOn` (`KeyedLemmas.lean`) need; a chain over the
     children (`restrict_chain`, `sameOn_chain`) replaces the members one at a time.
 14. The keyed engine is complete for the reference engine: every reference entry at a
     node has a keyed entry at the node with the same answer on the visible variables up

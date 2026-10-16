@@ -12,7 +12,7 @@ def usage : String :=
   verify <file.mm0> <file.mmb>   check that a proof file proves a specification
   prove replay <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--verbose]
                [--full [--others N|all]] [--ms T] [--max-nodes N] [--max-tuples N]
-               [--total S [--factor F]]
+               [--total S [--factor F]] [--max-steps N]
                                  reconstruct the proofs of a file from the assertions they use
                                  (--every K: every K-th theorem of the range, a sample);
                                  --full: every node gets all its variants, the known proof's are
@@ -22,7 +22,8 @@ def usage : String :=
                                  (--max-work N)); --total S: rounds within S seconds, the first
                                  with the limits given (then 1 s, 100,000 nodes, 10,000 proofs,
                                  1,000,000 by default), each next with F (4) times those, on the
-                                 theorems stopped at a limit
+                                 theorems stopped at a limit; --max-steps N: proofs of more than N
+                                 steps are left out
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
                [--verbose]

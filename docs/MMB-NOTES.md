@@ -409,7 +409,8 @@ substitution. It runs in one of three modes.
 Every statement that is not local is matched against the next statement of the same kind
 in the `.mm0` file. That step is defined by the formal specification (the environment
 built from the proof file must *extend* the one built from the `.mm0` file: `env.extend`
-in `mm0.lean`). It is phase-2 material and is not described here.
+in `mm0.lean`). Our implementation is `matchSpec` (`Whitehead/Verify/Spec.lean`),
+described in `DESIGN.md`, "Against the specification".
 
 ## 7. The index
 
@@ -425,7 +426,8 @@ At `p_index`: a `u64` count `num_entries`, then that many 16-byte entries.
 | 4 | 4 | `data` — depends on the type |
 | 8 | 8 | `ptr` — `p64` to the table |
 
-Entries of an unknown type are skipped. A known type may occur only once. The tables we
+Entries of an unknown type are skipped. `Name`, `VarN`, `HypN`, `Delm` and `Nota` may
+occur only once each; `Lisp` and `Deps` are not checked. The tables we
 read:
 
 **`"Name"`** — `num_sorts + num_terms + num_thms` entries of 16 bytes, sorts first, then
@@ -444,7 +446,8 @@ hypotheses in the order of the `Hyp` commands.
 What is an error and what is not, following `mm0-rs`:
 
 - an error: the index header or its entries do not fit in the file; one of the three
-  tables above does not fit in the file at its `ptr`; a table type occurs twice;
+  tables above does not fit in the file at its `ptr`; one of the five types above occurs
+  twice;
 - not an error: a missing table; a name pointer that is null, out of range, or not valid
   UTF-8; a string list that is missing or too short. The item then gets a generated name:
   `s3` for a sort, `t5` for a term, `T7` for a theorem, `v0` for a variable, `h0` for a
@@ -550,7 +553,8 @@ f0  00 00 00 00                read-ahead padding
 
 This file decodes cleanly and its last proof is **rejected**, by `mm0-rs` and by mm0-c,
 at the `Thm 0` step: `ph := (p x)` breaks the condition that `ph` does not depend on `x`.
-Its sibling `bound_arg_vars.mmb` differs in three bytes (the binder of the predicate) and
+Its sibling `bound_arg_vars.mmb` differs in three bytes (the binder of the predicate, and the dependencies of its
+return type) and
 is the subject of point 1 in the next section.
 
 ## 9. Where the sources differ
@@ -581,14 +585,14 @@ the mutants in `tests/mmb/` of the MM0 repository.
 | 9 | sort in the term table vs sort of `ret` (`ret_sort_mismatch`) | — (mmb.md: must agree) | **not compared** | must agree | must agree |
 | 10 | more than 55 bound variables | — (not representable) | **accepts** | rejects | reject |
 | 11 | `deps` of a bound binder | — (mmb.md: exactly its own bit) | **ignored** | must be its own bit | must be its own bit |
-| 12 | reserved fields, bit 55 of `arg` | — (mmb.md: zero) | not checked | not checked | not checked by the reader; reported by `dump` |
+| 12 | reserved fields, bit 55 of `arg` | — (mmb.md: zero) | not checked | not checked | not checked; reported by `dump` (binders and return types) |
 | 13 | 4 bytes of padding after the last `END` | — (mmb.md: required) | not required | required | not required to read; always written |
 | 14 | a damaged index | — | **rejects** | ignores the index | reject, as section 7 |
 | 15 | order and alignment of the sections | — | required, as section 2 | not checked | required |
 | 16 | unknown bits in a sort's modifiers | — | rejects | only through the `.mm0` comparison | reject |
 | 17 | the unify stream of a term or theorem | — (mmb.md: behind a pointer) | inline | inline | inline; mmb.md's table is wrong |
 | 18 | equality of expressions | identity of nodes (`mm0b.lean`) | identity | identity | identity |
-| 19 | fixed capacity limits | none | none | stack, heap, store, 256 hypotheses | none |
+| 19 | fixed capacity limits | none | none | stack, heap, store, 256 hypotheses | 2^30 store slots per proof (node numbers are 30 bits in a stack element); unreachable in practice |
 | 20 | fewer statements than table entries | — | **accepts** | rejects | reject |
 | 21 | an `END` whose first byte has data-width bits (`0x40`, `0x80`, `0xC0`) | — (mmb.md: `END` is `0x00`) | accepts | rejects | accept |
 | 22 | more than 128 sorts (`many_sorts`); a `Dummy` of a sort ≥ 128 (`dummy_sort_high`) | no limit; a dummy of any sort | accepts up to 255; rejects | rejects the file; rejects | accept; reject the `Dummy` |
@@ -701,7 +705,7 @@ Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.m
 
 ## 10. The reader
 
-`Whitehead/Mmb/Types.lean`, `Reader.lean`, `Encode.lean`, `Dump.lean`, and `Write.lean`, which writes a file with other proof bodies (`MmbFile.withBodies`, for `prove ... -o`): `END`, padding to a multiple of 8 and 8 zero bytes after each body, no index.
+`Whitehead/Mmb/Types.lean`, `Reader.lean`, `Encode.lean`, `Dump.lean`, and `Write.lean`, which writes a file with other proof bodies (`MmbFile.withBodies`, for `prove ... -o`): the bytes up to the proof stream kept, each replaced body with its statement command re-encoded in the shortest form, the bodies back to back, then the `END` of the stream, padding to a multiple of 8 and 8 zero bytes, and no index (`p_index` zeroed).
 
 - Input: the whole file as one `ByteArray` (core Lean has no memory mapping).
 - **`MmbFile.parse` opens a file.** It decodes the header, the sort table, the entries of
@@ -718,6 +722,9 @@ Differences in how the **`.mm0`** file is read are a separate list, in `DESIGN.m
   Opening `setmm.mmb` (39 MB) takes 8 ms; decoding every stream in it takes 0.35 s.
 - `MmbFile.checkStreams` decodes every unify stream (as a tree) and every proof body once
   and reports the first error. Opening a file and running it is "the file decodes".
+  `verify` does not run it: the verifier reads the streams itself and rejects what the
+  tree decoding would (a cyclic `URef` is a unify failure; a `UHyp` inside a pattern
+  fails when the theorem's statement is unified).
 - Commands are decoded faithfully: `Term`/`TermSave` keep their `save` flag, the `data`
   width is not preserved (it carries no meaning), and an unknown opcode is an error at
   the offset where it occurs. `Encode.lean` is the inverse, in the shortest encoding;
@@ -760,7 +767,8 @@ theorem t (a: wff): $ dbl a $;
 
 A `Ref` to a variable or hypothesis is annotated with its name; a command that adds to
 the heap is annotated with the index it gets. Names come from the index, or are generated
-as in section 7, with `d<k>` for the dummies of a proof and `?<j>` for what has no name
+as in section 7, with `d<k>` for the dummies of a theorem's proof, `v<n>` for those of a
+def (numbered on from its arguments), and `?<j>` for what has no name
 yet; a header line says the version and whether the file has an index. Non-zero
 reserved fields and a term-table sort that differs from the return type are printed as
 `-- note:` lines.

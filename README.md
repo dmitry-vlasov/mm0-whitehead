@@ -7,7 +7,7 @@ state is in [docs/STATUS.md](docs/STATUS.md).
 
 ## Build and test
 
-    lake build                           # builds .lake/build/bin/mm0-whitehead
+    lake build                           # every library and executable: mm0-whitehead, test, mutate, thorough
     lake test                            # the fast layer: the self-contained tests, in seconds
     MM0_REPO=/path/to/mm0 lake test      # also runs over the files of the MM0 repository
     MM0_REPO=/path/to/mm0 lake exe thorough [--minutes 30] [--every 10]
@@ -17,12 +17,19 @@ state is in [docs/STATUS.md](docs/STATUS.md).
 The Lean toolchain is pinned in `lean-toolchain`. There are no dependencies beyond core
 Lean.
 
-The verification of the prover's engine ([docs/THEORY.md](docs/THEORY.md)) is a separate
-Lake package with Mathlib, `theory/`, which depends on this one:
+The verification of the prover's engine ([docs/THEORY.md](docs/THEORY.md)) and of the
+verifier ([docs/VERIFIER-THEORY.md](docs/VERIFIER-THEORY.md)) is a separate Lake package
+with Mathlib, `theory/`, which depends on this one:
 
-    cd theory && lake exe cache get && lake build       # the model, the reference engine, the theorems
+    cd theory && lake exe cache get && lake build       # the theorems and every executable below
     lake exe ref-search ../tests/fixtures/prove/logic.mmb a1i 2   # the reference engine on a theorem
     lake exe diff-test ../tests/fixtures/prove/logic.mmb 3        # the production engine against it
+    lake exe verify-diff [--mutants N] [spec.mm0] file.mmb ...    # the verified checker against the verifier
+    lake exe certify file.mmb [spec.mm0]                          # the verified checker on a proof file
+
+`scripts/prove-certified.sh replay|search in.mmb out.mmb [spec.mm0]` runs the prover and
+then `certify` on what it wrote, so that the proofs found are sound by the theorems of
+`docs/VERIFIER-THEORY.md`.
 
 ## Usage
 
@@ -102,12 +109,20 @@ With both in place, the verifier can be compared with `mm0-rs` on mutated proof 
     lake exe mutate file.mmb --count 3000 --seed 1    # one campaign
     scripts/mutation-campaign.sh                      # those of the acceptance test, about a minute
 
+and the search test of phase 3 run on the set.mm translation:
+
+    scripts/search-baseline.sh [MS]                   # propositional and predicate calculus, MS per theorem
+    scripts/search-summary.py NAME LOG ...            # the summary of a `prove search --verbose` log
+
 ## Documents
 
 - [docs/MMB-NOTES.md](docs/MMB-NOTES.md) — the `.mmb` format as we understand it, and where
   the formal semantics, `mm0-rs` and mm0-c differ
 - [docs/DESIGN.md](docs/DESIGN.md) — how the code is built and why
 - [docs/STATUS.md](docs/STATUS.md) — what passes, what is open
+- [docs/THEORY.md](docs/THEORY.md) — the verification of the prover's algorithm and engine
+- [docs/VERIFIER-THEORY.md](docs/VERIFIER-THEORY.md) — the verification of the verifier
+  against the formal semantics
 
 ## License
 

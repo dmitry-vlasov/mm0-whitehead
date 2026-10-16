@@ -2,15 +2,15 @@
 The forward direction: a port of `russell-flow/src/ru/prover/core/forward.flow`.
 
 It is the mirror of `expandHyp`. `expandHyp` unifies a goal with the conclusions of the
-assertions and makes their hypotheses subgoals; `expandForward` unifies a fact with the
+assertions and makes their hypotheses subgoals; `applyForward` unifies a fact with the
 hypotheses of the assertions and makes their conclusions facts. A fact is an expression
 node of the tree with a proof on it (`RuProverExp` with the sentinel parent); the
 assertion node that produced it and the nodes of its hypotheses are ordinary nodes, and
 the proofs are joined by the same `addProof`.
 
 The two directions meet in a join: a fact that unifies with a subgoal of the backward
-tree proves it (`reverseJoin`, and the splice in `expandProp`), and a fact that the goal
-is an instance of proves the goal.
+tree proves it (`joinSubgoal`, and the splice in `expandProp`), and a fact that the goal
+is an instance of proves the goal (`joinRoot`; the two are Russell's `ruReverseJoin`).
 
 Ported: `ruSeedForwardFront` (the premises and the assertions without hypotheses as
 facts), `ruApplyForward`, `ruApplyForwardOn` for an assertion without hypotheses,

@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-13.
+Last updated: 2026-10-16.
 
 ## Phase
 
@@ -12,6 +12,12 @@ the replay reader, and the checking of a proof found for a task with metavariabl
 **Phase 4 — pattern mining and ranking**: started on 2026-10-13, and paused the same
 day. The design, with its questions, is in `DESIGN.md` ("Phase 4"); the first tool, the
 chain miner (`prove chains`), is built, and its numbers are below.
+**Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
+now builds every library and executable of a package (`ref-search` had not compiled
+since milestone 12 without this being seen); the docs were checked against the code.
+A verifier fault was found on the way: a `Dummy` of a sort ≥ 128 was taken for its low
+7 bits and a wrong proof accepted (`MMB-NOTES.md`, section 9, point 22); fixed, with two
+fixtures.
 **The verification of the engine** (`THEORY.md`): started on 2026-10-13, before phase 4
 goes on — a reference engine in Lean with Mathlib, in the package `theory/`, and the
 proofs of its soundness and completeness for MM0, backward search; the production
@@ -75,8 +81,8 @@ ignored the images of the metavariables, where a name a node above can still rep
 may sit. All sixteen milestones are reached; `cd theory && lake build` has no `sorry`.
 **The verification of the verifier** (`docs/VERIFIER-THEORY.md`, started 2026-10-14):
 the MM0 semantics of `mm0-lean/mm0/mm0.lean` ported to Lean 4 (`theory/Spec/Mm0.lean`,
-with three deviations recorded: `conv'.trans`, and the corrections of `safe_subst` and
-of `sexpr.free'` to `mm0.mm0`'s text), the stack machine of `.mmb` files as relations
+with four deviations recorded: `conv'.trans`, the corrections of `safe_subst` and
+of `sexpr.free'` to `mm0.mm0`'s text, and that of `env.extend.defn_def`, V6), the stack machine of `.mmb` files as relations
 (`theory/Verifier/Machine.lean`, `mm0b.lean` completed), and its soundness for the
 logic proved: a proof file the machine accepts declares an environment all of whose
 theorems are proved (`file_sound`, milestone V3). An executable reference verifier
@@ -351,7 +357,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 921 checks, 0 failures, in 18 seconds:
+corpus of `scripts/build-corpus.sh` built — 928 checks, 0 failures, in 18 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -377,6 +383,8 @@ corpus of `scripts/build-corpus.sh` built — 921 checks, 0 failures, in 18 seco
   direction and both in turn, conditions on bound variables, one proof per key kept in
   the tree and in the forward front and none made twice, variables marked as
   metavariables and the values found for them).
+- Prover, the chain miner: its counts by length, the most frequent chain and the
+  coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
   `examples/set.mm1`), the rule made for an unfolding, the expansion of a goal by its
   unfoldings and foldings, an unfolding inside a variable by the conversion rules and
@@ -471,7 +479,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    assertion to the layer above. Answered on 2026-10-05: the decisions above, all
    built (decision 2 as refined on 2026-10-11). Answered on 2026-10-12: the three
    places of the source stay as the port has them, and the forward limits are
-   configurable. No question is open.
+   configurable. No question of phase 3 is open; phase 4 has six, in `DESIGN.md`,
+   "Phase 4", "Questions (2026-10-13)".
 
 ## Next steps
 
@@ -490,4 +499,4 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    clock and the memory are now looked at before each forward application and between
    joins, and a join sees the deadline; the case of a front of 2,048 facts, where a
    search once ran for minutes past its limit, has not been measured again.
-4. Phase 4 is designed only after the search baseline is accepted.
+4. Phase 4: the design waits on the answers to its questions (`DESIGN.md`, "Phase 4").

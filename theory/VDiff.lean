@@ -1,5 +1,5 @@
 /-
-`lake exe verify-diff [--mutants N] [--seed S] <file.mmb>...`: the reference verifier
+`lake exe verify-diff [--mutants N] [--seed S] [<spec.mm0>] <file.mmb>...`: the reference verifier
 (`Verifier.checkFile`, proved sound for the MM0 semantics) against the fast verifier
 (`Whitehead.Verify.checkProofs`), statement by statement (`docs/VERIFIER-THEORY.md`,
 milestone V5). For each file, and for `N` mutants of it (`Tests.Mutate`), the verdicts
