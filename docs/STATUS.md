@@ -24,7 +24,10 @@ goal node on a known proof's path has 988 variants, and 1% have over 33,000
 (`prove variants`, `DESIGN.md`, "Measurement"). Then the fourth step, intermediate
 goals: an agent's hint S is a goal node of its own, and each proof of S becomes a fact,
 used in the main goal's proof through the joins and forward (`DESIGN.md`,
-"Intermediate goals").
+"Intermediate goals"). Then the fifth step, the first front-end: an MCP server for an
+AI agent (`mm0-whitehead mcp <file.mm0> <file.mmb>`), with the session operations as
+tools and statements in the notation of the specification (`DESIGN.md`, "The MCP
+server").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -370,7 +373,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,024 checks, 0 failures, in 19 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,074 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -414,6 +417,11 @@ corpus of `scripts/build-corpus.sh` built — 1,024 checks, 0 failures, in 19 se
   proof, offered before and after the choice that needs it; one with a hole, which its
   proof fills; one reached by a deduction; two in a chain; the guard, under a
   breadth-first run; and the errors of reading one.
+- The MCP front-end: the JSON module (values, escapes, surrogate pairs, 8 malformed
+  texts); the printer, every statement of `logic.mm0` and of the corpus' specifications
+  (170,109) printed in the notation and read back the same; and a conversation with the
+  server, in which a filtered choice and an intermediate goal prove `mpd`, a run proves
+  `syl`, and the errors of the protocol and of the tools are answered.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -548,7 +556,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    search once ran for minutes past its limit, has not been measured again.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
    Done: the resumable search and the session operations, backward (`choose`) and
-   forward (`deduce`); the filters; the language; and intermediate goals. Next: the
-   MCP front-end, the simpler one, which comes first. Open: how a human moves about in
-   a huge tree; whether a session is recorded as a file; whether an intermediate goal
-   should be usable before it is proved.
+   forward (`deduce`); the filters; the language; intermediate goals; and the MCP
+   server. Next: an agent's sessions on set.mm through it, which measure filter quality
+   (step 6); and the human front-end. Open: how a human moves about in a huge tree;
+   whether a session is recorded as a file; whether an intermediate goal should be
+   usable before it is proved.

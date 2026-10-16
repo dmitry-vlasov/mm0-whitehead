@@ -19,6 +19,7 @@ import Tests.Prove.Chains
 import Tests.Prove.Session
 import Tests.Prove.Filter
 import Tests.Prove.Hints
+import Tests.Mcp
 
 def main : IO UInt32 := do
   let ((), stats) ← (do
@@ -42,11 +43,14 @@ def main : IO UInt32 := do
     Tests.Prove.dslTests
     Tests.Prove.measureTests
     Tests.Prove.hintTests
+    Tests.Mcp.jsonTests
+    Tests.Mcp.serverTests
     Tests.Prove.fullReplayTests
     Tests.Mm0.corpusTests
     Tests.Mmb.corpusTests
     Tests.Verify.corpusTests
     Tests.Mm0.pairTests
+    Tests.Mcp.printerTests
     Tests.Prove.replayCorpusTests
     Tests.Prove.replayDefsCorpusTests : Tests.TestM Unit).run {}
   IO.println s!"{stats.passed} passed, {stats.failed} failed, {stats.skipped} skipped"

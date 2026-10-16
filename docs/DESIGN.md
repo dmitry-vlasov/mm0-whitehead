@@ -1601,6 +1601,34 @@ lists the components.
     core's `Lean.Data.Json` is not used, to keep the binary independent of `Lean`.
   - The server prints expressions in `.mm0` notation.
   - The human UI is chosen for its UX, not copied from Russell's tree view.
+- **The MCP server, built 2026-10-16** (`Mcp/Server.lean`, `Mcp/Tools.lean`,
+  `Json.lean`, `Prove/Show.lean`):
+  - **Command:** `mm0-whitehead mcp <file.mm0> <file.mmb> [--log FILE]`. For Claude
+    Code: `claude mcp add whitehead -- mm0-whitehead mcp file.mm0 file.mmb`.
+  - **Loading:** the server loads the pair once and checks that the proof file proves
+    the specification (`matchSpec`). It names the assertions by the specification,
+    which is what a file without an index, such as set.mm's, needs. set.mm loads in
+    1.9 s.
+  - **Transport:** MCP over stdio, one JSON-RPC message per line. The server answers
+    `initialize` (versions 2025-06-18, 2025-03-26 and 2024-11-05), `ping`,
+    `tools/list` and `tools/call`; a notification needs no answer. Its `instructions`
+    tell the agent how to work.
+  - **Errors:** an error of a tool, such as a choice that is not a variant, is a result
+    with `isError`, and the sessions stay as they were. An error of the protocol is a
+    JSON-RPC error.
+  - **Tools:** `language`, `find`, `start`, `goals`, `variants`, `choose`, `run`,
+    `goal`, `facts`, `deduce`, `proof` and `close`. Results are JSON objects.
+    - Each result that changes the tree reports what it cost: `ms` and `nodes`.
+    - A sample is drawn from a seed, and a run limited by `nodes` is deterministic.
+    - With `--log`, every message in and out is written: the trace.
+  - **Statements in notation:** they are printed in the notation of the specification
+    (`Printer`, which inverts the tables of the `.mm0` parser), and read in it.
+    - A variable the engine made is printed `?` and a number. A variable of a variant's
+      rule that its unifier leaves free is `?` and the binder's name.
+    - Tested: all 170,109 statements of the corpus' specifications print and read back
+      to the same expression.
+  - **Proofs:** `proof` lists the proof as numbered steps, each with the steps it uses
+    and its statement, checked by the verifier.
 - **The human UI, a first variant (decided 2026-10-16): a goal panel.** It is a webview
   beside the editor that shows one goal node at a time:
   - the path from the root, which is also the way back;
@@ -1659,7 +1687,7 @@ lists the components.
    2026-10-16.
 3. The DSL for both sorts: done 2026-10-16.
 4. Intermediate goals in the engine: done 2026-10-16.
-5. The front-ends.
+5. The front-ends: the MCP server done 2026-10-16; the human one to come.
 6. Filter quality measured on set.mm.
 
 ### Mining and ranking (the design of 2026-10-13)

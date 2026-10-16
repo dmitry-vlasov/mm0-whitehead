@@ -25,6 +25,10 @@ def usage : String :=
                                  theorems stopped at a limit; --max-steps N: proofs of more than N
                                  steps are left out
   dsl                            list the tactics and filters of the language of sessions
+  mcp <file.mm0> <file.mmb> [--log FILE]
+                                 the MCP server for an AI agent, on stdin and stdout: sessions
+                                 to prove the theorems of the file; --log: a trace of every
+                                 message
   prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                                  how many variants the goal nodes on the paths of the known
                                  proofs have, each node expanded against the whole database:
@@ -504,6 +508,19 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"steps on a chain of 2 or more steps that occurs at least {t} times: {n} ({pct n stats.steps}%)"
   return 0
 
+/-- `mcp`: the MCP server for an agent, on stdin and stdout (`Mcp/Server.lean`). -/
+def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
+  match ← Mcp.Ctx.load mm0 mmb with
+  | .error msg =>
+    IO.eprintln msg
+    return 1
+  | .ok c =>
+    match strOption args "--log" with
+    | some path =>
+      IO.FS.withFile path .append fun h => Mcp.serve c (some h)
+    | none => Mcp.serve c
+    return 0
+
 def bench (path : String) : IO UInt32 :=
   if (path : System.FilePath).extension == some "mmb" then benchMmb path else benchMm0 path
 
@@ -522,6 +539,7 @@ def main (args : List String) : IO UInt32 := do
   | ["dsl"] =>
     IO.print Prove.Dsl.help
     return 0
+  | "mcp" :: mm0 :: mmb :: rest => mcpServe mm0 mmb rest
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: "search" :: path :: rest => proveSearch path rest
   | "prove" :: "chains" :: path :: rest => proveChains path rest
