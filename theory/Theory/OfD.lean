@@ -379,11 +379,11 @@ theorem congAssoc_keys_ge : ∀ (tys : List Ty) (es₁ es₂ : List Exp) (k : �
     ∀ p ∈ Build.congAssoc tys es₁ es₂ k, k ≤ p.1.id
   | ty :: tys, e₁ :: es₁, e₂ :: es₂, k, p, hp => by
     by_cases hn : ty.name = true
-    · simp only [Build.congAssoc, hn, if_true, List.mem_cons] at hp
+    · simp only [Build.congAssoc, hn, ite_true, List.mem_cons] at hp
       rcases hp with rfl | hp
       · exact le_rfl
       · exact (Nat.le_succ k).trans (congAssoc_keys_ge tys es₁ es₂ (k + 1) p hp)
-    · simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.mem_cons] at hp
+    · simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.mem_cons] at hp
       rcases hp with rfl | rfl | hp
       · exact le_rfl
       · exact Nat.le_succ k
@@ -396,14 +396,14 @@ theorem congAssoc_nodup : ∀ (tys : List Ty) (es₁ es₂ : List Exp) (k : ℕ)
     ((Build.congAssoc tys es₁ es₂ k).map Prod.fst).Nodup
   | ty :: tys, e₁ :: es₁, e₂ :: es₂, k => by
     by_cases hn : ty.name = true
-    · simp only [Build.congAssoc, hn, if_true, List.map_cons, List.nodup_cons, List.mem_map]
+    · simp only [Build.congAssoc, hn, ite_true, List.map_cons, List.nodup_cons, List.mem_map]
       refine ⟨?_, congAssoc_nodup tys es₁ es₂ (k + 1)⟩
       rintro ⟨p, hp, hpk⟩
       have := congAssoc_keys_ge tys es₁ es₂ (k + 1) p hp
       rw [hpk] at this
       simp only [] at this
       omega
-    · simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.map_cons, List.nodup_cons,
+    · simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.map_cons, List.nodup_cons,
         List.mem_cons, List.mem_map]
       refine ⟨?_, ?_, congAssoc_nodup tys es₁ es₂ (k + 2)⟩
       · rintro (h | ⟨p, hp, hpk⟩)
@@ -427,11 +427,11 @@ theorem congAssoc_fits {c : Consts} : ∀ (tys : List Ty) (es₁ es₂ : List Ex
     obtain ⟨f1, _, _, g1⟩ := h1
     obtain ⟨f2, _, _, g2⟩ := h2
     by_cases hn : ty.name = true
-    · simp only [Build.congAssoc, hn, if_true, List.mem_cons] at hp
+    · simp only [Build.congAssoc, hn, ite_true, List.mem_cons] at hp
       rcases hp with rfl | hp
       · exact f1
       · exact congAssoc_fits tys es₁ es₂ (k + 1) g1 g2 p hp
-    · simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.mem_cons] at hp
+    · simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.mem_cons] at hp
       rcases hp with rfl | rfl | hp
       · exact f1
       · exact f2
@@ -454,10 +454,10 @@ theorem congVars_apply : ∀ (tys : List Ty) (es₁ es₂ : List Exp) (k : ℕ) 
       fun i u hu hn => by simpa using hnames (i + 1) u (by simpa using hu) hn
     by_cases hn : ty.name = true
     · have he : e₁ = e₂ := by simpa using hnames 0 ty (by simp) hn
-      simp only [Build.congAssoc, hn, if_true, List.mem_cons, forall_eq_or_imp] at hθ
+      simp only [Build.congAssoc, hn, ite_true, List.mem_cons, forall_eq_or_imp] at hθ
       obtain ⟨ih1, ih2⟩ := congVars_apply tys es₁ es₂ (k + 1) θ h1 h2 hnames' hθ.2
       simp [Rules.congVars, hn, Rules.v, Subst.apply_var, hθ.1, ih1, ih2, he]
-    · simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.mem_cons, forall_eq_or_imp] at hθ
+    · simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.mem_cons, forall_eq_or_imp] at hθ
       obtain ⟨ih1, ih2⟩ := congVars_apply tys es₁ es₂ (k + 2) θ h1 h2 hnames' hθ.2.2
       simp [Rules.congVars, hn, Rules.v, Subst.apply_var, hθ.1, hθ.2.1, ih1, ih2]
   | [], _ :: _, _, _, _, h1, _, _, _ => by simp at h1
@@ -490,7 +490,7 @@ theorem firstDiff_some : ∀ (es₁ es₂ : List Exp) (i : ℕ), es₁ ≠ es₂
     simp only [Build.firstDiff]
     by_cases he : e₁ = e₂
     · subst he
-      simp only [if_true]
+      simp only [ite_true]
       exact firstDiff_some es₁ es₂ (i + 1) (fun h => hne (by rw [h])) (by simpa using hl)
     · exact ⟨i, by simp [he]⟩
   | [], [], _, hne, _ => absurd rfl hne
@@ -526,7 +526,7 @@ theorem mem_all_cong {t : ℕ} (ht : t < L.terms) {pick : Option ℕ}
     (RuleKind.cong t pick, Rules.congRule L t pick) ∈ Rules.all L defs := by
   simp only [Rules.all, List.mem_append, Rules.termRules, List.mem_flatMap, List.mem_range]
   refine Or.inl (Or.inr ⟨t, ht, ?_⟩)
-  rw [if_neg hreg]
+  rw [ite_eq_right hreg]
   cases pick with
   | none => simp
   | some i =>
@@ -576,7 +576,7 @@ theorem PTree.mem_allVars_step (db : Database) {v : Var} {e : Exp} {a : ℕ} {θ
   constructor
   · rintro ⟨x, (rfl | ⟨k, hk, hx⟩ | ⟨c, hc, hx⟩), hv⟩
     · exact Or.inl hv
-    · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hx
+    · simp only [List.not_mem_nil, or_false] at hx
       rcases hx with rfl | rfl
       · exact Or.inr (Or.inl ⟨k, hk, Or.inl hv⟩)
       · exact Or.inr (Or.inl ⟨k, hk, Or.inr hv⟩)
@@ -761,7 +761,7 @@ theorem congStep_ok {f : ℕ} {t : Ty} {as bs : List Exp} {s : ℕ} {strict : Bo
     cases strict with
     | false => simp at hi
     | true =>
-      simp only [if_true] at hi
+      simp only [ite_true] at hi
       exact diff_regular hl₁ hl₂ hnames (by simpa using (firstDiff_spec as bs 0 i hi).2)
   have hreg : ¬(Rules.regularArgs (L.sig.args f)).isEmpty = true := by
     obtain ⟨j, hj⟩ := firstDiff_some as bs 0 hne (hl₁.symm.trans hl₂)
@@ -1041,14 +1041,14 @@ theorem CTree.toTree_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.const
       obtain ⟨_, _, _, hargs₂⟩ := hgb
       by_cases heq : es₁ = es₂
       · subst heq
-        rw [if_pos rfl]
+        rw [ite_eq_left rfl]
         cases strict with
         | true => exact absurd rfl (hab rfl)
         | false =>
           obtain ⟨h1, h2, h3, h4⟩ := reflTree_valid (db := db) (st := st)
             (by rw [← hsa, ht]; exact hrs) hsa
           exact ⟨h1, h2, h3, fun v hv => Or.inl (h4 v hv)⟩
-      · rw [if_neg heq]
+      · rw [ite_eq_right heq]
         have hs : s = L.sig.sort f := by rw [← hsa, ht]; rfl
         have hθ : ∀ p ∈ Build.congAssoc (L.sig.args f) es₁ es₂ 0,
             (Subst.ofAssoc (Build.congAssoc (L.sig.args f) es₁ es₂ 0)).f p.1 = p.2 :=
@@ -1120,14 +1120,14 @@ theorem CTree.toTreeR_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.cons
       obtain ⟨_, _, _, hargs₂⟩ := hgb
       by_cases heq : es₁ = es₂
       · subst heq
-        rw [if_pos rfl]
+        rw [ite_eq_left rfl]
         cases strict with
         | true => exact absurd rfl (hab rfl)
         | false =>
           obtain ⟨h1, h2, h3, h4⟩ := reflTree_valid (db := db) (st := st)
             (by rw [← hsa, ht]; exact hrs) hsa
           exact ⟨h1, h2, h3, fun v hv => Or.inl (h4 v hv)⟩
-      · rw [if_neg heq]
+      · rw [ite_eq_right heq]
         have hs : s = L.sig.sort f := by rw [← hsa, ht]; rfl
         have hnames' : ∀ (j : ℕ) (u : Ty), (L.sig.args f)[j]? = some u → u.name = true → es₂[j]? = es₁[j]? :=
           fun j u hu hn => (hnames j u hu hn).symm
@@ -1210,15 +1210,15 @@ theorem CTree.toTreeList_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.c
         simp only [Exp.mem_varsOf, CTree.exprsList, List.mem_cons, List.mem_append] at hv ⊢
         aesop
       by_cases hn : ty.name = true
-      · simp only [CTree.toTreeList, hn, if_true, List.nil_append]
-        simp only [Rules.congHyps, Rules.congVars, hn, if_true, List.nil_append]
-        simp only [Build.congAssoc, hn, if_true, List.mem_cons, forall_eq_or_imp] at hθ
+      · simp only [CTree.toTreeList, hn, ite_true, List.nil_append]
+        simp only [Rules.congHyps, Rules.congVars, hn, ite_true, List.nil_append]
+        simp only [Build.congAssoc, hn, ite_true, List.mem_cons, forall_eq_or_imp] at hθ
         obtain ⟨hrest, hreste⟩ := CTree.toTreeList_valid hL hdefs hnd ks pick tys es₁ es₂ (i + 1) (kv + 1) θ hks'
           (fun k' hk' => hnt k' (by simp [hk'])) (fun k' hk' => hgk k' (by simp [hk'])) hg₁' hg₂' hnames' hθ.2 hpick'
         exact ⟨fun c hc => ⟨(hrest c hc).1, (hrest c hc).2.1, fun v hv => hwiden v ((hrest c hc).2.2 v hv)⟩, hreste⟩
-      · simp only [CTree.toTreeList, hn, Bool.false_eq_true, if_false, List.singleton_append]
-        simp only [Rules.congHyps, Rules.congVars, hn, Bool.false_eq_true, if_false, List.singleton_append]
-        simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.mem_cons, forall_eq_or_imp] at hθ
+      · simp only [CTree.toTreeList, hn, Bool.false_eq_true, ite_false, List.singleton_append]
+        simp only [Rules.congHyps, Rules.congVars, hn, Bool.false_eq_true, ite_false, List.singleton_append]
+        simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.mem_cons, forall_eq_or_imp] at hθ
         obtain ⟨hθ1, hθ2, hθ'⟩ := hθ
         have hab : (pick == some i) = true → e₁ ≠ e₂ := by
           intro h
@@ -1279,15 +1279,15 @@ theorem CTree.toTreeListR_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.
         simp only [Exp.mem_varsOf, CTree.exprsList, List.mem_cons, List.mem_append] at hv ⊢
         aesop
       by_cases hn : ty.name = true
-      · simp only [CTree.toTreeListR, hn, if_true, List.nil_append]
-        simp only [Rules.congHyps, Rules.congVars, hn, if_true, List.nil_append]
-        simp only [Build.congAssoc, hn, if_true, List.mem_cons, forall_eq_or_imp] at hθ
+      · simp only [CTree.toTreeListR, hn, ite_true, List.nil_append]
+        simp only [Rules.congHyps, Rules.congVars, hn, ite_true, List.nil_append]
+        simp only [Build.congAssoc, hn, ite_true, List.mem_cons, forall_eq_or_imp] at hθ
         obtain ⟨hrest, hreste⟩ := CTree.toTreeListR_valid hL hdefs hnd ks pick tys es₁ es₂ (i + 1) (kv + 1) θ hks'
           (fun k' hk' => hnt k' (by simp [hk'])) (fun k' hk' => hgk k' (by simp [hk'])) hg₁' hg₂' hnames' hθ.2 hpick'
         exact ⟨fun c hc => ⟨(hrest c hc).1, (hrest c hc).2.1, fun v hv => hwiden v ((hrest c hc).2.2 v hv)⟩, hreste⟩
-      · simp only [CTree.toTreeListR, hn, Bool.false_eq_true, if_false, List.singleton_append]
-        simp only [Rules.congHyps, Rules.congVars, hn, Bool.false_eq_true, if_false, List.singleton_append]
-        simp only [Build.congAssoc, hn, Bool.false_eq_true, if_false, List.mem_cons, forall_eq_or_imp] at hθ
+      · simp only [CTree.toTreeListR, hn, Bool.false_eq_true, ite_false, List.singleton_append]
+        simp only [Rules.congHyps, Rules.congVars, hn, Bool.false_eq_true, ite_false, List.singleton_append]
+        simp only [Build.congAssoc, hn, Bool.false_eq_true, ite_false, List.mem_cons, forall_eq_or_imp] at hθ
         obtain ⟨hθ1, hθ2, hθ'⟩ := hθ
         have hab : (pick == some i) = true → e₁ ≠ e₂ := by
           intro h
@@ -1331,12 +1331,12 @@ theorem DTree.expr_toP (L : Language) (db : Database) : ∀ D : DTree, (D.toP L 
   | .conv e k t => by
     by_cases h : e = t.expr
     · simp only [DTree.toP]
-      rw [if_pos h]
+      rw [ite_eq_left h]
       show (DTree.toP L db t).expr = e
       rw [DTree.expr_toP L db t]
       exact h.symm
     · simp only [DTree.toP]
-      rw [if_neg h]
+      rw [ite_eq_right h]
       rfl
 
 theorem DTree.expr_mem_exprs (db : Database) (D : DTree) : D.expr ∈ D.exprs db := by
@@ -1476,13 +1476,13 @@ theorem DTree.toP_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.consts.N
     obtain ⟨h1, h2, h3⟩ := ih hct hft
     simp only [DTree.toP]
     by_cases heq : e = t.expr
-    · rw [if_pos heq]
+    · rw [ite_eq_left heq]
       refine ⟨h1, h2, fun v hv => ?_⟩
       have := h3 v hv
       rw [DTree.mem_allVars] at this ⊢
       obtain ⟨x, hx, hvx⟩ := this
       exact ⟨x, by simp [DTree.exprs, hx], hvx⟩
-    · rw [if_neg heq]
+    · rw [ite_eq_right heq]
       have hge : L.Good st.consts e := hf.good e (by simp [DTree.exprs])
       have hgt : L.Good st.consts t.expr := hf.good t.expr (by
         simp only [DTree.exprs, List.mem_cons, List.mem_append]
@@ -1510,7 +1510,7 @@ theorem DTree.toP_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.consts.N
       · simp only [hidx, Option.getD_some]
         refine Shape.step _ _ _ _ _ hA ?_ ?_ ?_ ?_ ?_
         · exact Subst.ofAssoc_typed (by
-            simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq,
+            simp only [List.mem_cons, List.not_mem_nil, or_false, forall_eq_or_imp, forall_eq,
               FitsTy]
             exact ⟨⟨⟨rfl, fun h => by simp at h⟩, fun h => by simp at h⟩,
               ⟨⟨hsort.symm, fun h => by simp at h⟩, fun h => by simp at h⟩⟩)
@@ -1518,7 +1518,7 @@ theorem DTree.toP_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.consts.N
         · simp [Rules.convRule, Rules.v, Subst.apply_var, hθ0]
         · simp [Rules.convRule, Rules.v, Language.apply_eq, Subst.apply_var, hθ0, hθ1, DTree.expr_toP, r3]
         · intro c hc'
-          simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hc'
+          simp only [List.mem_cons, List.not_mem_nil, or_false] at hc'
           rcases hc' with rfl | rfl
           · exact h1
           · exact r1
@@ -1528,7 +1528,7 @@ theorem DTree.toP_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.consts.N
             PTree.condsList (db.withConv L) [DTree.toP L db t, CTree.toTreeR L db true e.ty.sort k t.expr e] := hc'
         rw [hsc, List.nil_append, PTree.mem_condsList] at hc''
         obtain ⟨c', hc', hcc'⟩ := hc''
-        simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hc'
+        simp only [List.mem_cons, List.not_mem_nil, or_false] at hc'
         rcases hc' with rfl | rfl
         · exact h2 c hcc'
         · exact r2 c hcc'
@@ -1541,7 +1541,7 @@ theorem DTree.toP_valid (hL : L.WF db st) (hdefs : db.DefsWF) (hnd : st.consts.N
         rcases hv' with hv' | ⟨_, h, _⟩ | ⟨c, hc', hv'⟩
         · exact ⟨e, by simp [DTree.exprs], hv'⟩
         · simp at h
-        · simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hc'
+        · simp only [List.mem_cons, List.not_mem_nil, or_false] at hc'
           rcases hc' with rfl | rfl
           · have := h3 v hv'
             rw [DTree.mem_allVars] at this

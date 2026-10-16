@@ -44,7 +44,7 @@ theorem ctxOk_prefix {E : env} {c : Ctx} {allTerms : List TermDecl} (hE : EnvHas
   | j + 1, hj => by
     have hjl : j < bs.length := hj
     have hb : bs[j]? = some bs[j] := List.getElem?_eq_getElem hjl
-    rw [List.take_succ, hb]
+    rw [List.take_add_one, hb]
     simp only [Option.toList, List.map_append, List.map_cons, List.map_nil]
     have ih := ctxOk_prefix hE h j (le_of_lt hjl)
     obtain ⟨h1, h2⟩ := h.wf j bs[j] hjl hb

@@ -50,7 +50,7 @@ theorem loaded_var {c : Ctx} {bs : List Binder} {st : State} (h : Loading c bs b
 theorem range_map_toSexpr {c : Ctx} {bs : List Binder} {st : State} (h : Loading c bs bs.length st)
     {store : List Node} (hpre : st.store <+: store) :
     (List.range bs.length).map (toSexpr store) = (List.range bs.length).map sexpr.var :=
-  List.map_congr_left fun i hi => loaded_var h hpre (List.mem_range.1 hi)
+  List.map_congr_left fun _ hi => loaded_var h hpre (List.mem_range.1 hi)
 
 /-! ### Dummies in the context -/
 
@@ -104,7 +104,7 @@ theorem thm_stmt_sound {E : env} {c : Ctx} {allTerms : List TermDecl} (hE : EnvH
       rw [hsx, range_map_toSexpr hL hx.store, subst_id_of_varsLt hvl]
     have hHs : W.Hs = {x | x ∈ hl} := by
       ext x
-      simp only [World.Hs, Set.mem_setOf_eq]
+      simp only [World.Hs, Set.mem_ofPred_eq]
       constructor
       · rintro ⟨h, hh, rfl⟩
         obtain ⟨y, hy, hhy⟩ := forall₂_mem_left hall h (List.mem_reverse.2 hh)

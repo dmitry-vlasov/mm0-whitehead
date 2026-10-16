@@ -34,14 +34,14 @@ theorem take_succ_cases {α : Type} {l : List α} {n i : ℕ} {x : α} (h : (l.t
 theorem take_mono {α : Type} {l : List α} {n i : ℕ} {x : α} (h : (l.take n)[i]? = some x) : (l.take (n + 1))[i]? = some x := by
   rw [List.getElem?_take] at h ⊢
   by_cases hi : i < n
-  · rw [if_pos hi] at h
-    rw [if_pos (by omega)]
+  · rw [ite_eq_left hi] at h
+    rw [ite_eq_left (by omega)]
     exact h
-  · rw [if_neg hi] at h
+  · rw [ite_eq_right hi] at h
     cases h
 
 theorem take_self {α : Type} {l : List α} {n : ℕ} {x : α} (h : l[n]? = some x) : (l.take (n + 1))[n]? = some x := by
-  rw [List.getElem?_take, if_pos (by omega)]
+  rw [List.getElem?_take, ite_eq_left (by omega)]
   exact h
 
 theorem take_prefix {α : Type} {l : List α} {n i : ℕ} {x : α} (h : (l.take n)[i]? = some x) : l[i]? = some x := by
@@ -234,7 +234,7 @@ theorem term_ok_of {f : File} {E : env} {ns nt nh : ℕ} (h : PInv f E ns nt nh)
   rw [hargs]
   refine ⟨fun ⟨a, r, o, hg⟩ => ?_, hctx, hdep, ?_⟩
   · obtain ⟨d, hd, _⟩ := h.has.terms_unique nt a r o hg
-    simp [ctxAt, List.getElem?_take] at hd
+    simp [ctxAt] at hd
   · obtain ⟨sd, hsd, hpure⟩ := hfacts.ret_sort
     exact ⟨sd, h.has.sorts _ _ hsd, by simp [hpure]⟩
 

@@ -429,11 +429,11 @@ theorem judgeK_spec (c : Consts) (st : Statement) (e : Exp) (J : Subst) (k : Con
   · simp only [hh, not_true_eq_false, ite_false, ite_true]
     cases hk : (Cond.apply J k).1 with
     | var y =>
-      by_cases hy : y ∈ imageVars J (e.vars ∪ st.vars) <;> simp [hk, hy]
+      by_cases hy : y ∈ imageVars J (e.vars ∪ st.vars) <;> simp [hy]
     | const k' t =>
-      by_cases hv : (Cond.apply J k).2.vars = ∅ <;> simp [hk, hv]
+      by_cases hv : (Cond.apply J k).2.vars = ∅ <;> simp [hv]
     | app f t args =>
-      by_cases hv : (Cond.apply J k).2.vars = ∅ <;> simp [hk, hv]
+      by_cases hv : (Cond.apply J k).2.vars = ∅ <;> simp [hv]
   · simp [hh]
 
 theorem judgeAll_spec (c : Consts) (st : Statement) (e : Exp) (J : Subst) :
@@ -735,7 +735,7 @@ theorem child_cond_eq (hU : U.Oriented) (hs : StateInv U db st s) (hwf : db.WF) 
 
 /-- A condition of a child's entry that is settled there holds under the keyed join and
 is not pending at the parent. -/
-theorem settled_child (hU : U.Oriented) (hs : StateInv U db st s) (hwf : db.WF) (hj : j < s.anodes.size)
+theorem settled_child (_hU : U.Oriented) (hs : StateInv U db st s) (hwf : db.WF) (hj : j < s.anodes.size)
     (h : Joined U st s fuel j etup ktup J θ) {l : ℕ} (hl : l < etup.length) {c : Cond} (hc : c ∈ etup[l].conds)
     (hnp : isPending etup[l].sub (visible st s s.anodes[j]!.children[l]!) c = false) :
     (c.apply J).Holds st.consts ∧ isPending J (visible st s s.anodes[j]!.parent) (c.apply J) = false := by

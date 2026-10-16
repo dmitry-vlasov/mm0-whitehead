@@ -78,9 +78,9 @@ theorem mem_all_spec {defs : List Def} {k : RuleKind} {A : Assertion}
         exact ⟨rfl, hs⟩
       · simp at h
   · by_cases hreg : (Rules.regularArgs (L.sig.args t)).isEmpty = true
-    · rw [if_pos hreg] at h
+    · rw [ite_eq_left hreg] at h
       simp at h
-    · rw [if_neg hreg] at h
+    · rw [ite_eq_right hreg] at h
       simp only [List.mem_cons, List.mem_map, Prod.mk.injEq] at h
       rcases h with ⟨rfl, rfl⟩ | ⟨i, _, rfl, rfl⟩ <;> exact ⟨rfl, ht⟩
   · have hd : defs[d]? = some D := by
@@ -237,10 +237,10 @@ theorem congVars_fits {θ : Subst} (hθ : θ.Typed) :
   | [], _ => ⟨List.Forall₂.nil, List.Forall₂.nil⟩
   | ty :: tys, k => by
     by_cases hn : ty.name = true
-    · simp only [Rules.congVars, hn, if_true, List.map_cons, Rules.v, Subst.apply_var]
+    · simp only [Rules.congVars, hn, ite_true, List.map_cons, Rules.v, Subst.apply_var]
       exact ⟨List.Forall₂.cons (Subst.fitsTy_f hθ ⟨k, ty⟩) (congVars_fits hθ tys (k + 1)).1,
         List.Forall₂.cons (Subst.fitsTy_f hθ ⟨k, ty⟩) (congVars_fits hθ tys (k + 1)).2⟩
-    · simp only [Rules.congVars, hn, Bool.false_eq_true, if_false, List.map_cons, Rules.v, Subst.apply_var]
+    · simp only [Rules.congVars, hn, Bool.false_eq_true, ite_false, List.map_cons, Rules.v, Subst.apply_var]
       exact ⟨List.Forall₂.cons (Subst.fitsTy_f hθ ⟨k, ty⟩) (congVars_fits hθ tys (k + 2)).1,
         List.Forall₂.cons (Subst.fitsTy_f hθ ⟨k + 1, ty⟩) (congVars_fits hθ tys (k + 2)).2⟩
 
@@ -255,9 +255,9 @@ theorem congVars_names (θ : Subst) :
   | ty :: tys, k, i + 1, u, h, hu => by
     simp only [List.getElem?_cons_succ] at h
     by_cases hn : ty.name = true
-    · simp only [Rules.congVars, hn, if_true, List.map_cons, List.getElem?_cons_succ]
+    · simp only [Rules.congVars, hn, ite_true, List.map_cons, List.getElem?_cons_succ]
       exact congVars_names θ tys (k + 1) i u h hu
-    · simp only [Rules.congVars, hn, Bool.false_eq_true, if_false, List.map_cons, List.getElem?_cons_succ]
+    · simp only [Rules.congVars, hn, Bool.false_eq_true, ite_false, List.map_cons, List.getElem?_cons_succ]
       exact congVars_names θ tys (k + 2) i u h hu
 
 /-- The certificates of the arguments of a congruence step are valid: at an argument
@@ -273,20 +273,20 @@ theorem congList_valid {θ : Subst} (sa : Option ℕ) :
   | [], k, i, cs, hcs, _ => by
     simp only [Rules.congVars, Rules.congHyps, List.map_nil] at hcs ⊢
     rw [List.map_eq_nil_iff.1 hcs]
-    simp only [Translate.congCerts, PTree.toCList]
+    simp only [Translate.congCerts]
     exact CValidList.nil
   | ty :: tys, k, i, cs, hcs, ih => by
     by_cases hn : ty.name = true
-    · simp only [Rules.congVars, hn, if_true, Rules.congHyps, List.nil_append] at hcs ⊢
-      simp only [Translate.congCerts, hn, if_true, List.map_cons, Rules.v, Subst.apply_var]
+    · simp only [Rules.congVars, hn, ite_true, Rules.congHyps, List.nil_append] at hcs ⊢
+      simp only [Translate.congCerts, hn, ite_true, List.map_cons, Rules.v, Subst.apply_var]
       exact CValidList.cons (CValid.refl _) (congList_valid sa tys (k + 1) (i + 1) cs hcs ih)
-    · simp only [Rules.congVars, hn, Bool.false_eq_true, if_false, Rules.congHyps, List.singleton_append, List.map_cons] at hcs ⊢
+    · simp only [Rules.congVars, hn, Bool.false_eq_true, ite_false, Rules.congHyps, List.singleton_append, List.map_cons] at hcs ⊢
       cases cs with
       | nil => simp at hcs
       | cons c cs' =>
         simp only [List.map_cons, List.cons.injEq] at hcs
         obtain ⟨hc, hcs'⟩ := hcs
-        simp only [PTree.toCList, Translate.congCerts, hn, Bool.false_eq_true, if_false, Rules.v, Subst.apply_var]
+        simp only [PTree.toCList, Translate.congCerts, hn, Bool.false_eq_true, ite_false, Rules.v, Subst.apply_var]
         refine CValidList.cons ?_ (congList_valid sa tys (k + 2) (i + 1) cs' hcs' fun c' hc' => ih c' (by simp [hc']))
         have := ih c (by simp) ty.sort (sa == some i) (θ.f ⟨k, ty⟩) (θ.f ⟨k + 1, ty⟩)
           (by rw [hc, Language.apply_eq]; simp [Rules.v])
@@ -615,13 +615,13 @@ theorem congVars_vars : ∀ (tys : List Ty) (k : ℕ),
   | [], _ => by simp [Rules.congVars]
   | ty :: tys, k => by
     by_cases hn : ty.name = true
-    · simp only [Rules.congVars, hn, if_true, List.mem_cons, List.toFinset_cons]
+    · simp only [Rules.congVars, hn, ite_true, List.mem_cons, List.toFinset_cons]
       refine ⟨fun w hw => ?_, fun w hw => ?_⟩ <;> rcases hw with rfl | hw
       · simp [Rules.v, Exp.vars]
       · exact (congVars_vars tys (k + 1)).1 w hw |>.trans (Finset.subset_insert _ _)
       · simp [Rules.v, Exp.vars]
       · exact (congVars_vars tys (k + 1)).2 w hw |>.trans (Finset.subset_insert _ _)
-    · simp only [Rules.congVars, hn, Bool.false_eq_true, if_false, List.mem_cons, List.toFinset_cons]
+    · simp only [Rules.congVars, hn, Bool.false_eq_true, ite_false, List.mem_cons, List.toFinset_cons]
       refine ⟨fun w hw => ?_, fun w hw => ?_⟩ <;> rcases hw with rfl | hw
       · simp [Rules.v, Exp.vars]
       · exact (congVars_vars tys (k + 2)).1 w hw |>.trans
@@ -660,7 +660,7 @@ theorem reflRule_WF (s : ℕ) : (Rules.reflRule L s).WF where
 theorem convRule_WF (s : ℕ) : (Rules.convRule L s).WF where
   concl_vars := by simp [Rules.convRule, Rules.v, Exp.vars]
   hyps_vars := by
-    simp only [Rules.convRule, List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false]
+    simp only [Rules.convRule, List.mem_cons, List.not_mem_nil, or_false]
     rintro h (rfl | rfl)
     · simp [Rules.v, Exp.vars]
     · simp [Language.vars_eq, Rules.v, Exp.vars]
@@ -843,7 +843,7 @@ theorem mem_exprsList_congCerts (θ : Subst) : ∀ (tys : List Ty) (ks : List CT
   | [], ks, k, x, hx => by simp [Translate.congCerts, CTree.exprsList] at hx
   | ty :: tys, ks, k, x, hx => by
     by_cases hn : ty.name = true
-    · simp only [Translate.congCerts, hn, if_true, CTree.exprsList, CTree.exprs, List.mem_append,
+    · simp only [Translate.congCerts, hn, ite_true, CTree.exprsList, CTree.exprs, List.mem_append,
         List.mem_singleton] at hx
       rcases hx with rfl | hx
       · exact Or.inl ⟨Rules.v k ty, by simp [Rules.congVars, hn], by simp [Rules.v]⟩
@@ -852,7 +852,7 @@ theorem mem_exprsList_congCerts (θ : Subst) : ∀ (tys : List Ty) (ks : List CT
         · exact Or.inr hx
     · cases ks with
       | nil =>
-        simp only [Translate.congCerts, hn, Bool.false_eq_true, if_false, CTree.exprsList, CTree.exprs,
+        simp only [Translate.congCerts, hn, Bool.false_eq_true, ite_false, CTree.exprsList, CTree.exprs,
           List.mem_append, List.mem_singleton] at hx
         rcases hx with rfl | hx
         · exact Or.inl ⟨Rules.v k ty, by simp [Rules.congVars, hn], by simp [Rules.v]⟩
@@ -860,7 +860,7 @@ theorem mem_exprsList_congCerts (θ : Subst) : ∀ (tys : List Ty) (ks : List CT
           · exact Or.inl ⟨w, by simp [Rules.congVars, hn, hw], hxw⟩
           · exact Or.inr hx
       | cons k' ks' =>
-        simp only [Translate.congCerts, hn, Bool.false_eq_true, if_false, CTree.exprsList,
+        simp only [Translate.congCerts, hn, Bool.false_eq_true, ite_false, CTree.exprsList,
           List.mem_append] at hx
         rcases hx with hx | hx
         · exact Or.inr (by simp [CTree.exprsList, hx])

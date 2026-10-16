@@ -93,7 +93,7 @@ inductive ctx.ok (e : env) : ctx → Prop
     ctx.ok e Γ → ctx.ok e (Γ ++ [binder.reg s vs])
 
 -- Helper function to allow defining the mutual recursive functions Expr and ExprBi
-def sexpr.ok_bi' (e : env) (Γ : ctx) (x : sexpr) (P : sort_id → Prop) : binder → Prop
+def sexpr.ok_bi' (_e : env) (Γ : ctx) (x : sexpr) (P : sort_id → Prop) : binder → Prop
   | .bound s => ∃ v, x = sexpr.var v ∧ Γ[v]? = some (binder.bound s)
   | .reg s _ => P s
 

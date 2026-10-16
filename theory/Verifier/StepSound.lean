@@ -11,7 +11,7 @@ open Whitehead.Mmb (ProofCmd UnifyCmd)
 
 variable {W : World} {c : Ctx} {allTerms : List TermDecl} {bs : List Binder} {D : List ℕ}
 
-theorem lift_x (hW : WorldOk W c allTerms bs D) {store : List Node} (hwf : StoreWF store) (hpre : store <+: W.store)
+theorem lift_x (_hW : WorldOk W c allTerms bs D) {store : List Node} (hwf : StoreWF store) (hpre : store <+: W.store)
     {p : ℕ} (hp : p < store.length) : W.x p = toSexpr store p :=
   toSexpr_prefix hwf hpre hp
 

@@ -56,12 +56,12 @@ theorem boundNumbers_bound {bs : List Binder} {k : ℕ} (hk : k < (boundNumbers 
 theorem bvVar_of_lt {bs : List Binder} {k : ℕ} (hk : k < (boundNumbers bs).length) :
     bvVar bs k = (boundNumbers bs)[k] := by
   unfold bvVar
-  rw [dif_pos hk]
+  rw [dite_eq_left hk]
 
 theorem bvVar_of_ge {bs : List Binder} {k : ℕ} (hk : ¬ k < (boundNumbers bs).length) :
     bvVar bs k = bs.length + (k - (boundNumbers bs).length) := by
   unfold bvVar
-  rw [dif_neg hk]
+  rw [dite_eq_right hk]
 
 theorem bvVar_lt_of_lt {bs : List Binder} {k : ℕ} (hk : k < (boundNumbers bs).length) : bvVar bs k < bs.length := by
   rw [bvVar_of_lt hk]
@@ -128,13 +128,13 @@ theorem ctxOf_bvVar {bs : List Binder} {ds : List ℕ} {k : ℕ} (hk : k < (boun
     obtain ⟨b, hb, hbb⟩ := isBoundAt_iff.1 (boundNumbers_bound h)
     rw [ctxOf_getElem_binder ds hb, toMm0_bound hbb]
     unfold bvSort
-    rw [dif_pos h, hb]
+    rw [dite_eq_left h, hb]
     rfl
   · rw [bvVar_of_ge h]
     have hd : k - (boundNumbers bs).length < ds.length := by omega
     rw [ctxOf_getElem_dummy bs (List.getElem?_eq_getElem hd)]
     unfold bvSort
-    rw [dif_neg h, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hd]
+    rw [dite_eq_right h, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hd]
     rfl
 
 /-- A variable of the context that is bound is the variable of a number. -/

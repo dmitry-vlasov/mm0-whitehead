@@ -49,7 +49,7 @@ def main (args : List String) : IO UInt32 := do
       let done ← IO.monoMsNow
       IO.println s!"  keyed: {kroot.length} entries at the root, one per key, in {done - start} ms"
       for K in kroot do
-        IO.println s!"  {Convert.proofText names terms (K.proof dbm s)} with \
+        IO.println s!"  {Convert.proofText names terms (State.proofOf dbm s K.sub K.tree)} with \
           {Convert.expText terms (K.sub.apply st.concl)}, {K.conds.length} pending"
     return 0
   | _ =>
