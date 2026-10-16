@@ -27,7 +27,11 @@ used in the main goal's proof through the joins and forward (`DESIGN.md`,
 "Intermediate goals"). Then the fifth step, the first front-end: an MCP server for an
 AI agent (`mm0-whitehead mcp <file.mm0> <file.mmb>`), with the session operations as
 tools and statements in the notation of the specification (`DESIGN.md`, "The MCP
-server").
+server"). And, for the sixth step, what filters can do on set.mm without an agent.
+Describing the known proof's new goals to depth 3, without naming the assertion,
+leaves a median of 16 of 983 variants, and 5 or fewer at 39.5% of nodes. The rest is
+mostly steps without premises, where a description has nothing to say (`DESIGN.md`,
+"Measurement").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -373,7 +377,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,074 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,076 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -557,7 +561,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
    Done: the resumable search and the session operations, backward (`choose`) and
    forward (`deduce`); the filters; the language; intermediate goals; and the MCP
-   server. Next: an agent's sessions on set.mm through it, which measure filter quality
-   (step 6); and the human front-end. Open: how a human moves about in a huge tree;
+   server; and what a description of the next goals narrows on set.mm. Next: an
+   agent's sessions on set.mm through the server, which measure its own filters; the
+   rank atom, for the steps that a description cannot narrow; and the human front-end. Open: how a human moves about in a huge tree;
    whether a session is recorded as a file; whether an intermediate goal should be
    usable before it is proved.

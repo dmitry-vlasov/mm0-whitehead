@@ -164,6 +164,24 @@ def measureTests : TestM Unit := do
       (counts.size == 3 && counts.all (· ≥ 1) && !limited) s!"{counts}"
     check "measure: the summary counts the nodes" (contains (variantSummary counts) "3 nodes") (variantSummary counts)
   | none => check "measure: mpd's proof is measured" false
+  -- the shape of an expression: terms and constants to a depth, holes below and for variables
+  let wffTy := Ty.mk 0 false
+  let c (k : Nat) : Exp := ⟨#[Node.const k wffTy]⟩
+  let wi (a b : Exp) : Exp := Exp.mkApp 0 wffTy #[a, b]
+  let hole : Exp := ⟨#[holeNode]⟩
+  let v : Exp := Exp.ofVar (Node.var freshBase wffTy)
+  let e := wi (wi (c 0) v) (c 1)
+  check "measure: shapes to depths 0 to 3"
+    (e.shape 0 == hole && e.shape 1 == wi hole hole && e.shape 2 == wi (wi hole hole) (c 1) &&
+      e.shape 3 == wi (wi (c 0) hole) (c 1))
+  -- every node of every proof of the fixture: the described variant passes, and fewer remain
+  let mut all := #[]
+  for j in [0:file.stmts.size] do
+    if let .thm _ := file.stmts[j]!.kind then
+      if let some (cs, _) ← nodeCounts db db.index { maxProps := 5000 } #[1, 2, 3] j then all := all ++ cs
+  check "measure: described, the known variant passes, and no more remain than there are"
+    (!all.isEmpty && all.all fun n => n.kept && n.shaped.all (· ≤ n.variants) && n.shaped.all (· ≥ 1))
+    s!"{all.size} nodes"
 
 def dslTests : TestM Unit := do
   let bytes ← IO.FS.readBinFile logicPath

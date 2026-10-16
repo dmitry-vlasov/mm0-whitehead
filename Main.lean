@@ -29,10 +29,12 @@ def usage : String :=
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
                                  message
-  prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
+  prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--shapes]
                                  how many variants the goal nodes on the paths of the known
                                  proofs have, each node expanded against the whole database:
-                                 what a filter has to narrow
+                                 what a filter has to narrow; --shapes: and how many pass the
+                                 filter that describes the known proof's new goals to depth 1,
+                                 2 and 3
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
                [--verbose]
@@ -324,16 +326,22 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
   let index := db.index
   let start ← IO.monoMsNow
-  let results ← Prove.runJobs jobs todo.size (fun k => Prove.variantCounts db index limits todo[k]!) progress memLimit
-    logLine
-  let counts := results.foldl (init := #[]) fun acc r => match r with
+  let depths := if args.contains "--shapes" then #[1, 2, 3] else #[]
+  let results ← Prove.runJobs jobs todo.size (fun k => Prove.nodeCounts db index limits depths todo[k]!) progress
+    memLimit logLine
+  let nodes := results.foldl (init := #[]) fun acc r => match r with
     | some (c, _) => acc ++ c
     | none => acc
   let limited := (results.filter fun r => r.any (·.2)).size
   let left := (results.filter (·.isNone)).size
   IO.println s!"{path}: {todo.size} theorems, {left} with a shared conversion left out, {limited} stopped at a limit \
     (their nodes up to there counted), in {(← IO.monoMsNow) - start} ms"
-  IO.println s!"  {Prove.variantSummary counts}"
+  IO.println s!"  all variants: {Prove.variantSummary (nodes.map (·.variants))}"
+  for j in [0:depths.size] do
+    IO.println s!"  described to depth {depths[j]!}: {Prove.variantSummary (nodes.map (·.shaped[j]!))}"
+  if !depths.isEmpty then
+    IO.println s!"  nodes where the known proof's variant does not pass its description: \
+      {(nodes.filter (!·.kept)).size}"
   return 0
 
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/

@@ -1666,6 +1666,35 @@ lists the components.
 
   On the propositional and predicate calculus parts, every 10th theorem, the median
   is 203 and the largest 2,760.
+- **What a description of the next goals narrows, built 2026-10-16** (`prove variants
+  --shapes`, `nodeCounts`, `Exp.shape`):
+  - **The filter:** at each node on a known proof's path, the filter that describes the
+    known proof's variant without naming it. It gives the number of premises, and the
+    shape of each new goal to depth `d`: its terms and the theorem's variables down to
+    `d`, and a hole below that and for every variable of the tree. This is what an agent
+    could say if it knew what the next goals look like.
+  - **A check:** the known proof's variant passes its description at every node.
+  - **On set.mm, every 40th theorem (1,198 theorems, 42,582 nodes):**
+
+    | | median left | 90th percentile | 5 or fewer left |
+    |---|---|---|---|
+    | all variants | 983 | 8,958 | 0% |
+    | described to depth 1 | 114 | 1,064 | 9.2% |
+    | described to depth 2 | 32 | 802 | 25.8% |
+    | described to depth 3 | 16 | 725 | 39.5% |
+
+    On the propositional and predicate calculus parts, at depth 3, the median is 3 and
+    57.5% of nodes have 5 or fewer left.
+  - **The tail that stays wide:** 1.5% of nodes keep more than 10,000 variants at every
+    depth. In a sample of every 400th theorem (3,912 nodes), 375 nodes keep more than
+    1,000 at depth 3:
+    - 330 of them are steps without premises, for which a description says nothing.
+      The goals they close are often bare variables, which nearly every assertion fits;
+    - 14 have new goals that are all variables;
+    - 31 are other cases.
+
+    There an agent has to name the assertion (`name`, `scope`), or a ranking has to help:
+    the rank atom of "Mining and ranking".
 
 ### Open
 
@@ -1688,7 +1717,8 @@ lists the components.
 3. The DSL for both sorts: done 2026-10-16.
 4. Intermediate goals in the engine: done 2026-10-16.
 5. The front-ends: the MCP server done 2026-10-16; the human one to come.
-6. Filter quality measured on set.mm.
+6. Filter quality measured on set.mm: what a description of the next goals narrows,
+   done 2026-10-16; an agent's own filters, through the MCP server, to come.
 
 ### Mining and ranking (the design of 2026-10-13)
 

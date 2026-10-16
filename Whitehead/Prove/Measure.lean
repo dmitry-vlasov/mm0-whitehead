@@ -9,17 +9,51 @@ by a hypothesis of the theorem has nothing to choose, and is not counted.
 
 This is the baseline for filters. Measuring a filter needs someone who writes it, an
 agent; that comes with the front-ends.
+
+What the filters can do, without an agent: at each such node, the filter that says only
+what the new goals of the known proof's variant look like, to a depth — their premises'
+number, and each new goal's terms and the theorem's variables down to depth `d`, with a
+hole for everything below and for every variable of the tree. It never names the
+assertion. How many variants pass it, at depths 1, 2 and 3, is how far a description of
+the next goals narrows the choice. The known proof's variant always passes.
 -/
 import Whitehead.Prove.Replay
+import Whitehead.Prove.Filter
 
 namespace Whitehead.Prove
 
-/-- The variants of the goal nodes on the path of the known proof of statement `i` of the
-file, a theorem: for each node where a step is chosen, how many variants it has. `none`
-for a proof with a shared conversion; and whether the replay stopped at a limit, in
-which case the counts are of the nodes reached. -/
-def variantCounts (db : Db) (index : Index Nat) (limits : Limits) (i : Nat) :
-    IO (Option (Array Nat × Bool)) := do
+/-- The shape of `e` to depth `d`: its terms and constants down to depth `d`, a hole for
+what is below and for every variable. -/
+partial def Exp.shape (e : Exp) (d : Nat) : Exp :=
+  go 0 d
+where
+  go (i d : Nat) : Exp :=
+    let n := e.nodes[i]!
+    if d == 0 || Node.isVar n then ⟨#[holeNode]⟩
+    else if Node.isConst n then ⟨#[n]⟩
+    else Exp.mkApp (Node.appId n) (Node.ty n) ((e.argStarts i).map (go · (d - 1)))
+
+/-- The filter that describes assertion node `p` to depth `d`: its number of premises, and
+the shape of each of its new goals. -/
+def Env.shapeFilter (env : Env) (p : Nat) (d : Nat) : Filter :=
+  let v := env.propView p
+  .and (#[Filter.premises v.premises v.premises] ++ v.goals.get.map fun g => Filter.goal (g.shape d))
+
+/-- What is measured at a goal node on the path of a known proof: its variants, and with
+`depths`, how many of them pass the filter that describes the known proof's variant to
+each depth, and whether that variant passes. -/
+structure NodeCount where
+  variants : Nat
+  shaped : Array Nat := #[]
+  kept : Bool := true
+  deriving Inhabited
+
+/-- The goal nodes on the path of the known proof of statement `i` of the file, a theorem,
+where a step is chosen: what `NodeCount` says of each. `none` for a proof with a shared
+conversion; and whether the replay stopped at a limit, in which case the nodes are those
+reached. -/
+def nodeCounts (db : Db) (index : Index Nat) (limits : Limits) (depths : Array Nat) (i : Nat) :
+    IO (Option (Array NodeCount × Bool)) := do
   let s := db.file.stmts[i]!
   match db.skeleton s with
   | .error _ | .ok none => return none
@@ -27,15 +61,26 @@ def variantCounts (db : Db) (index : Index Nat) (limits : Limits) (i : Nat) :
     let env := Env.init db index (db.task s.index)
     let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
     let env := r.env
-    -- the goal nodes whose chosen variant was expanded, each once
     let mut seen : Std.HashSet Nat := {}
-    let mut counts := #[]
+    let mut out := #[]
     for p in [0:env.props.size] do
       let prop := env.props[p]!
       if prop.expanded && !seen.contains prop.parent then
         seen := seen.insert prop.parent
-        counts := counts.push env.hyps[prop.parent]!.children.size
-    return some (counts, r.ending == .limit)
+        let kids := env.hyps[prop.parent]!.children
+        let mut shaped := #[]
+        let mut kept := true
+        for d in depths do
+          let f := env.shapeFilter p d
+          shaped := shaped.push (kids.filter fun q => f.eval (env.propView q)).size
+          kept := kept && f.eval (env.propView p)
+        out := out.push { variants := kids.size, shaped, kept }
+    return some (out, r.ending == .limit)
+
+/-- `nodeCounts` without the filters: how many variants each node has. -/
+def variantCounts (db : Db) (index : Index Nat) (limits : Limits) (i : Nat) :
+    IO (Option (Array Nat × Bool)) := do
+  return (← nodeCounts db index limits #[] i).map fun (cs, limited) => (cs.map (·.variants), limited)
 
 /-- A summary of variant counts: how many nodes, the mean, quantiles, the largest, and how
 many fall in each decade (1, 2–10, 11–100, ...). -/
@@ -56,7 +101,8 @@ def variantSummary (counts : Array Nat) : String := Id.run do
   let labels := #["1", "2-10", "11-100", "101-1000", "1001-10000", "10001-100000", "more"]
   let pct (k : Nat) : String := s!"{k * 1000 / n / 10}.{k * 1000 / n % 10}%"
   let parts := (Array.range decades.size).map fun j => s!"{labels[min j 6]!}: {decades[j]!} ({pct decades[j]!})"
+  let few := (sorted.filter (· ≤ 5)).size
   return s!"{n} nodes; variants per node: mean {sum / n}, median {q 1 2}, 90% {q 9 10}, 99% {q 99 100}, \
-    largest {sorted.back!}\n  {", ".intercalate parts.toList}"
+    largest {sorted.back!}; 5 or fewer: {pct few}\n  {", ".intercalate parts.toList}"
 
 end Whitehead.Prove
