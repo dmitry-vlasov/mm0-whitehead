@@ -1523,6 +1523,46 @@ lists the components.
   to be proved backward or reached by the forward frontier.
 - **New:** Russell has no counterpart.
 
+**As built (2026-10-16; `Forward.lean`, `offerHint` in `Expand.lean`, `Session.goal`):**
+
+- **S is a goal node of its own.** It has no parent, is expanded backward like the
+  root, and is recorded in the backward front so that a fact can reach it. A session
+  without a forward front gets an empty one, with the subgoals already made recorded
+  (`Env.withForward`). So S is on the backward frontier from the moment it is offered:
+  it is proved backward, by choices or runs in its tree, or reached by a fact.
+- **Each proof of S becomes a fact of the forward front** (`takeHints`). A proof is
+  taken at S's node, as root proofs are taken at the root. From there S is used as any
+  fact is:
+  - in the proof of the main goal, through the joins with the goal and the subgoals;
+  - forward, as an input of deductions.
+
+  A new subgoal is joined with every fact of an intermediate goal that unifies with it,
+  whatever the join cap says, since an agent offered it.
+- **Holes:** written in `.mm0` notation, S may have holes. Each hole is a new
+  metavariable of the sort of its argument, and the proof of S finds its value
+  (`Notation.formula`).
+- **A guard against loops** (`HypNode.deps`, `Env.mayJoin`):
+  - Each fact records the intermediate goals its proof depends on. A fact is never
+    joined into the tree of an intermediate goal that it depends on.
+  - Without the guard, the fact of S would prove subgoals of S's own tree that unify
+    with S, which gives S new proofs, each a new fact, without end.
+  - What the guard leaves out is a proof of S that contains a proof of the same
+    statement. The engine without intermediate goals reaches those steps by expanding
+    the subgoal, so hints only add proofs.
+  - A second intermediate goal may use the first, but not the other way round once the
+    second depends on the first.
+- **Batch searches are unchanged.** Without intermediate goals the engine does what it
+  did: the node-limited comparison on the set.mm sample, before and after, is identical
+  for `bfs`, `both` and `forward`.
+- **Not built: the use of S before it is proved.** The main goal can follow from S
+  while S itself is still open. Seeing that would need proofs with S as an assumption
+  at a leaf.
+  - A node keeps one proof per key (`proofKey`). A conditional proof with the key of a
+    real one would make the real one a duplicate and drop it.
+  - So the key would have to carry the assumptions used, which changes the keyed engine
+    that `THEORY.md` proves.
+  - Open point 6.
+
 ### The session
 
 - **The tree persists between requests,** with stable node numbers. Built on
@@ -1545,7 +1585,8 @@ lists the components.
     expanded (`Session.start` with `forward`). A strategy that goes forward is not run
     in a session yet: a wave that a limit stops leaves the facts it had not expanded
     off the front;
-  - `goal(S)` offers an intermediate goal;
+  - `goal(S)` offers an intermediate goal (`Session.goal`, `goalText`; built
+    2026-10-16);
   - `run(tactic)` runs a tactic within its limits;
   - a view of the tree and of the frontier;
   - `proof()` extracts the proof as `.mmb`, checked by the verifier.
@@ -1607,6 +1648,9 @@ lists the components.
    not block the session.
 4. How a human moves about in a huge tree. The goal panel is a first variant only.
 5. Whether a session is recorded as a file of DSL lines.
+6. Whether an intermediate goal should be usable before it is proved: whether the
+   agent should see that the main goal follows from S while S is still open
+   ("Intermediate goals", "Not built").
 
 ### Order of building (a proposal)
 
@@ -1614,7 +1658,7 @@ lists the components.
 2. The first filter atoms and combinators, and a `Strategy` that takes a filter: done
    2026-10-16.
 3. The DSL for both sorts: done 2026-10-16.
-4. Intermediate goals in the engine.
+4. Intermediate goals in the engine: done 2026-10-16.
 5. The front-ends.
 6. Filter quality measured on set.mm.
 

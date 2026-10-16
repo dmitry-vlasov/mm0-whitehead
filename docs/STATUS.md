@@ -21,7 +21,10 @@ second and third steps: filters over variants and deductions, with patterns in `
 notation, and one language for tactics and filters (`Prove/Filter.lean`,
 `Prove/Dsl.lean`). And the baseline of what filters have to narrow: on set.mm the median
 goal node on a known proof's path has 988 variants, and 1% have over 33,000
-(`prove variants`, `DESIGN.md`, "Measurement").
+(`prove variants`, `DESIGN.md`, "Measurement"). Then the fourth step, intermediate
+goals: an agent's hint S is a goal node of its own, and each proof of S becomes a fact,
+used in the main goal's proof through the joins and forward (`DESIGN.md`,
+"Intermediate goals").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -367,7 +370,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,008 checks, 0 failures, in 19 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,024 checks, 0 failures, in 19 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -407,6 +410,10 @@ corpus of `scripts/build-corpus.sh` built — 1,008 checks, 0 failures, in 19 se
   fixes; tactics restricted by a scope, by a size and by a depth, and in sequence; the
   reading of the language, with 14 malformed texts and their messages; and the count
   of the variants on a known proof's path.
+- Prover, intermediate goals: one proved by a choice and used in the main goal's
+  proof, offered before and after the choice that needs it; one with a hole, which its
+  proof fills; one reached by a deduction; two in a chain; the guard, under a
+  breadth-first run; and the errors of reading one.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -458,7 +465,11 @@ of the first two parts) with a node limit and no time limit: `bfs`, `both` and
 `forward` give the same result for every theorem, and byte-identical `.mmb` files.
 After the filters and the language (holes in the formula parser, `Db.binderImage`
 taken out of `Db.task`), run again: 153 checks, 0 failures, 1 skip, and the counts back
-at those of 2026-10-12 (backward 138 of 281, peano 90 of 270, both 167 of 281).
+at those of 2026-10-12 (backward 138 of 281, peano 90 of 270, both 167 of 281). After
+intermediate goals: 153 checks, 0 failures, 1 skip; backward 134 of 281. The search
+backward with 1 s each, run three times with the binary before and after, gave 137,
+136, 135 and 136, 135, 136: the count moves by a few theorems from run to run, and the
+node-limited comparison is identical.
 
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
@@ -537,7 +548,7 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    search once ran for minutes past its limit, has not been measured again.
 4. Phase 4: build in the order of `DESIGN.md` ("Phase 4", "Order of building"),
    Done: the resumable search and the session operations, backward (`choose`) and
-   forward (`deduce`); the filters; and the language. Next: intermediate goals in the
-   engine (step 4), then the MCP front-end, the simpler one, which comes first.
-   Open: how a human moves about in a huge tree, and whether a session is recorded as
-   a file.
+   forward (`deduce`); the filters; the language; and intermediate goals. Next: the
+   MCP front-end, the simpler one, which comes first. Open: how a human moves about in
+   a huge tree; whether a session is recorded as a file; whether an intermediate goal
+   should be usable before it is proved.

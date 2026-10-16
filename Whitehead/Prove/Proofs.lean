@@ -351,9 +351,11 @@ partial def buildPropProofs (p : Nat) (proofs : Array Proof) : ProverM Unit := d
   match parent with
   | some _ => buildExpProofs h added
   | none =>
-    -- `ruBuildRootProofs`: the driver takes them from here. (A node of the forward
-    -- front has no parent either; its proofs go nowhere.)
+    -- `ruBuildRootProofs`: the driver takes them from here. The goal node of an
+    -- intermediate goal has no parent either: its proofs become facts (`takeHints`).
+    -- (A node of the forward front has no parent; its proofs go nowhere.)
     if h == 0 then modify fun env => { env with rootProofs := env.rootProofs ++ added }
+    else if env.hints.contains h then modify fun env => { env with hintProofs := env.hintProofs ++ added }
 
 /-- `ruBuildExpProofs`: the new proofs `proofs` of expression node `h` are joined with
 those of its siblings. -/

@@ -66,6 +66,9 @@ structure Forward where
   /-- The applications that have been made: the assertion, and the fact for each of its
   hypotheses. The same application is not made again (`applyForward`). -/
   applied : Std.HashSet (Array Nat) := {}
+  /-- The facts made from the proofs of intermediate goals. A new subgoal is joined with
+  every one of them that unifies with it, whatever `joinCap` says. -/
+  hintFacts : Array Nat := #[]
   deriving Inhabited
 
 structure Env where
@@ -102,6 +105,12 @@ structure Env where
   fresh : Nat := freshBase
   /-- The proofs that reached the root and have not been taken by the driver yet. -/
   rootProofs : Array Proof := #[]
+  /-- The goal nodes of the intermediate goals, in the order they were offered: nodes
+  without a parent, expanded backward like the root (`offerHint`). -/
+  hints : Array Nat := #[]
+  /-- The proofs that reached the goal node of an intermediate goal and have not been
+  made facts yet (`takeHints`). -/
+  hintProofs : Array Proof := #[]
   counters : Counters := {}
   /-- The largest number of tuples of proofs that unify — proofs to be made — that
   `addProof` may join in the whole search. When a join would go past it, nothing of it

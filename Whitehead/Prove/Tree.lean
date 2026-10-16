@@ -179,6 +179,9 @@ structure HypNode where
   which Russell calls at every use). A fact has one proof: another derivation of the
   same statement is another fact. -/
   factProof : Option ProofTree := none
+  /-- For a fact: the intermediate goals its proof depends on, by their number in
+  `Env.hints` (`Forward.lean`, "Intermediate goals"). -/
+  deps : Array Nat := #[]
   deriving Inhabited
 
 /-- The canonical form of a substitution, as a key (`ruProofSubKey`). -/

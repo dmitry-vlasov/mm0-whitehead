@@ -52,6 +52,17 @@ What differs from Russell:
   in scope and then finds the front over its limit, so that no wave runs.
 - One application is held to the room that the front has left (`applyForward`). In
   Russell the limit is looked at between applications only.
+
+Intermediate goals (`docs/DESIGN.md`, "Phase 4", "Intermediate goals"; Russell has none).
+An intermediate goal S, which an agent offers as a hint, is a goal node of its own,
+without a parent, expanded backward like the root and recorded in the backward front,
+so that a fact can reach it (`offerHint` in `Expand.lean`). Every proof that S gets,
+backward or from a fact, becomes a fact of the front (`takeHints`): from there S is
+used as any fact is, in the proof of the main goal through the joins, and forward.
+A fact is never joined into the tree of an intermediate goal that its proof depends on
+(`HypNode.deps`), or the fact of S would prove S again, and every new proof of S would
+make another fact without end. Such a proof contains a proof of the same statement of
+S, so the tree without intermediate goals has its steps; hints only add proofs.
 -/
 import Whitehead.Prove.Proofs
 
@@ -93,16 +104,49 @@ def graft (f h : Nat) (pattern : Exp) (pre : Subst := {}) : ProverM (Option (Pro
     let full := pre.unsafeCompose s
     return some (.forward h (s.apply target) (restrict full pattern) (tree.subst s) (conds.map (·.subst s)) f, full)
 
+/-- The intermediate goal whose tree node `h` is in, by its number in `Env.hints`: the
+goal node of the tree is found by following the parents. `none` in the main tree, and
+for a fact. -/
+def Env.hintOf (env : Env) (h : Nat) : Option Nat := Id.run do
+  if env.hints.isEmpty then return none
+  let mut h := h
+  for _ in [0:env.hyps.size] do
+    if let some k := env.hints.findIdx? (· == h) then return some k
+    match env.hyps[h]!.parent with
+    | some p => h := env.props[p]!.parent
+    | none => return none
+  return none
+
+/-- The intermediate goals that a proof depends on: those of the facts at its leaves. -/
+partial def Proof.hintDeps (env : Env) : Proof → Array Nat
+  | .top .. => #[]
+  | .stmt _ _ _ c => c.hintDeps env
+  | .prop _ _ cs _ => cs.foldl (init := #[]) fun acc c =>
+      (c.hintDeps env).foldl (init := acc) fun acc k => if acc.contains k then acc else acc.push k
+  | .forward _ _ _ _ _ f => env.hyps[f]!.deps
+
+/-- May fact `f` be joined with subgoal `h`? Not if `h` is in the tree of an intermediate
+goal that the fact depends on. -/
+def Env.mayJoin (env : Env) (f h : Nat) : Bool :=
+  match env.hintOf h with
+  | some k => !env.hyps[f]!.deps.contains k
+  | none => true
+
 /-- `ruFwdRegister`: a new fact with the expression `expr`, and the proof that `proof`
 makes for the number of its node. Every derivation is registered: there is no set of
-the statements that are known already. -/
-def addFact (expr : Exp) (proof : Nat → Proof) (children : Array Nat) : ProverM (Option Nat) := do
+the statements that are known already. The fact depends on the intermediate goals that
+its proof does, and on `deps`. -/
+def addFact (expr : Exp) (proof : Nat → Proof) (children : Array Nat) (deps : Array Nat := #[]) :
+    ProverM (Option Nat) := do
   let env ← get
   let some fwd := env.forward | return none
   let f := env.hyps.size
   let tree := makeProofTree env (proof f)
+  let deps := if env.hints.isEmpty then #[] else
+    (proof f).hintDeps env |>.foldl (init := deps) fun acc k => if acc.contains k then acc else acc.push k
   set { env with
-    hyps := env.hyps.push { ind := 0, expr, parent := none, children, proofs := #[proof f], factProof := some tree },
+    hyps := env.hyps.push { ind := 0, expr, parent := none, children, proofs := #[proof f], factProof := some tree,
+                            deps },
     forward := some { fwd with index := fwd.index.insert expr f, front := fwd.front.push f, count := fwd.count + 1 },
     counters := { env.counters with facts := env.counters.facts + 1 } }
   return some f
@@ -135,10 +179,18 @@ def joinRoot (f : Nat) : ProverM (Array Nat) := do
     env.admitJoin env.hyps[f]!.expr env.hyps[h]!.expr
 
 /-- `ruReverseJoin`, the second part: the fact `f` as a proof of the subgoal `h`, put on
-the subgoal and carried down the tree. -/
+the subgoal and carried down the tree. The goal node of an intermediate goal has no
+parent: the proof waits there to become a fact (`takeHints`). -/
 def joinSubgoal (f h : Nat) : ProverM Unit := do
   let env ← get
-  let some p := env.hyps[h]!.parent | return
+  if !env.mayJoin f h then return
+  let some p := env.hyps[h]!.parent
+    | if env.hints.contains h then
+        if let some (proof, _) ← graft f h env.hyps[h]!.expr then
+          modify fun env =>
+            { env with hyps := env.hyps.modify h fun hyp => { hyp with proofs := hyp.proofs.push proof },
+                       hintProofs := env.hintProofs.push proof,
+                       counters := { env.counters with joins := env.counters.joins + 1 } }
   if let some (proof, _) ← graft f h env.hyps[h]!.expr then
     let before := (← get).props[p]!.proofs.size
     modify fun env =>
@@ -147,6 +199,31 @@ def joinSubgoal (f h : Nat) : ProverM Unit := do
     addProof p proof
     let all := (← get).props[p]!.proofs
     buildPropProofs p (all.extract before all.size)
+
+/-- Fact `f` joined with the goal and with every subgoal that it unifies with and that
+the strategy admits, each join to its end (`joinFacts` in `Prove.lean` is the same with
+the clock looked at). -/
+def joinAll (f : Nat) : ProverM Unit := do
+  for h in ← joinRoot f do
+    joinSubgoal f h
+
+/-- The proofs that reached the goal nodes of intermediate goals become facts, each joined
+with the goal and the subgoals; until no more come, since a join can prove another
+intermediate goal. A fact of intermediate goal `k` depends on `k`, which keeps it out of
+the tree of `k`. Returns the facts made. -/
+partial def takeHints : ProverM (Array Nat) := do
+  let env ← get
+  if env.hintProofs.isEmpty then return #[]
+  let proofs := env.hintProofs
+  set { env with hintProofs := #[] }
+  let mut made := #[]
+  for proof in proofs do
+    let some k := (← get).hints.findIdx? (· == proof.node) | continue
+    if let some f ← addFact proof.expr (fun _ => proof) #[] #[k] then
+      modify fun env => { env with forward := env.forward.map fun fwd => { fwd with hintFacts := fwd.hintFacts.push f } }
+      joinAll f
+      made := made.push f
+  return made ++ (← takeHints)
 
 /-- The variables of an assertion replaced by fresh ones. -/
 def freshVars (a : Assertion) : ProverM Subst := do

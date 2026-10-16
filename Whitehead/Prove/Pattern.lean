@@ -86,6 +86,39 @@ def pattern (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos
   let e ← parseMath c m .any
   return n.toExp vars args.size e
 
+/-- An expression of the specification as a statement of the prover, in which a hole is
+a new variable: the `j`-th hole is variable `fresh + j`, with the type of the argument
+it stands in (`ty` for the whole). The state counts the holes. -/
+partial def toFormula (n : Notation) (vars : Nat → Exp) (hole fresh : Nat) (ty : Nat) :
+    Mm0.Expr → StateM Nat Exp
+  | .var i => do
+    if i == hole then
+      let j ← modifyGet fun j => (j, j + 1)
+      return Exp.ofVar (Node.var (fresh + j) ty)
+    else return vars i
+  | .app t args => do
+    let decl := n.st.env.terms[t]!
+    let mut out := #[]
+    for k in [0:args.size] do
+      let b := decl.args[k]!
+      out := out.push (← toFormula n vars hole fresh (Ty.mk b.sort b.bound) args[k]!)
+    return Exp.mkApp n.terms[t]! (Ty.mk decl.retSort false) out
+
+/-- Reads the statement `text`, the inside of `$ ... $`, for theorem `thm` of the proof
+file, as `pattern` does; but a hole `_` is a new variable, a metavariable, numbered from
+`fresh` on. Returns the statement and the number of holes. A statement of a provable
+sort is asked for, as for a theorem. -/
+def formula (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos fresh : Nat) :
+    Except ParseError (Exp × Nat) := do
+  let some t := n.specThm thm
+    | throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
+  let args := n.st.env.thms[t]!.args
+  let c := { Elab.mathCtx n.st args with hole := some args.size }
+  let m : MathString := { text, span := ⟨pos, pos + text.utf8ByteSize + 2⟩ }
+  let e ← parseMath c m .provable
+  if e == .var args.size then throw ⟨pos, "a statement that is only a hole has no sort"⟩
+  return (n.toFormula vars args.size fresh 0 e).run 0
+
 end Notation
 
 /-! ### Matching -/

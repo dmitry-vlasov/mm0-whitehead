@@ -520,6 +520,7 @@ partial def searchLoop {σ : Type} (accept : Env → ProofTree → Array Cond �
       return rej.result env (if env.overBudget then .limit else .exhausted) (stop := env.stop)
     | .forward =>
       let (env', more) ← forwardWave env limits start sid
+      let env' ← if env'.hintProofs.isEmpty then pure env' else do pure ((← takeHints.run env')).2
       let (found, rej', env') := takeFound accept env' rej
       env := env'
       rej := rej'
@@ -536,6 +537,9 @@ partial def searchLoop {σ : Type} (accept : Env → ProofTree → Array Cond �
         if let some stop ← overNow env limits start sid then return rej.result env .limit (stop := stop)
         let (_, env') ← (proveProp p only).run env
         env := env'
+        -- an intermediate goal proved: its proofs become facts (a session's; none here
+        -- otherwise)
+        if !env.hintProofs.isEmpty then env := ((← takeHints.run env)).2
         if !env.rootProofs.isEmpty then
           let (found, rej', env') := takeFound accept env rej
           env := env'

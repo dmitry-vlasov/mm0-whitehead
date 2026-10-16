@@ -185,9 +185,12 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
       if (← get).forward.isSome && restriction.isNone then
         modify fun env => { env with backwardFront := env.backwardFront.insert ex h }
         let env ← get
-        let found := ((env.forward.map (·.index.unify ex)).getD #[]).map (·.data)
+        let found := ((env.forward.map (·.index.unify ex)).getD #[]).map (·.data) |>.filter (env.mayJoin · h)
         let size (f : Nat) : Nat := (env.hyps[f]!.factProof.map (·.size)).getD 0
         let nearest := (found.qsort fun a b => size a < size b || size a == size b && a < b).extract 0 env.joinCap
+        -- and the facts of the intermediate goals, every one: an agent offered them
+        let hintFacts := (env.forward.map (·.hintFacts)).getD #[]
+        let nearest := nearest ++ (found.filter fun f => hintFacts.contains f && !nearest.contains f).qsort (· < ·)
         for f in nearest do
           if let some (proof, _) ← graft f h ex then
             modify fun env =>
@@ -195,6 +198,21 @@ def expandProp (p : Nat) (only : Option (Array Only) := none) : ProverM Unit := 
                          counters := { env.counters with joins := env.counters.joins + 1 } }
             addProof p proof
       expandHyp h restriction
+
+/-- An intermediate goal `expr` (`Forward.lean`, "Intermediate goals"): a goal node of its
+own, without a parent, recorded in the backward front and expanded like the root. The
+facts that unify with it prove it at once, those that do not depend on it. Needs the
+forward front. Returns the node. The proofs it gets are made facts by `takeHints`. -/
+def offerHint (expr : Exp) : ProverM Nat := do
+  let h := (← get).hyps.size
+  modify fun env =>
+    { env with hyps := env.hyps.push { ind := 0, expr, parent := none }, hints := env.hints.push h,
+               backwardFront := env.backwardFront.insert expr h }
+  let env ← get
+  for f in ((env.forward.map (·.index.unify expr)).getD #[]).map (·.data) do
+    joinSubgoal f h
+  expandHyp h
+  return h
 
 /-- `ruProveProp`: expands an assertion node, and carries the proofs that this gives it
 down the tree. -/

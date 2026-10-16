@@ -8,7 +8,8 @@ It never asks the agent for a substitution.
 
 Backward, the agent chooses variants of a goal node (`choose`). Forward, it chooses
 facts, at least one of them on the front, and the engine makes every deduction from
-them (`deduce`). Russell's interactive prover drives its backward tree in the same way
+them (`deduce`). And it offers intermediate goals (`goal`): hints that may lead to a
+proof (`Forward.lean`, "Intermediate goals"). Russell's interactive prover drives its backward tree in the same way
 (`prove-expand`, `prove-candidates` in `russell-flow/src/ru/prover/commands`).
 -/
 import Whitehead.Prove.Dsl
@@ -65,13 +66,13 @@ def variant (s : Session) (p : Nat) : Variant :=
     | .conv t _ unfold => s!"{if unfold then "unfold" else "fold"} {s.env.db.terms[t]!.name}"
   { prop := p, step := prop.step, name, expanded := prop.expanded, goals := prop.children }
 
-/-- Is `h` a goal node of the backward tree: the root, or a premise of an assertion node
-of that tree? A fact of the forward front is an expression node without a parent, and
-the hypotheses of an application forward lead up to a fact, not to the root. -/
+/-- Is `h` a goal node of a backward tree: of the main goal's, or of an intermediate
+goal's? A fact of the forward front is an expression node without a parent, and the
+hypotheses of an application forward lead up to a fact, not to a goal. -/
 def isGoal (s : Session) (h : Nat) : Bool := Id.run do
   let mut h := h
   for _ in [0:s.env.hyps.size] do
-    if h == 0 then return true
+    if h == 0 || s.env.hints.contains h then return true
     match s.env.hyps[h]? with
     | some { parent := some p, .. } => h := s.env.props[p]!.parent
     | _ => return false
@@ -86,6 +87,12 @@ def isFact (s : Session) (f : Nat) : Bool :=
 /-- The facts, in the order they were made. -/
 def facts (s : Session) : Array Nat :=
   (Array.range s.env.hyps.size).filter s.isFact
+
+/-- The goal nodes of the intermediate goals, in the order they were offered. -/
+def hints (s : Session) : Array Nat := s.env.hints
+
+/-- The facts made from the proofs of the intermediate goals. -/
+def hintFacts (s : Session) : Array Nat := (s.env.forward.map (·.hintFacts)).getD #[]
 
 /-- The facts on the front: those not expanded forward yet, without a restriction. -/
 def front (s : Session) : Array Nat :=
@@ -154,7 +161,7 @@ def choose (s : Session) (h : Nat) (props : Array Nat) : IO (Except String Sessi
   let mut found := found
   for p in props do
     let (_, env') ← (proveProp p none).run env
-    env := env'
+    env := ((← takeHints.run env')).2
     if !env.rootProofs.isEmpty then
       let (f, rej', env') := takeFound accept env rej
       env := env'
@@ -190,8 +197,43 @@ def deduce (s : Session) (chosen : Array Nat) : IO (Except String (Session × Ar
         for h in targets do
           env := ((← (joinSubgoal g h).run env)).2
       made := made ++ new
+  env := ((← takeHints.run env)).2
   let (f, rej, env') := takeFound accept env rej
   return .ok ({ accept, env := env', rej, found := found <|> f, sid, maxFacts }, made)
+
+/-- The forward front, for a session that started without it: empty, with the subgoals of
+the backward tree recorded for the facts to come, as `expandProp` records each new one
+when there is a front. -/
+def _root_.Whitehead.Prove.Env.withForward (env : Env) : Env := Id.run do
+  if env.forward.isSome then return env
+  let mut front := env.backwardFront
+  for h in [1:env.hyps.size] do
+    if env.hyps[h]!.parent.isSome then front := front.insert env.hyps[h]!.expr h
+  return { env with forward := some {}, backwardFront := front }
+
+/-- Offers the intermediate goal `expr` (`offerHint`): a goal node of its own, expanded
+like the root, and returned. Every proof it gets, by choices, runs and deductions,
+becomes a fact, joined with the goal and the subgoals of the main tree. A session
+without a forward front gets an empty one. -/
+def goal (s : Session) (expr : Exp) : IO (Except String (Session × Nat)) := do
+  if s.env.overBudget then return .error "a join of this tree was cut short: it is missing proofs"
+  let { accept, env, rej, found, sid, maxFacts } := s
+  let (h, env) ← (offerHint expr).run env.withForward
+  let (_, env) ← takeHints.run env
+  let (f, rej, env) := takeFound accept env rej
+  return .ok ({ accept, env, rej, found := found <|> f, sid, maxFacts }, h)
+
+/-- `goal` for a statement in the notation of the specification, the inside of
+`$ ... $`; a hole `_` is a new metavariable. `metas` are the binders of the theorem
+marked as metavariables in its task. -/
+def goalText (s : Session) (spec : Notation) (text : String) (metas : Array Nat := #[]) :
+    IO (Except String (Session × Nat)) := do
+  let ctx := s.dslCtx (some spec) metas
+  match spec.formula ctx.thm ctx.vars text 0 s.env.fresh with
+  | .error e => return .error (Dsl.ParseError.show text e)
+  | .ok (expr, holes) =>
+    let s := { s with env := { s.env with fresh := s.env.fresh + holes } }
+    s.goal expr
 
 /-- Runs a strategy on the tree as it is, from the strategy's initial state, until it
 accepts a proof, has nothing more to do, or reaches a limit. The time is counted from
