@@ -1629,6 +1629,9 @@ lists the components.
       to the same expression.
   - **Proofs:** `proof` lists the proof as numbered steps, each with the steps it uses
     and its statement, checked by the verifier.
+  - **A bridge for a shell** (`scripts/mcp-bridge.py`): it keeps one server up behind a
+    port of 127.0.0.1, and each `call <tool> '<json>'` prints one result. It serves an
+    agent that has a shell but no MCP client, and trying the server by hand.
 - **The human UI, a first variant (decided 2026-10-16): a goal panel.** It is a webview
   beside the editor that shows one goal node at a time:
   - the path from the root, which is also the way back;
