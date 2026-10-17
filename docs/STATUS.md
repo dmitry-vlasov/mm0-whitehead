@@ -57,6 +57,11 @@ breadth-first:
 
 All proofs were checked by the verifier. Rails ranked by occurrences alone lose
 (`DESIGN.md`, "How much it helps").
+
+The composable tactics are proposed (`DESIGN.md`, "Composable tactics"), after a reading
+of Russell's tactics: one search atom with a cost for its order, guides followed, a
+combinator by order, and the stamps through which atoms speak. `rails` becomes a
+definition. The author's answers are awaited.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -601,7 +606,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    server; what a description of the next goals narrows on set.mm; and the first
    rank, by uses; two pilots, seven theorems proved by an agent, the second with the
    names hidden; and the replay of subproofs as rails, +54% proved on set.mm at 1 s.
-   Next: ranks for the rails that open goals (the ranking layer); the human front-end;
+   Next: the composable tactics, once the author has answered (`DESIGN.md`,
+   "Composable tactics"); ranks for the rails that open goals (the ranking layer); the human front-end;
    and a pilot at a larger scale, with counts per decision, for the dataset. Open: how a human moves
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one

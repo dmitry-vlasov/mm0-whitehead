@@ -1511,6 +1511,136 @@ lists the components.
 - **Russell's selectors** (`all`, `frontier`, `leaf(id)`, `assertion(name)`, for `focus`
   and `track`) choose nodes; filters choose the variants of a node. They are not ported.
 
+### Composable tactics (a proposal of 2026-10-17)
+
+The author's request: tactics made of atoms with simple meanings, put together by
+combinators in the DSL. `replay` and `rails` were built to measure a concept. This is
+proposed, not built; the questions are at the end.
+
+#### What Russell has
+
+Checked on 2026-10-17 in `russell-flow`.
+
+- **The author's own engine** (2021–2025, `prover/tactics.flow` and `prover/controls.flow`
+  at b65b0b9a):
+  - a tactic, `RuProverTactic(description, expand, finished)`, chooses the leaves to expand
+    and says when it is finished;
+  - `RuProverStrategy(initTactic, nextTactic)` puts tactics one after another;
+  - the atoms are `ruBreadthFirstTactic`, `ruGiveupTactic`, and `ruLimitTactic`, which
+    limits the time and the counts;
+  - `ruFollowProofTactic` (`tactics/follow_proof.flow`, 2021) follows one proof tree. It
+    maps the proof's steps to the variants of the tree, by assertion, a level at a time;
+  - the replay of similar proofs was begun (`strategies/similar_proofs.flow`): an index of
+    every step of every proof, under a tactic that does not expand anything yet.
+- **Written in 2026 with Claude, so not authoritative:**
+  - one type, `RuProverTactic(toString, tag, step, keep_expanding)`, whose step is
+    Expand(leaves), ExpandForward, Switch(next) or Done (`core/controls.flow`);
+  - the DSL (`docs/tactics-language.md`):
+    - atoms: `bfs`, `forward`, `spr`, `linear-guided`, `oracle`, `ml`, `ap`,
+      `follow-proof`;
+    - combinators: `seq`, `or-else`, `loop`, `limited`, `focus`, `track`, `scoped`;
+    - selectors, guides and realizers (`replay(stored)`);
+    - derived tactics: compositions with parameters, in `.tac` files.
+- **`spr(attempts)`, the subproof replay, is one atom built of three parts**
+  (`tactics/subproof_replay.flow`). `ruIterateTactic` runs a driver that:
+  1. takes the deepest open leaf;
+  2. looks its goal up in the step index, leaving out the theorem's own steps
+     (`ruStepsForLeaf`);
+  3. follows each fragment found with `ruBoundedFollowProofTactic`.
+
+  The parts are not in the DSL, and `attempts` is the only parameter. `linear-guided` is
+  built the same way.
+- **Replay and breadth-first search are put together only one after the other.**
+  `spr-bfs.tac` is `limited(loop(seq(limited(spr(3), size=…), limited(bfs, …)), N),
+  size=…)`. That is our `seq(replay, bfs)`, which loses ("How much it helps").
+
+#### What composes, and what does not
+
+- **One question each round:** which leaves to expand now. Every atom answers it, and
+  every combinator combines answers. This is Russell's model, kept.
+- **Two ways of combining exist:** in time (`seq`, `loop`, `limited`), and in space
+  (`filter`, `focus`), which restricts the leaves.
+- **A third is missing: by order.** `rails` wins because the replay and breadth-first
+  search share one order, by cost. Neither time nor space can say that, so
+  `Strategy.rails` is one strategy that does four things:
+  - where subproofs go down;
+  - which subproofs;
+  - following them;
+  - the order of the search.
+
+#### The proposal
+
+- **Four sorts, each using only those before it:** filter, guide, cost, tactic.
+- **Filter** (built): a predicate over the variants of a node.
+- **Guide** (new): where the proof fragments for a goal come from:
+  - `subproofs(count, rank=, open=, min=, source=)`: the index of subproofs, as `replay`
+    takes them now;
+  - `proof`: the theorem's own proof, as `oracle` follows it (`Prove.lean`);
+  - later: linear chains, and the proofs of intermediate goals.
+- **Cost** (new): the order of the leaves:
+  - `depth`: the number of assertion nodes above a leaf, the leaf included;
+  - `depth(free=A, penalty=N)` is the cost of `rails`:
+    - a node that atom A expanded costs nothing;
+    - an alternative at a goal where such a node hangs costs its full depth;
+    - a goal that A left open costs N more;
+  - later: the ranks of the ranking layer.
+- **Tactic atoms, one meaning each:**
+  - `search(c)`: each round, the unexpanded leaves of the least cost `c`. `bfs` is
+    `search(depth)`;
+  - `follow(g, at=root|open, upto=N, ground, chain)`: the variants that the fragments
+    of `g` name, at the goals chosen, step by step, and nothing else. It is Russell's
+    `follow-proof` over many fragments;
+  - `forward` and `done`, as now.
+- **Combinators:**
+  - in time: `seq`, `loop`, `limited`, as now;
+  - in space: `filter`, `focus`, as now;
+  - by order, new: `first(t1, t2, ...)`, which each round runs the first that has
+    something to expand;
+  - in turns: `both(t1, t2)`, a round of each in turn. `both` as it is now becomes
+    `both(bfs, forward)`.
+- **Atoms share no state; they speak through the tree.**
+  - The search loop stamps each assertion node with the atom that expanded it, and
+    `depth(free=follow)` reads the stamps. Russell's `tag` does this, for statistics.
+  - The session stamps an agent's choices `choose`. So `search(depth(free=choose))`
+    goes on first from what the agent chose.
+- **Definitions** are named compositions with parameters, as Russell's `.tac` files.
+  The built-in tactics become a prelude:
+  - `bfs = search(depth)`;
+  - `replay(...) = follow(subproofs(...), at=open, chain)`;
+  - `rails(n, ...) = first(follow(subproofs(n, ...), at=open, upto=U, ground),
+    search(depth(free=follow, penalty=P)))`.
+- **Completeness is a property of the cost.** `search(c)` is fair when, for every N,
+  only finitely many leaves cost N or less.
+  - `depth` is fair.
+  - `depth(free=follow)` is fair too: each fragment is finite, and without `chain` no
+    fragment goes down at a goal that a fragment left open.
+- **Not ported:**
+  - `or-else` is `seq` here, since building a tactic costs nothing;
+  - `track` is `follow`;
+  - `scoped` is `filter(scope(...), t)`;
+  - `iterate` is inside `follow`.
+- **Mining and ranking** become guides and costs, besides the filter atoms they are now
+  (CLAUDE.md, "Phase 4").
+
+#### Order of building
+
+1. The stamps. The trees do not change (the diff tests).
+2. Costs and `search`. `search(depth)` builds the tree of `bfs`, round for round.
+3. Guides and `follow`. `follow` builds the tree of `replay`.
+4. `first`. The prelude's `rails` builds the trees of `Strategy.rails`, on the fixture
+   and in the node-limited runs on set.mm. Then `Strategy.rails` goes.
+5. Definitions, and the prelude.
+6. The thorough tests.
+
+#### Questions
+
+1. **BFS with parameters:** do you mean one search atom whose parameter is the order,
+   `bfs` = `search(depth)`? Or should its parameters be others, such as a filter, a
+   scope or limits? (These are combinators now: `filter(f, bfs)`, `limited(bfs, ...)`.)
+2. **The stamps** change the search loop, not the expansion. Is that acceptable?
+3. **Definitions:** a prelude file in the repository, like Russell's `tactics/*.tac`. May
+   an agent also define its own in a session?
+
 ### Intermediate goals
 
 - **What it is:** an expression S offered by a user, who may be a human, an AI, or an
@@ -1804,6 +1934,7 @@ lists the components.
    ("Intermediate goals", "Not built").
 7. Whether a choice at one sibling should narrow the variants shown at the others, by
    the bindings of the proofs joined at their parent ("The first pilot").
+8. The composable tactics: the questions of "Composable tactics".
 
 ### Order of building (a proposal)
 
