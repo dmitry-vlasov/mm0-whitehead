@@ -25,6 +25,7 @@ import Whitehead.Prove.Dsl
 import Whitehead.Prove.Measure
 import Whitehead.Prove.Show
 import Whitehead.Prove.Uses
+import Whitehead.Prove.Subproofs
 import Whitehead.Json
 import Whitehead.Mcp.Tools
 import Whitehead.Mcp.Server

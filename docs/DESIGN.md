@@ -1881,6 +1881,60 @@ the true proof.
 - **Measured first:** on set.mm, at the nodes of known proofs, how often a rail from an
   earlier theorem reaches the premises, and how often a rail lies along the known proof.
 
+**Is it feasible to cover every distinct subproof by a lemma?** The author's question of
+2026-10-17. Measured the same day (`prove subproofs`, `Prove/Subproofs.lean`).
+
+- **What counts as a subproof decides it.**
+  - The subproof below a node (everything down to the theorem's hypotheses) is
+    feasible.
+  - Any connected piece of a proof, cut anywhere, is not: each branch can be kept or
+    cut off into a hypothesis, so the pieces grow exponentially with the size of the
+    proof.
+  - Bounded pieces are feasible: chains of up to 6 steps are 190,000 to 350,000
+    distinct ones per length (the chains report of 2026-10-13).
+- **The subproofs below a node, hash-consed across set.mm:**
+  - **Count:** 47,611 proofs with 3,508,182 steps (counting a shared subproof each time
+    it is used) have 664,589 distinct subproofs. By size:
+
+    | steps | distinct subproofs |
+    |---|---|
+    | 1 | 28,876 |
+    | 2–5 | 202,566 |
+    | 6–20 | 247,718 |
+    | 21–100 | 138,358 |
+    | 101–1,000 | 43,253 |
+    | more | 3,818 |
+
+  - **The lemmas:** each subproof's most general lemma is made from its children's in
+    one unification each. All 664,589 are made, in 11 s for the whole file. 158 have a
+    bare variable for a conclusion. There are 615,612 distinct statements.
+  - **Coverage:** the share of steps that lie inside a subproof which an earlier
+    theorem's proof already has, and which one lemma step would therefore take:
+    - 43.2% with each subproof counted once per proof (the author's rule, answer 5);
+    - 63.0% counting every use;
+    - 22.1% of the nodes of 2 steps or more are such a subproof;
+    - 670 proofs (1.4%) are, whole, a subproof of an earlier proof.
+  - **Recurring subproofs:** 78,877 distinct subproofs occur in two proofs or more
+    (1.6 times the assertions), and 7,910 in ten or more. Those that two earlier proofs
+    have cover 36.5% of the steps, each subproof once per proof (56.0% counting every
+    use).
+  - **The cost in variants,** at the 48,208 goal nodes of the known proofs of every
+    40th theorem, each lemma usable only after the proof where it is known:
+
+    | | median | 90th percentile | 99th percentile |
+    |---|---|---|---|
+    | assertions alone | 983 | 8,963 | 32,657 |
+    | with all lemmas of earlier proofs | 5,691 | 94,714 | 484,128 |
+    | with lemmas that 2 earlier proofs have | 1,698 | 18,225 | 83,368 |
+
+- **What this means:**
+  - A lemma for every subproof below a node is cheap to make. But it multiplies the
+    variants by about 6 at the median and 10 at the 90th percentile.
+  - The lemmas of recurring subproofs keep most of the coverage (36.5% of the steps,
+    against 43.2%) at about 1.7 to 2.5 times the variants.
+  - Either way, the filters and ranks are what an agent would choose among them with.
+    The occurrences of a subproof are a natural rank.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

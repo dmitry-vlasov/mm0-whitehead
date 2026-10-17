@@ -8,6 +8,7 @@ a size and by a depth, and in sequence; and the reading of the language, with it
 -/
 import Whitehead.Prove.Session
 import Whitehead.Prove.Measure
+import Whitehead.Prove.Subproofs
 import Tests.Prove.Engine
 
 open Whitehead.Mmb Whitehead.Prove
@@ -224,6 +225,34 @@ def usesTests : TestM Unit := do
     check "uses: used(2) keeps those used in two proofs or more"
       (k == (ordered.filter (u · ≥ 2)).size && used.all (u · ≥ 2)) s!"{k}"
   | _, _ => check "uses: a selection on syl" false
+
+/-- The distinct subproofs of the fixture, their lemmas, and what earlier proofs cover
+(`Prove/Subproofs.lean`). -/
+def subproofTests : TestM Unit := do
+  let bytes ← IO.FS.readBinFile logicPath
+  let some file := MmbFile.parse bytes |>.toOption | check "subproofs: the fixture is read" false; return
+  let some db := Db.ofFile file |>.toOption | check "subproofs: the fixture becomes a database" false; return
+  let id := thmId db
+  let sp := Subproofs.ofDb db
+  let lemmas := sp.lemmas db
+  let r := sp.report lemmas
+  checkEq "subproofs: distinct, lemmas made, none bare"
+    (r.proofs, r.distinct, r.failed, r.bare) (16, 43, 0, 0)
+  checkEq "subproofs: covered by earlier proofs" (r.coveredNodes, r.coveredSteps, r.distinctSteps, r.coveredDistinct)
+    (2, 15, 56, 13)
+  -- a1i's proof, (ax_mp h0 ax_1): its lemma is a1i itself, the most general form
+  match sp.roots.find? (·.1 == id "a1i") with
+  | none => check "subproofs: a1i's proof is read" false
+  | some (_, root) =>
+    match lemmas[root]! with
+    | none => check "subproofs: a1i's lemma is made" false
+    | some l =>
+      let a := (Lemma.canonical { hyps := db.asserts[id "a1i"]!.hyps, concl := db.asserts[id "a1i"]!.concl })
+      check "subproofs: the lemma of a1i's proof is a1i" (l.concl == a.concl && l.hyps == a.hyps)
+        s!"{db.showExp l.concl} from {l.hyps.map (db.showExp ·)}"
+  -- a subproof first occurs in the theorem it is first made for
+  check "subproofs: first occurrences come before the theorems that reuse them"
+    (sp.roots.all fun (thm, root) => sp.first[root]! ≤ thm)
 
 def dslTests : TestM Unit := do
   let bytes ← IO.FS.readBinFile logicPath

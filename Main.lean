@@ -36,6 +36,11 @@ def usage : String :=
                                  what a filter has to narrow; --shapes: and how many pass the
                                  filter that describes the known proof's new goals to depth 1,
                                  2 and 3
+  prove subproofs <file.mmb> [--variants [--every K] [--ms T]]
+                                 the distinct subproofs of the proofs (what is below a node), the
+                                 most general lemma of each, and how much of each proof the
+                                 proofs before it cover; --variants: what the lemmas of earlier
+                                 proofs add to the variants at the nodes of known proofs
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
                [--verbose]
@@ -354,6 +359,59 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
       among those described: {Prove.rankSummary (none0.map (·.ranks.back!))}"
   return 0
 
+/-- `prove subproofs`: the distinct subproofs of a file, their lemmas, how much of the
+proofs earlier proofs cover, and what the lemmas would add to the variants
+(`Prove/Subproofs.lean`). -/
+def proveSubproofs (path : String) (args : List String) : IO UInt32 := do
+  let file ←
+    match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let (jobs, progress, memLimit) ← jobOptions args
+  let t0 ← IO.monoMsNow
+  let sp := Prove.Subproofs.ofDb db
+  let lemmas := sp.lemmas db
+  let r := sp.report lemmas
+  let pct (n d : Nat) : String := if d == 0 then "0" else s!"{n * 1000 / d / 10}.{n * 1000 / d % 10}%"
+  -- the report is computed when it is first used
+  IO.println s!"{path}: {r.proofs} proofs, {r.distinct} distinct subproofs"
+  IO.println s!"  lemmas: {r.failed} not made; {r.bare} with a bare variable for conclusion; \
+    {r.statements} distinct statements"
+  IO.println s!"  nodes of 2 steps or more, each subproof once per proof: {r.nodes}, \
+    {r.coveredNodes} ({pct r.coveredNodes r.nodes}) a subproof of an earlier theorem's proof"
+  IO.println s!"  steps: {r.steps}, {r.coveredSteps} ({pct r.coveredSteps r.steps}) inside such a subproof; \
+    each subproof once per proof: {r.distinctSteps}, {r.coveredDistinct} ({pct r.coveredDistinct r.distinctSteps}); \
+    proofs that are one, whole: {r.wholeCovered} ({pct r.wholeCovered r.proofs})"
+  IO.println s!"  subproofs in 2 proofs or more: {r.recurring}, in 10 or more: {r.recurring10}; \
+    steps inside a subproof that 2 earlier proofs have: {r.coveredRecurring} ({pct r.coveredRecurring r.steps}), \
+    each subproof once per proof: {r.coveredRecurringDistinct} ({pct r.coveredRecurringDistinct r.distinctSteps})"
+  IO.println s!"  in {(← IO.monoMsNow) - t0} ms"
+  if args.contains "--variants" then
+    let lemmaIx := sp.lemmaIndex lemmas
+    let recurringIx := sp.lemmaIndex lemmas (recurring := true)
+    let every := max 1 (numOption args "--every" 40)
+    let limits : Prove.Limits := { maxProps := numOption args "--max-nodes" 2000000, maxMs := numOption args "--ms" 10000 }
+    let todo := (Array.range file.stmts.size).filter fun i =>
+      (match file.stmts[i]!.kind with | .thm _ => true | _ => false) && file.stmts[i]!.index % every == 0
+    let index := db.index
+    let results ← Prove.runJobs jobs todo.size (fun k => Prove.lemmaCounts db index lemmaIx recurringIx limits todo[k]!)
+      progress memLimit logLine
+    let rows := results.foldl (init := #[]) fun acc r => acc ++ r.getD #[]
+    IO.println s!"  at the goal nodes of the known proofs of every {every}th theorem:"
+    IO.println s!"    assertions: {Prove.variantSummary (rows.map (·.1))}"
+    IO.println s!"    lemmas of earlier proofs: {Prove.variantSummary (rows.map (·.2.1))}"
+    IO.println s!"    lemmas that 2 earlier proofs have: {Prove.variantSummary (rows.map (·.2.2))}"
+    IO.println s!"    assertions and those lemmas: {Prove.variantSummary (rows.map fun (a, _, c) => a + c)}"
+  return 0
+
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/
 def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
@@ -562,6 +620,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "search" :: path :: rest => proveSearch path rest
   | "prove" :: "chains" :: path :: rest => proveChains path rest
   | "prove" :: "variants" :: path :: rest => proveVariants path rest
+  | "prove" :: "subproofs" :: path :: rest => proveSubproofs path rest
   | _ =>
     IO.eprintln usage
     return 2

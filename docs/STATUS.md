@@ -40,7 +40,13 @@ only looked them up. Eight interface fixes came out of its report (`DESIGN.md`, 
 first pilot"). A second pilot, with the assertions known only by number, proved four
 theorems. Its steps were chosen by recognizing rules in their statements, by shape
 filters and by `premises(0)`. Six more fixes followed, among them the closing of ground
-goals by the steps without premises (`DESIGN.md`, "The second pilot").
+goals by the steps without premises (`DESIGN.md`, "The second pilot"). On 2026-10-17
+the author answered the questions on chains: they are guiding rails, replayed at a goal,
+not theorems of their own. The subproofs of set.mm were measured:
+- 664,589 distinct subproofs below a node, each with its most general lemma;
+- 43.2% of the steps lie inside a subproof that an earlier proof already has;
+- the recurring ones (78,877, in two proofs or more) cover 36.5%, at about twice the
+  variants (`DESIGN.md`, "Proof rails").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -386,7 +392,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,105 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,109 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -440,6 +446,8 @@ corpus of `scripts/build-corpus.sh` built — 1,105 checks, 0 failures, in 20 se
 - The MCP tools after the pilot: an unknown argument refused, a goal's proved
   instances, what a closing step proves, the compact listing, `run` in a subtree and
   its report, and the filters `hyp` and `bare`.
+- Prover, subproofs: the distinct subproofs of the fixture, their lemmas (that of
+  `a1i`'s proof is `a1i`), and what earlier proofs cover.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
