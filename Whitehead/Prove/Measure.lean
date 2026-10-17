@@ -53,6 +53,11 @@ structure NodeCount where
   them, and among those that pass its description to each depth. -/
   rankAll : Nat := 0
   ranks : Array Nat := #[]
+  /-- The same, the variants ordered by the latest proof before the theorem that uses
+  their assertion, then by uses (`Env.rankByRecency`): among all, and among those that
+  pass the description to each depth. -/
+  recentAll : Nat := 0
+  recents : Array Nat := #[]
   deriving Inhabited
 
 /-- Where variant `p` is among `set`, ordered by uses, the most first, the first made
@@ -60,6 +65,15 @@ first among equals; from 1. -/
 def Env.rankByUses (env : Env) (set : Array Nat) (p : Nat) : Nat :=
   let u (q : Nat) : Nat := env.stepUses env.props[q]!.step
   1 + (set.filter fun q => u q > u p || u q == u p && q < p).size
+
+/-- Where variant `p` is among `set`, ordered by the latest proof before the theorem that
+uses its assertion, the latest first, then by uses; from 1. -/
+def Env.rankByRecency (env : Env) (set : Array Nat) (p : Nat) : Nat :=
+  let l (q : Nat) : Nat := match env.props[q]!.step with
+    | .assertion id => env.uses.latest id env.task.limit
+    | .conv .. => 0
+  let u (q : Nat) : Nat := env.stepUses env.props[q]!.step
+  1 + (set.filter fun q => l q > l p || l q == l p && (u q > u p || u q == u p && q < p)).size
 
 /-- The goal nodes on the path of the known proof of statement `i` of the file, a theorem,
 where a step is chosen: what `NodeCount` says of each. `none` for a proof with a shared
@@ -83,15 +97,18 @@ def nodeCounts (db : Db) (index : Index Nat) (limits : Limits) (depths : Array N
         let kids := env.hyps[prop.parent]!.children
         let mut shaped := #[]
         let mut ranks := #[]
+        let mut recents := #[]
         let mut kept := true
         for d in depths do
           let f := env.shapeFilter p d
           let passing := kids.filter fun q => f.eval (env.propView q)
           shaped := shaped.push passing.size
           ranks := ranks.push (env.rankByUses passing p)
+          recents := recents.push (env.rankByRecency passing p)
           kept := kept && f.eval (env.propView p)
         out := out.push { variants := kids.size, shaped, kept, premises := prop.rule.hyps.size,
-                          rankAll := env.rankByUses kids p, ranks }
+                          rankAll := env.rankByUses kids p, ranks,
+                          recentAll := env.rankByRecency kids p, recents }
     return some (out, r.ending == .limit)
 
 /-- `nodeCounts` without the filters: how many variants each node has. -/

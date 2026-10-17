@@ -14,13 +14,28 @@ import Whitehead.Prove.Combinators
 
 namespace Whitehead.Prove
 
+/-- An order of the variants of a goal, by the proofs of the theorems before the one
+being proved (`Uses.lean`). -/
+inductive VariantRank where
+  /-- By how many proofs use the assertion, the most first. -/
+  | used
+  /-- By the latest proof that uses the assertion, the latest first; then by uses. -/
+  | recent
+  deriving BEq, Inhabited, Repr
+
 /-- The order of the leaves for `search`. -/
 inductive Cost where
   /-- The number of assertion nodes above a leaf's goal. Those with a label of `free`
   cost nothing; at a goal where such a node hangs, the other variants are the
   alternatives to it and cost the goal's full depth; and a goal that such a node left
-  open, where none hangs, costs `penalty` more. With `free` empty, the depth. -/
-  | depth (free : Array Label := #[]) (penalty : Nat := 0)
+  open, where none hangs, costs `penalty` more. With `free` empty, the depth.
+
+  With a rank and a `width`, a step costs one and its place among the variants of its
+  goal by the rank, from 0, divided by `width`: the first `width` variants nothing more,
+  the next `width` one more, and so on (a search by discrepancies). Still fair: a cost
+  only grows with the depth. -/
+  | depth (free : Array Label := #[]) (penalty : Nat := 0) (rank : Option VariantRank := none)
+      (width : Nat := 0)
   deriving Inhabited, Repr
 
 /-- The nodes with one of a set of labels, kept up to date as the tree grows: the
@@ -56,12 +71,56 @@ partial def goalCost (env : Env) (m : Marks) (penalty : Nat) (memo : Std.HashMap
       let c := if !m.props.contains q then c + 1 else if m.goals.contains h then c else c + penalty
       (c, memo.insert h c)
 
-/-- The state of `search`: the marks of its cost's labels, and the costs and depths of
-goal nodes, as far as they are known. -/
+/-- The places of assertion nodes among the variants of their goals, from 0, by a rank;
+those of a goal's variants are found together, the first time one is asked for. -/
+structure Places where
+  of : Std.HashMap Nat Nat := {}
+  deriving Inhabited
+
+/-- The place of assertion node `p` among the variants of its goal, by `rank`. -/
+def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat × Places :=
+  if let some r := pl.of[p]? then (r, pl)
+  else Id.run do
+    let kids := env.hyps[env.props[p]!.parent]!.children
+    let uses (q : Nat) : Nat := match env.props[q]!.step with
+      | .assertion a => env.uses.before a env.task.limit
+      | .conv .. => 0
+    let latest (q : Nat) : Nat := match env.props[q]!.step with
+      | .assertion a => env.uses.latest a env.task.limit
+      | .conv .. => 0
+    let key (q : Nat) : Nat × Nat := match rank with
+      | .used => (uses q, 0)
+      | .recent => (latest q, uses q)
+    let keys := kids.foldl (init := ({} : Std.HashMap Nat (Nat × Nat))) fun (m : Std.HashMap Nat (Nat × Nat)) q =>
+      m.insert q (key q)
+    let sorted := kids.qsort fun a b =>
+      let (a1, a2) := keys[a]!
+      let (b1, b2) := keys[b]!
+      a1 > b1 || a1 == b1 && (a2 > b2 || a2 == b2 && a < b)
+    let mut of := pl.of
+    for i in [0:sorted.size] do of := of.insert sorted[i]! i
+    return (of[p]?.getD 0, { of })
+
+/-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
+`rank`, divided by `width`. -/
+partial def rankedCost (env : Env) (m : Marks) (penalty : Nat) (rank : VariantRank) (width : Nat)
+    (st : Std.HashMap Nat Nat × Places) (h : Nat) : Nat × (Std.HashMap Nat Nat × Places) :=
+  if let some c := st.1[h]? then (c, st)
+  else match env.hyps[h]!.parent with
+    | none => (0, (st.1.insert h 0, st.2))
+    | some q =>
+      let (c, (memo, pl)) := rankedCost env m penalty rank width st env.props[q]!.parent
+      let (r, pl) := pl.get env rank q
+      let c := if !m.props.contains q then c + 1 + r / width else if m.goals.contains h then c else c + penalty
+      (c, (memo.insert h c, pl))
+
+/-- The state of `search`: the marks of its cost's labels, the costs and depths of goal
+nodes, as far as they are known, and the places of the variants, for a rank. -/
 structure SearchState where
   marks : Marks := {}
   cost : Std.HashMap Nat Nat := {}
   depth : Std.HashMap Nat Nat := {}
+  places : Places := {}
   deriving Inhabited
 
 /-- `search(c)`: each round, the unexpanded leaves of the least cost `c`; done when there
@@ -71,8 +130,33 @@ def Strategy.search (c : Cost) : Strategy SearchState where
   root := none
   init := {}
   step env st := Id.run do
-    match c with
-    | .depth free penalty =>
+    let .depth free penalty rank width := c
+    match rank.filter fun _ => width > 0 with
+    | some rank =>
+      let marks := st.marks.update env free
+      let mut memo := (st.cost, st.places)
+      let mut best : Option Nat := none
+      let mut round := #[]
+      for p in env.leafs do
+        if env.props[p]!.expanded then continue
+        let h := env.props[p]!.parent
+        let (k, memo') := rankedCost env marks penalty rank width memo h
+        let (r, pl) := memo'.2.get env rank p
+        memo := (memo'.1, pl)
+        let k := k + r / width
+        match best with
+        | none =>
+          best := some k
+          round := #[p]
+        | some b =>
+          if k < b then
+            best := some k
+            round := #[p]
+          else if k == b then round := round.push p
+      let st := { st with marks, cost := memo.1, places := memo.2 }
+      if round.isEmpty then return (.done, st)
+      return (.expand (round.map (·, none)), st)
+    | none =>
       let marks := st.marks.update env free
       let mut cost := st.cost
       let mut depth := st.depth
@@ -98,7 +182,7 @@ def Strategy.search (c : Cost) : Strategy SearchState where
             best := some k
             round := #[p]
           else if k == b then round := round.push p
-      let st := { marks, cost, depth }
+      let st := { st with marks, cost, depth }
       if round.isEmpty then return (.done, st)
       return (.expand (round.map (·, none)), st)
 

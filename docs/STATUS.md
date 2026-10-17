@@ -69,6 +69,17 @@ Russell's tactics and the author's answers:
 
 `replay` and `rails` are definitions now. They build the trees of the strategies they
 were, on the fixture and on set.mm.
+
+Ranks for the rails that leave goals open were found offline (`prove rails --dump`) and
+added: `specific` and `recent`. With them the open rails pay, beside the closing ones:
+`guided` (`tactics/guided.tac`) against breadth-first and the best before
+(`DESIGN.md`, "Ranks for the rails"):
+- all of set.mm, every 40th theorem: 110 against 66 and 102 at 1 s, 127 against 91 and
+  122 at 5 s;
+- propositional and predicate calculus: 173 against 134 and 159 at 1 s, 188 against
+  170 and 170 at 5 s.
+
+The variants of a node ranked by recency, as a cost, do not pay.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -414,7 +425,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,189 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,198 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -481,7 +492,9 @@ corpus of `scripts/build-corpus.sh` built — 1,189 checks, 0 failures, in 20 se
   and `replay` as definitions build the trees of the reference strategies, in ten
   configurations; the errors of the new components; definitions from text and from
   files, called by name, position and default, with their errors; the MCP tool
-  `define`.
+  `define`; the ranks `specific` and `recent` of the rails; ranked steps
+  (`depth(by=..., width=...)`): a width past every rank is the depth, and a width of 1
+  takes the first variant by the rank first; `guided` is read and built.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -622,8 +635,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    server; what a description of the next goals narrows on set.mm; and the first
    rank, by uses; two pilots, seven theorems proved by an agent, the second with the
    names hidden; and the replay of subproofs as rails, +54% proved on set.mm at 1 s.
-   The composable tactics are built. Next: ranks for the rails that open goals (the
-   ranking layer, as costs); the human front-end;
+   The composable tactics are built, and ranks for the rails that leave goals open:
+   `guided`, +40% over breadth-first on set.mm at 5 s. Next: the human front-end;
    and a pilot at a larger scale, with counts per decision, for the dataset. Open: how a human moves
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one

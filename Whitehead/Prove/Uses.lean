@@ -49,6 +49,13 @@ def before (u : Uses) (a limit : Nat) : Nat := Id.run do
     if ts[mid]! < limit then lo := mid + 1 else hi := mid
   return lo
 
+/-- The latest theorem numbered below `limit` whose proof uses assertion `a`, and one; 0
+if there is none. -/
+def latest (u : Uses) (a limit : Nat) : Nat :=
+  match u.before a limit with
+  | 0 => 0
+  | n => u.byAssertion[a]![n - 1]! + 1
+
 end Uses
 
 end Whitehead.Prove

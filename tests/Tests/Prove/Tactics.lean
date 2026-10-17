@@ -25,7 +25,8 @@ def tacticsTests : TestM Unit := do
   let defs ← match ← Dsl.loadDefs "tactics" with
     | .ok d => pure d
     | .error e => check "tactics: the definitions of tactics/ are read" false e; return
-  check "tactics: the definitions of tactics/ are read" (defs.contains "rails" && defs.contains "replay")
+  check "tactics: the definitions of tactics/ are read"
+    (defs.contains "rails" && defs.contains "replay" && defs.contains "guided")
   let ctx : Dsl.Ctx := { db, rails := some rails, defs }
   let tac (text : String) : AnyStrategy :=
     match Dsl.parseTactic ctx text with
@@ -75,6 +76,30 @@ def tacticsTests : TestM Unit := do
   checkEq "tactics: search is search(depth)" (← sameOn (tac "search") (tac "search(depth)")) #[]
   checkEq "tactics: depth(follow) without anything followed is depth"
     (← sameOn (tac "search(depth(follow, penalty=2))") (tac "search(depth)")) #[]
+  -- ranked steps: a width past every rank is the depth; a width of 1 takes the first
+  -- variant by the rank first
+  let uses := Uses.ofFile file db.asserts.size
+  let runU (thm : Nat) (t : AnyStrategy) (n : Nat := 3000) : IO Result :=
+    search vc { Env.init db index (db.task thm) with uses } t.strategy { maxProps := n }
+  let mut differ := #[]
+  for thm in thms do
+    if !same (← runU thm (tac "search(depth(by=recent, width=1000000))")) (← runU thm (tac "bfs")) then
+      differ := differ.push db.asserts[thm]!.name
+  checkEq "tactics: ranked steps, with a width past every rank, are the depth" differ #[]
+  let r ← runU (id "syl") (tac "search(depth(by=recent, width=1))")
+  let env0 := { Env.init db index (db.task (id "syl")) with uses }
+  let key (p : Nat) : Nat × Nat := match r.env.props[p]!.step with
+    | .assertion a => (uses.latest a env0.task.limit, uses.before a env0.task.limit)
+    | .conv .. => (0, 0)
+  let rootKids := r.env.hyps[0]!.children
+  let gt (a b : Nat × Nat) : Bool := a.1 > b.1 || a.1 == b.1 && a.2 > b.2
+  let topKey := rootKids.foldl (init := (0, 0)) fun m q => if gt (key q) m then key q else m
+  check "tactics: ranked by recency, width 1: the first step is the latest used variant of the root"
+    (r.ending == .proved && (r.env.labels[0]?.map fun (p, _) => key p == topKey && r.env.props[p]!.parent == 0) == some true)
+  let r ← runU (id "syl") (tac "search(depth(by=used, width=1))")
+  check "tactics: ranked by uses, width 1, proves" (r.ending == .proved)
+  checkEq "tactics: a rank without a width" (err ctx "search(depth(by=recent))") "`depth` with `by` needs a `width`"
+  checkEq "tactics: a rank that is not one" (err ctx "search(depth(by=best, width=3))") "`by` is used or recent, not `best`"
   -- bfs with a filter and limits, as the combinators
   checkEq "tactics: bfs with its filter and limits is limited(filter(f, bfs))"
     (← sameOn (tac "bfs(filter=premises(max=1), size=500, depth=4)")
@@ -110,7 +135,8 @@ def tacticsTests : TestM Unit := do
   check "tactics: the new components"
     (ok "search(depth(follow, choose, penalty=1), filter=hyp, size=10, depth=3)" &&
       ok "follow(subproofs(5, rank=reach, open=0), at=root, upto=1, ground=true, chain=true)" &&
-      ok "first(follow(proof), search(depth(follow)), bfs)" && ok "bfs(size=100)" && ok "follow(proof)")
+      ok "first(follow(proof), search(depth(follow)), bfs)" && ok "bfs(size=100)" && ok "follow(proof)" &&
+      ok "guided" && ok "guided(close=3, open=2, upto=0, penalty=1)")
   checkEq "tactics: follow without the subproofs" (err { db } "follow(proof)") "`follow` needs the subproofs of the file"
   checkEq "tactics: a label that is not one" (err ctx "search(depth(bfs))")
     "a label of `depth` is follow, choose or search, not `bfs`"

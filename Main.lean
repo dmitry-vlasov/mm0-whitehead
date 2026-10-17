@@ -43,9 +43,11 @@ def usage : String :=
                                  most general lemma of each, and how much of each proof the
                                  proofs before it cover; --variants: what the lemmas of earlier
                                  proofs add to the variants at the nodes of known proofs
-  prove rails <file.mmb> [--every K] [--to B] [--rank occurrences|size|small|reach]
+  prove rails <file.mmb> [--every K] [--to B] [--rank occurrences|size|small|reach|specific|recent] [--dump FILE]
                                  how far the subproofs of earlier proofs that fit the goal of a
-                                 theorem agree with its known proof, for the first 1, 3 and 10
+                                 theorem agree with its known proof, for the first 1, 3 and 10;
+                                 --dump: every one that fits, with its features and how far it
+                                 agrees, a row each
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--max-facts N] [--join-cap N|all]
                [--meta I,J,...] [--verbose]
@@ -365,6 +367,11 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
         {Prove.rankSummary (nodes.map (·.ranks[j]!))}"
     IO.println s!"  steps without premises, ordered by uses, among all: {Prove.rankSummary (none0.map (·.rankAll))}; \
       among those described: {Prove.rankSummary (none0.map (·.ranks.back!))}"
+    -- the order by the latest proof that uses the assertion
+    IO.println s!"  ordered by recency, the known variant among all: {Prove.rankSummary (nodes.map (·.recentAll))}"
+    for j in [0:depths.size] do
+      IO.println s!"  ordered by recency, among those described to depth {depths[j]!}: \
+        {Prove.rankSummary (nodes.map (·.recents[j]!))}"
   return 0
 
 /-- `prove subproofs`: the distinct subproofs of a file, their lemmas, how much of the
@@ -444,7 +451,38 @@ def proveRails (path : String) (args : List String) : IO UInt32 := do
     | some "reach" => Prove.RailRank.reach
     | some "size" => .size
     | some "small" => .small
+    | some "specific" => .specific
+    | some "recent" => .recent
     | _ => .occurrences
+  -- --dump: every subproof that fits the goal, with what a rank could use, and how far it
+  -- agrees with the known proof, one row each (for ranks tried outside)
+  if let some out := strOption args "--dump" then
+    let uses := Prove.Uses.ofFile file db.asserts.size
+    let thms := (rails.sp.roots.filter fun (thm, _) => thm % every == 0 && thm < last)
+    let rowsOf (thm root : Nat) : String := Id.run do
+      let env := Prove.Env.init db index (db.task thm)
+      let goal := env.task.goal
+      let found := rails.at_ env 0 { count := 1000000000, minSize := 2 }
+      let mut out := ""
+      for k in found do
+        let n := rails.sp.occBefore k thm
+        let last := if n == 0 then thm else rails.sp.occ[k]![n - 1]!
+        let concl := rails.concl[k]!
+        let conclNon := (concl.nodes.filter (!Prove.Node.isVar ·)).size
+        let top := rails.sp.nodes[k]!.1
+        out := out ++ s!"{thm}\t{k}\t{rails.sp.sizes[k]!}\t{n}\t{thm - last}\t{rails.openHyps env goal k}\t\
+          {rails.hyps[k]!.size}\t{conclNon}\t{concl.size}\t{goal.size}\t{top}\t{uses.before top thm}\t\
+          {rails.agree k root}\t{rails.sp.sizes[root]!}\t{found.size}\n"
+      return out
+    let jobs := 12
+    let tasks := (List.range jobs).map fun j => Task.spawn fun _ =>
+      (Array.range thms.size).foldl (init := "") fun acc i =>
+        if i % jobs == j then acc ++ rowsOf thms[i]!.1 thms[i]!.2 else acc
+    let h ← IO.FS.Handle.mk out .write
+    h.putStr "thm\tk\tsize\tocc\trecency\topen\thyps\tconclNon\tconclSize\tgoalSize\ttop\ttopUses\tagree\trootSize\tfit\n"
+    for t in tasks do h.putStr t.get
+    IO.println s!"{path}: {thms.size} theorems, every {every}th, written to {out}"
+    return 0
   for count in [1, 3, 10] do
     let cfg : Prove.ReplayConfig := { count, rank }
     let mut n := 0

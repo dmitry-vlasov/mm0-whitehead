@@ -40,6 +40,11 @@ inductive RailRank where
   hypotheses of a subproof's lemma that no premise of the theorem fits (the author's idea:
   from the goal to the premises in one step). A subproof with none open proves the goal. -/
   | reach
+  /-- Those whose lemma's conclusion has the most nodes that are not variables first: the
+  most specific to the goal, which they all fit. Then by occurrences. -/
+  | specific
+  /-- Those that occur in the latest proof before the theorem first. Then by occurrences. -/
+  | recent
   deriving BEq, Inhabited, Repr
 
 /-- Which subproofs may be put down for a theorem. -/
@@ -127,11 +132,23 @@ def at_ (r : Rails) (env : Env) (h : Nat) (cfg : ReplayConfig) : Array Nat := Id
     else {}
   let kept := if cfg.maxOpen < 1000000 then ok.filter fun k => (opens[k]?.getD 0) ≤ cfg.maxOpen else ok
   let op (k : Nat) : Nat := opens[k]?.getD 0
+  let spec (k : Nat) : Nat := (r.concl[k]!.nodes.filter (!Node.isVar ·)).size
+  -- the latest theorem before this one whose proof has it
+  let latest (k : Nat) : Nat := match r.sp.occBefore k thm with
+    | 0 => 0
+    | n => r.sp.occ[k]![n - 1]!
+  let byOcc (a b : Nat) : Bool := occ a > occ b || occ a == occ b && (size a > size b || size a == size b && a < b)
   let ordered := match cfg.rank with
     | .occurrences => kept.qsort fun a b => occ a > occ b || occ a == occ b && (size a > size b || size a == size b && a < b)
     | .size => kept.qsort fun a b => size a > size b || size a == size b && a < b
     | .small => kept.qsort fun a b => size a < size b || size a == size b && a < b
     | .reach => kept.qsort fun a b => op a < op b || op a == op b && (occ a > occ b || occ a == occ b && a < b)
+    | .specific =>
+      let sp := kept.foldl (init := ({} : Std.HashMap Nat Nat)) fun (m : Std.HashMap Nat Nat) k => m.insert k (spec k)
+      kept.qsort fun a b => sp[a]! > sp[b]! || sp[a]! == sp[b]! && byOcc a b
+    | .recent =>
+      let lt := kept.foldl (init := ({} : Std.HashMap Nat Nat)) fun (m : Std.HashMap Nat Nat) k => m.insert k (latest k)
+      kept.qsort fun a b => lt[a]! > lt[b]! || lt[a]! == lt[b]! && byOcc a b
   return ordered.extract 0 cfg.count
 
 end Rails

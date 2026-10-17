@@ -213,6 +213,8 @@ def usesTests : TestM Unit := do
   checkEq "uses: the proofs before, each once" (uses.before (id "ax_mp") (id "id")) 3
   checkEq "uses: of a theorem" (uses.before (id "a1i") (id "a2d")) 1
   checkEq "uses: an axiom that one proof uses, the last" (uses.before (id "sp") 1000) 1
+  checkEq "uses: the latest proof before, none" (uses.latest (id "ax_mp") (id "a1i")) 0
+  checkEq "uses: the latest proof before, and one" (uses.latest (id "ax_mp") (id "id")) (id "mpd" + 1)
   -- in a session on syl: the variants of its root, by uses
   let vc := Whitehead.Verify.Ctx.ofFile file
   let s ← Session.startFor vc { Env.init db db.index (db.task (id "syl")) with uses }

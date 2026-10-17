@@ -245,10 +245,10 @@ def docs : Array Doc := #[
     "each round, the first tactic that has something to expand; the others wait: combined by order, where seq combines in time"⟩,
   ⟨"focus", "tactic", "focus(N, t)", "t, only in the subtree of goal node N"⟩,
   ⟨"loop", "tactic", "loop(t, N)", "t again from its start each time it is done, while the tree grows, up to N times"⟩,
-  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N)",
-    "the number of assertion nodes above a leaf's goal; those labelled L1, L2, ... (follow, choose or search: who expanded them) cost nothing, the other variants at a goal where such a node hangs cost the goal's full depth, and a goal that such a node left open costs N more"⟩,
+  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent, width=W)",
+    "the number of assertion nodes above a leaf's goal; those labelled L1, L2, ... (follow, choose or search: who expanded them) cost nothing, the other variants at a goal where such a node hangs cost the goal's full depth, and a goal that such a node left open costs N more; with by and width, a step costs 1 and its place among the variants of its goal (from 0), by the proofs before the theorem that use its assertion (used: how many; recent: the latest), divided by W"⟩,
   ⟨"subproofs", "guide", "subproofs(count=3, rank=occurrences, min=2, source=earlier, open=N)",
-    "subproofs of earlier proofs that fit the goal: count of them; rank occurrences (in the most proofs before the theorem), size (the largest), small, or reach (those leaving the fewest hypotheses that no premise fits first); open: only those leaving at most N open; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two)"⟩,
+    "subproofs of earlier proofs that fit the goal: count of them; rank occurrences (in the most proofs before the theorem), size (the largest), small, reach (those leaving the fewest hypotheses that no premise fits first), specific (those whose conclusion has the most nodes that are not variables first) or recent (those in the latest proof before the theorem first); open: only those leaving at most N open; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two)"⟩,
   ⟨"proof", "guide", "proof", "the theorem's own proof, when it is one of the file: for tests"⟩
 ]
 
@@ -367,7 +367,9 @@ def rankOr (name : String) (a : Option Ast) : Except ParseError RailRank := do
   | "size" => pure .size
   | "small" => pure .small
   | "reach" => pure .reach
-  | w => fail ((a.map (·.pos)).getD 0) s!"`rank` is occurrences, size, small or reach, not `{w}`"
+  | "specific" => pure .specific
+  | "recent" => pure .recent
+  | w => fail ((a.map (·.pos)).getD 0) s!"`rank` is occurrences, size, small, reach, specific or recent, not `{w}`"
 
 def sourceOr (name : String) (a : Option Ast) : Except ParseError RailSource := do
   match ← wordOr name "source" "earlier" a with
@@ -488,10 +490,19 @@ partial def cost (c : Ctx) (a : Ast) : Except ParseError Cost := do
   | .call name pos args =>
     match name with
     | "depth" =>
-      checkNames name args #["penalty"]
+      checkNames name args #["penalty", "by", "width"]
       let free ← (args.filter (·.1.isNone)).mapM fun (_, v) => labelOf name v
-      let penalty ← numOr name "penalty" 0 ((args.find? (·.1 == some "penalty")).map (·.2))
-      return .depth free penalty
+      let named (k : String) : Option Ast := (args.find? (·.1 == some k)).map (·.2)
+      let penalty ← numOr name "penalty" 0 (named "penalty")
+      let rank ← match named "by" with
+        | none => pure none
+        | some a => match ← word name "by" a.pos (some a) with
+          | "used" => pure (some VariantRank.used)
+          | "recent" => pure (some .recent)
+          | w => fail a.pos s!"`by` is used or recent, not `{w}`"
+      let width ← numOr name "width" 0 (named "width")
+      if rank.isSome && width == 0 then fail pos "`depth` with `by` needs a `width`"
+      return .depth free penalty rank width
     | _ =>
       match c.expand? name pos args with
       | some r =>

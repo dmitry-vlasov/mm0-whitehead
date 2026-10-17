@@ -42,6 +42,16 @@ def railsTests : TestM Unit := do
   let bySize := at0 "con1" { count := 1000, minSize := 1, rank := .size }
   check "rails: ranked by size, the largest first"
     ((Array.range (bySize.size - 1)).all fun j => rails.sp.sizes[bySize[j]!]! ≥ rails.sp.sizes[bySize[j + 1]!]!)
+  let spec (k : Nat) : Nat := (rails.concl[k]!.nodes.filter (!Node.isVar ·)).size
+  let bySpec := at0 "con1" { count := 1000, minSize := 1, rank := .specific }
+  check "rails: ranked by how specific, the most first"
+    (bySpec.size == all.size && (Array.range (bySpec.size - 1)).all fun j => spec bySpec[j]! ≥ spec bySpec[j + 1]!)
+  let latest (k : Nat) : Nat := match rails.sp.occBefore k (id "con1") with
+    | 0 => 0
+    | n => rails.sp.occ[k]![n - 1]!
+  let byRecent := at0 "con1" { count := 1000, minSize := 1, rank := .recent }
+  check "rails: ranked by recency, the latest first"
+    (byRecent.size == all.size && (Array.range (byRecent.size - 1)).all fun j => latest byRecent[j]! ≥ latest byRecent[j + 1]!)
   let recurring := at0 "con1" { count := 1000, minSize := 1, source := .recurring }
   check "rails: recurring, those of two earlier proofs"
     (recurring.all fun k => rails.sp.occBefore k (id "con1") ≥ 2 && all.contains k)
@@ -111,13 +121,13 @@ def railsTests : TestM Unit := do
   check "rails: the tactics of the language"
     (ok "replay" && ok "replay(5, rank=size, min=3, source=recurring, at=root)" && ok "rails(3)" &&
       ok "rails(count=1, rank=small, upto=1, ground=false)" && ok "loop(seq(limited(bfs, size=100), rails(1)), 5)" &&
-      ok "rails(10, rank=reach, open=0, penalty=2)")
+      ok "rails(10, rank=reach, open=0, penalty=2)" && ok "rails(1, rank=recent)" && ok "replay(3, rank=specific)")
   let err (c : Dsl.Ctx) (text : String) : String :=
     match Dsl.parseTactic c text with
     | .ok _ => "accepted"
     | .error e => e.msg
   checkEq "rails: without the subproofs" (err { db, defs } "rails(3)") "`follow` needs the subproofs of the file"
-  checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size, small or reach, not `best`"
+  checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size, small, reach, specific or recent, not `best`"
   checkEq "rails: a source that is not one" (err ctx "replay(source=all)") "`source` is earlier or recurring, not `all`"
 
 end Tests.Prove

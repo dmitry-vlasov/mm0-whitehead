@@ -2167,6 +2167,60 @@ subproofs are those of earlier proofs only, so the measure is out of sample.
   are where the gain is. Ranks better than occurrences are what the open rails would
   need: phase 4's ranking layer.
 
+**Ranks for the rails** (2026-10-17, after the composable tactics). The rails that leave
+goals open lost because the first few at a goal were rarely the right ones. Better ranks
+were looked for offline, then tried in search.
+
+- **The data:** `prove rails --dump` writes, for the goal of each sampled theorem, every
+  subproof of earlier proofs that fits it: its size, occurrences, open hypotheses, how
+  long ago it was last used, how many nodes of its conclusion are not variables, the uses
+  of its top assertion, and how far it agrees with the known proof. Every 10th theorem of
+  set.mm gave 1,743,110 rows.
+- **Offline,** on the second half of the theorems (out of sample), among the rails that
+  leave a goal open, the best of the first 3:
+
+  | rank | the known proof's first step | half its steps |
+  |---|---|---|
+  | occurrences (as before) | 8.8% | 1.2% |
+  | reach | 7.9% | 1.4% |
+  | specific: the most nodes of the conclusion that are not variables | 19.1% | 3.4% |
+  | recent: in the latest proof before the theorem | 12.4% | 2.5% |
+  | a linear model per theorem, learned on the first half | 19.9% | 3.4% |
+
+  The learned model is no better than `specific`, so the two simple ranks went in:
+  `rank=specific` and `rank=recent`. On the propositional and predicate calculus,
+  every rail counted, `recent` is best: 24.1% and 14.9%, against 12.8% and 5.3% by
+  occurrences.
+- **In search,** at 1 s a theorem (`--every 40` on all of set.mm, `--to 2825 --every 10` on
+  the calculus):
+
+  | tactic | set.mm (1,198) | calculus (281) |
+  |---|---|---|
+  | `bfs` | 66 | 134 |
+  | `rails(10, rank=reach, open=0, upto=1)`, the best before | 102 | 159 |
+  | `rails(3, rank=recent)`: open rails alone | 69 | 120 |
+  | `rails(3, rank=specific)` | 78 | 115 |
+  | **`guided`**: the closing rails, and 1 open rail by `recent` at the root | **110** | **173** |
+  | the same with 3 open rails | 105 | 170 |
+  | the same with 1 by `specific` | 107 | 170 |
+
+  Penalties of 1 and 3, 2 open rails, or open rails also in the first round, are within
+  the noise (106 to 110, 170 to 173). Open rails by occurrences alone proved 54 and 70.
+- **At 5 s:** `bfs` 91 and 170, the best before 122 and 170, **`guided` 127 and 188**.
+  Against `bfs`, `guided` proves 40 theorems more and loses 4 on set.mm, and 22 more and
+  4 lost on the calculus; its new proofs have up to 104 steps. No proof was rejected by
+  the verifier in the 32 runs.
+- **`guided` is a definition** (`tactics/guided.tac`), made of the atoms only:
+  `first(follow(subproofs(10, rank=reach, open=0), at=open, upto=1, ground=true),
+  follow(subproofs(1, rank=recent), at=root), search(depth(follow, penalty=2)))`.
+- **The variants of a node, by recency** (`prove variants`, every 40th theorem): the
+  known proof's variant is first at 10.4% of the nodes by recency, against 8.2% by uses,
+  and in the first 10 at 36.7%, against 25.6%. As a cost, `depth(by=recent, width=W)`
+  (a step costs its place among its goal's variants, divided by W, more) gains a little
+  on the calculus (140 with W = 200, against 134) and loses on set.mm (59 against 66);
+  with `guided` it loses on both (165 and 96). The atom stays, not recommended: a proof
+  that needs a variant of a low place is put back too far.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above
