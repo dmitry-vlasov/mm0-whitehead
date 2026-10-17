@@ -216,6 +216,27 @@ def serverTests : TestM Unit := do
       ("rails", .arr #[Json.ofNat 100000])]))) "there is no rail 100000"
   checkEq "server: an argument the tool does not take"
     (errText (← callTool c st 191 "find" (.obj #[("pattern", "a*")]))) "`find` has no argument `pattern`; it takes `name`, `limit`"
+  -- definitions: those of tactics/, and the agent's own, for as long as the server runs
+  let defs := (← Prove.Dsl.loadDefs "tactics").toOption.getD {}
+  let cd := { c with defs }
+  let (lang, _) ← callTool cd st 201 "language" (.obj #[])
+  check "server: the language lists the definitions"
+    (((lang.get? "language").bind (·.str?)).any (contains · "rails(count=3")) lang.compress
+  let (df, err) ← callTool cd st 202 "define" (.obj #[("definition", "-- a short search\nquick(n=200) = limited(rails(3), size=@n)")])
+  checkEq "server: a definition of the agent's" (err, (df.get? "defined").bind (·.str?)) (false, some "quick(n=200)")
+  let (_, _) ← callTool cd st 203 "start" (.obj #[("theorem", "syl")])
+  let (ran, err) ← callTool cd st 204 "run" (.obj #[("session", Json.ofNat 5), ("tactic", "quick(5000)")])
+  check "server: a run of the agent's definition" (!err && (ran.get? "proved").bind (·.bool?) == some true) ran.compress
+  let (lang, _) ← callTool cd st 205 "language" (.obj #[])
+  check "server: the language lists the agent's definitions"
+    (((lang.get? "language").bind (·.str?)).any (contains · "quick(n=200)")) lang.compress
+  checkEq "server: a definition of the language is not redefined"
+    (errText (← callTool cd st 206 "define" (.obj #[("definition", "rails = bfs")]))) "`rails` is a definition of the language (tactics/rails.tac)"
+  checkEq "server: nor a component"
+    (errText (← callTool cd st 207 "define" (.obj #[("definition", "first = bfs")]))) "`first` is a component of the language"
+  checkEq "server: a definition that does not read"
+    (errText (← callTool cd st 208 "define" (.obj #[("definition", "x = bfs(@y)")])))
+    "x = bfs(@y)\n        ^ `@y` is not a parameter of `x`"
   -- after an error the sessions are still there
   let (gs, err) ← callTool c st 20 "goals" (.obj #[("session", Json.ofNat 0)])
   check "server: the session after the errors" (!err && (gs.get? "proved").bind (·.bool?) == some true) gs.compress

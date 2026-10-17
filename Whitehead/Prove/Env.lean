@@ -22,6 +22,18 @@ def Skeleton.only : Skeleton → Only
   | .step t _ => .assertion t
   | .hyp k => .premise k
 
+/-- Who expanded an assertion node: the label that the search loop or the session
+writes on it, for the costs to read (`Cost.lean`; `docs/DESIGN.md`, "Composable
+tactics"). Atoms share no state: what one did, another reads off the tree. -/
+inductive Label where
+  /-- A search: `bfs`, `search`, and a strategy that does not say. -/
+  | search
+  /-- A guide followed: `follow`, a subproof replayed. -/
+  | follow
+  /-- An agent's choice in a session (`Session.choose`). -/
+  | choose
+  deriving BEq, Hashable, Inhabited, Repr
+
 /-- Counters of the engine's work, for reports. -/
 structure Counters where
   /-- Assertion nodes made and expanded. -/
@@ -87,6 +99,8 @@ structure Env where
   round (`Env.dropExpanded`): taking each one out when it is expanded would be a pass
   over the whole list for every node. -/
   leafs : Array Nat := #[]
+  /-- The assertion nodes expanded, in the order they were, each with who expanded it. -/
+  labels : Array (Nat × Label) := #[]
   /-- The hypotheses of the assertions, for the forward direction. -/
   hypIndexes : HypIndexes := {}
   /-- The forward front, once a strategy has asked for it. -/

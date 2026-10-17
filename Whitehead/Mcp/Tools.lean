@@ -34,9 +34,11 @@ structure Ctx where
   /-- The names of the assertions, by which `start` finds a theorem. With `anonymous`,
   every other tool knows an assertion only as `A` and its number. -/
   realNames : Array String := #[]
-  /-- The subproofs of the file, for `rails`, `replay` and the tactics that replay
+  /-- The subproofs of the file, for `rails`, `replay` and the tactics that follow them
   (`Rails.lean`): made when they are first asked for. -/
   rails : Thunk Rails := Thunk.pure default
+  /-- The definitions of the language, from `tactics/` (`Dsl.loadTactics`). -/
+  defs : Dsl.Defs := {}
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -46,6 +48,9 @@ structure Open where
 
 structure State where
   sessions : Array (Option Open) := #[]
+  /-- The definitions that the agent made (`define`): for as long as the server runs,
+  and never written. -/
+  defs : Dsl.Defs := {}
   deriving Inhabited
 
 /-- Loads `mm0` and `mmb`, checks that the proof file proves the specification, and names
@@ -220,14 +225,18 @@ def goals (args : Json) : ToolM Json := do
     ("intermediate", .arr (o.session.hints.map (goalJson o))),
     ("proved", .bool o.session.found.isSome), ("nodes", Json.ofNat o.session.env.props.size)]
 
-/-- The DSL context of a session, with the subproofs of the file if the text replays. -/
-def Ctx.dsl (c : Ctx) (o : Open) (text : String) : Dsl.Ctx :=
-  let replays := (text.splitOn "replay").length > 1 || (text.splitOn "rails").length > 1
-  o.session.dslCtx (some c.spec) (rails := if replays then some c.rails.get else none)
+/-- The definitions of the language and those of the agent. -/
+def Ctx.allDefs (c : Ctx) (st : State) : Dsl.Defs :=
+  st.defs.fold (init := c.defs) fun m k d => m.insert k d
+
+/-- The DSL context of a session: the subproofs of the file, made if a tactic follows
+them, and the definitions. -/
+def Ctx.dsl (c : Ctx) (o : Open) (st : State) : Dsl.Ctx :=
+  o.session.dslCtx (some c.spec) (rails := some c.rails) (defs := c.allDefs st)
 
 def readFilter (c : Ctx) (o : Open) (args : Json) : ToolM Filter := do
   let text ← liftE (argStrD args "filter" "all")
-  match Dsl.parseFilter (o.session.dslCtx (some c.spec)) text with
+  match Dsl.parseFilter (c.dsl o (← get)) text with
   | .ok f => return f
   | .error e => throw (Dsl.ParseError.show text e)
 
@@ -287,7 +296,7 @@ def run (c : Ctx) (args : Json) : ToolM Json := do
     if !o.session.isGoal h then throw s!"{h} is not a goal node"
   let before := o.session.openGoals
   let size := o.session.env.props.size
-  let result ← match Dsl.parseTactic (c.dsl o text) text with
+  let result ← match Dsl.parseTactic (c.dsl o (← get)) text with
     | .ok t =>
       let t := match node? with
         | some h => t.focus h
@@ -499,8 +508,21 @@ def tools : Array Tool := #[
                ("description", "the subproofs, as `rails` numbered them")])] #["session", "node", "rails"]⟩,
   ⟨"proof", "The proof found, if there is one: its steps, each with the steps it uses and its statement, checked by the verifier.",
     schema #[sessionProp] #["session"]⟩,
-  ⟨"close", "Ends a session and frees its tree.", schema #[sessionProp] #["session"]⟩
+  ⟨"close", "Ends a session and frees its tree.", schema #[sessionProp] #["session"]⟩,
+  ⟨"define", "Defines a tactic (or a filter, a cost, a guide) of the language for as long as the server runs, as the files tactics/*.tac do: `name(p, q=default, ...) = body`, where `@p` in the body stands for what the parameter is given; comment lines `--` before it are its help. A call of it is its body with the arguments put in. The definitions of the language cannot be redefined, the agent's own can.",
+    schema #[prop "definition" "string" "the definition, such as `quick(n=3) = rails(@n, rank=reach, open=0, upto=1)`"] #["definition"]⟩
 ]
+
+/-- `define`: a definition of the agent's. -/
+def define (c : Ctx) (args : Json) : ToolM Json := do
+  let text ← liftE (argStr args "definition")
+  match Dsl.parseDef text with
+  | .error e => throw (Dsl.ParseError.show text e)
+  | .ok d =>
+    if Dsl.docs.any (·.name == d.name) then throw s!"`{d.name}` is a component of the language"
+    if c.defs.contains d.name then throw s!"`{d.name}` is a definition of the language (tactics/{d.name}.tac)"
+    modify fun st => { st with defs := st.defs.insert d.name d }
+    return .obj #[("defined", Json.str d.signature)]
 
 /-- The names of the arguments that a tool takes. -/
 def Tool.params (t : Tool) : Array String :=
@@ -517,7 +539,7 @@ def call (c : Ctx) (name : String) (args : Json) : ToolM Json := do
         if !t.params.contains k then
           throw s!"`{name}` has no argument `{k}`; it takes {", ".intercalate (t.params.map (s!"`{·}`")).toList}"
   match name with
-  | "language" => return .obj #[("language", Json.str Dsl.help)]
+  | "language" => return .obj #[("language", Json.str (Dsl.helpWith (c.allDefs (← get))))]
   | "find" => find c args
   | "start" => start c args
   | "goals" => goals args
@@ -531,6 +553,7 @@ def call (c : Ctx) (name : String) (args : Json) : ToolM Json := do
   | "replay" => replayTool c args
   | "proof" => proof c args
   | "close" => close args
+  | "define" => define c args
   | _ => throw s!"there is no tool `{name}`"
 
 end Whitehead.Mcp

@@ -104,6 +104,21 @@ def seq {σ τ : Type} (a : Strategy σ) (b : Strategy τ) : Strategy (σ × τ 
   forward := a.forward || b.forward
   admitJoin f g := a.admitJoin f g && b.admitJoin f g
 
+/-- `a` each round, and `b` in a round where `a` has nothing to expand (`first`):
+combined by order, where `seq` combines in time. `a` is asked again every round, since
+what `b` does may give it something. -/
+def first {σ τ : Type} (a : Strategy σ) (b : Strategy τ) : Strategy (σ × τ) where
+  root := a.root
+  init := (a.init, b.init)
+  step env st :=
+    match a.step env st.1 with
+    | (.done, sa) =>
+      let (d, sb) := b.step env st.2
+      (d, (sa, sb))
+    | (d, sa) => (d, (sa, st.2))
+  forward := a.forward || b.forward
+  admitJoin f g := a.admitJoin f g && b.admitJoin f g
+
 /-- The strategy that does nothing (`ruDoneTactic`). -/
 def done : Strategy Unit where
   root := none
@@ -123,6 +138,8 @@ def limited (a : AnyStrategy) (size depth : Nat) : AnyStrategy :=
   if size == 0 then a else ⟨a.strategy.sized size⟩
 
 def seq (a b : AnyStrategy) : AnyStrategy := ⟨a.strategy.seq b.strategy⟩
+
+def first (a b : AnyStrategy) : AnyStrategy := ⟨a.strategy.first b.strategy⟩
 
 /-- `a`, only in the subtree of goal node `h` (Russell's `focus`, with one seed). -/
 def focus (a : AnyStrategy) (h : Nat) : AnyStrategy := ⟨a.strategy.restrict fun env p => env.isUnder p h⟩

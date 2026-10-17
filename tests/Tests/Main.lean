@@ -20,6 +20,7 @@ import Tests.Prove.Session
 import Tests.Prove.Filter
 import Tests.Prove.Hints
 import Tests.Prove.Rails
+import Tests.Prove.Tactics
 import Tests.Mcp
 
 def main : IO UInt32 := do
@@ -47,6 +48,7 @@ def main : IO UInt32 := do
     Tests.Prove.subproofTests
     Tests.Prove.hintTests
     Tests.Prove.railsTests
+    Tests.Prove.tacticsTests
     Tests.Mcp.jsonTests
     Tests.Mcp.serverTests
     Tests.Prove.fullReplayTests

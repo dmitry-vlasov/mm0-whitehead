@@ -19,10 +19,12 @@ fragment does not fit, because the goal has no variant for its assertion, that b
 of the replay ends.
 
 Which subproofs are put down, and how many, is configured (`ReplayConfig`): how many at a
-goal, by which rank, from what size, from which proofs, and at which goals.
+goal, by which rank, from what size, and from which proofs. Where they are put down is
+`follow`'s (`FollowConfig`). The tactics `replay` and `rails` are definitions made of
+`follow`, `search` and `first` (`tactics/*.tac`; `docs/DESIGN.md`, "Composable tactics").
 -/
 import Whitehead.Prove.Subproofs
-import Whitehead.Prove.Combinators
+import Whitehead.Prove.Cost
 
 namespace Whitehead.Prove
 
@@ -63,7 +65,6 @@ structure ReplayConfig where
   /-- The fewest steps of a subproof put down. -/
   minSize : Nat := 2
   source : RailSource := .earlier
-  seeds : RailSeeds := .open
   /-- Only subproofs that leave at most this many hypotheses open (see `RailRank.reach`). -/
   maxOpen : Nat := 1000000
   deriving Inhabited, Repr
@@ -178,162 +179,104 @@ def replayStep (rails : Rails) (env : Env) (st : ReplayState) : Array Nat × Rep
       expanding := expanding.push (p, k)
   return (items, { st with pending := #[], expanding })
 
-/-- `replay` (Russell's `spr`): subproofs of earlier proofs put down at goals, `cfg.count`
-of them at each, and followed step by step into their premises. When nothing is left to
-follow, the goals not looked at yet are looked at, as `cfg.seeds` says; when no goal is
-left, it is done. Unbounded on its own: within a `limited`, or a time. -/
-def Strategy.replay (rails : Rails) (cfg : ReplayConfig) : Strategy ReplayState where
-  root := none
-  init := {}
-  step env st := Id.run do
-    let (items0, st0) := replayStep rails env st
-    let mut st := st0
-    let mut items := items0
-    -- nothing to follow: new goals to put subproofs down at
-    while items.isEmpty && st.expanding.isEmpty do
-      let mut pending := #[]
-      let mut seeded := st.seeded
-      let goals : Array Nat := match cfg.seeds with
-        | .root => if st.started then #[] else #[0] ++ env.hints
-        | .open => (Array.range (env.hyps.size - st.looked)).map (st.looked + ·) |>.filter fun h =>
-            env.isBackwardGoal h && env.hyps[h]!.proofs.isEmpty
-      for h in goals do
-        if seeded.contains h then continue
-        seeded := seeded.insert h
-        for k in rails.at_ env h cfg do pending := pending.push (h, k)
-      st := { st with seeded, looked := env.hyps.size, started := true, pending }
-      if pending.isEmpty then return (.done, st)
-      let (items', st'') := replayStep rails env st
-      items := items'
-      st := st''
-    return (.expand (items.map (·, none)), st)
-
 /-- Subproofs `pairs`, each put down at its goal node, and followed; then done. -/
 def Strategy.replayFrom (rails : Rails) (pairs : Array (Nat × Nat)) : Strategy ReplayState where
   root := none
   init := { pending := pairs, started := true }
   step env st :=
     let (items, st) := replayStep rails env st
-    if items.isEmpty && st.expanding.isEmpty then (.done, st) else (.expand (items.map (·, none)), st)
+    if items.isEmpty && st.expanding.isEmpty then (.done, st) else (.expand (items.map (·, none)) .follow, st)
 
-/-- Where `rails` puts subproofs down, besides what it replays. -/
-structure RailsConfig where
-  replay : ReplayConfig := {}
-  /-- Only at goals of this cost or less (`Strategy.rails`). -/
-  upto : Nat := 0
-  /-- Only at goals without variables: a goal with variables fits many more subproofs. -/
-  ground : Bool := true
-  /-- What a goal that a subproof leaves open costs more than the goal it was put down
-  at: 0 builds it up in the same round as that goal's other variants, more puts it later. -/
-  penalty : Nat := 0
+/-! ### Guides, and `follow` -/
+
+/-- Where the proof fragments for a goal come from, for `follow`. -/
+inductive Guide where
+  /-- The subproofs of earlier proofs that fit the goal, as `cfg` chooses and orders
+  them (`Rails.at_`). -/
+  | subproofs (cfg : ReplayConfig)
+  /-- The theorem's own proof, when it is a theorem of the file (`oracle` does the same
+  from the proof's statements): for tests. -/
+  | proof
   deriving Inhabited, Repr
 
-/-- The state of `rails`: the replay; the assertion nodes it expanded; and the cost of the
-goal nodes, as far as it is known. -/
-structure RailsState where
+/-- The fragments of guide `g` for goal node `h`. -/
+def Guide.at_ (g : Guide) (r : Rails) (env : Env) (h : Nat) : Array Nat :=
+  match g with
+  | .subproofs cfg => r.at_ env h cfg
+  | .proof => match r.sp.roots.find? (·.1 == env.task.limit) with
+    | some (_, k) => #[k]
+    | none => #[]
+
+/-- Where `follow` puts fragments down. -/
+structure FollowConfig where
+  guide : Guide := .proof
+  /-- At the root and the intermediate goals, or at every open goal, each once. -/
+  seeds : RailSeeds := .open
+  /-- Only at goals with at most this many assertion nodes above them that `follow` did
+  not expand. -/
+  upto : Option Nat := none
+  /-- Only at goals without variables: a goal with variables fits many more subproofs. -/
+  ground : Bool := false
+  /-- Also at the goals that a fragment left open. Without it, `follow` stays fair
+  beside a search whose cost makes its steps free: fragments are not put down on one
+  another without end. -/
+  chain : Bool := false
+  deriving Inhabited, Repr
+
+/-- The state of `follow`: the replay; the marks of the nodes it expanded; the costs of
+goal nodes, for `upto`. -/
+structure FollowState where
   replay : ReplayState := {}
-  replayed : Std.HashSet Nat := {}
-  /-- The goal nodes at which the replay expanded a variant: on a rail. -/
-  onRail : Std.HashSet Nat := {}
+  marks : Marks := {}
   cost : Std.HashMap Nat Nat := {}
-  /-- The depth of goal nodes: the number of assertion nodes above them. -/
-  depth : Std.HashMap Nat Nat := {}
   deriving Inhabited
 
-/-- The cost of goal node `h`: the number of assertion nodes above it that the replay did
-not expand. The cost of an assertion node is that of its goal and one more, unless the
-replay expanded it; a goal that a replayed node leaves open, where the replay went no
-further (not `onRail`), costs `penalty` more. -/
-partial def railCost (env : Env) (replayed onRail : Std.HashSet Nat) (penalty : Nat) (cost : Std.HashMap Nat Nat)
-    (h : Nat) : Nat × Std.HashMap Nat Nat :=
-  if let some c := cost[h]? then (c, cost)
-  else match env.hyps[h]!.parent with
-    | none => (0, cost.insert h 0)
-    | some q =>
-      let (c, cost) := railCost env replayed onRail penalty cost env.props[q]!.parent
-      let c := if !replayed.contains q then c + 1 else if onRail.contains h then c else c + penalty
-      (c, cost.insert h c)
-
-/-- `rails`: the replay of subproofs combined with breadth-first search, by cost.
-- **Cost:** a step that the replay takes costs nothing, and one that the search takes
-  costs one. Each round expands the leaves of the least cost, so without subproofs this is
-  breadth-first, round for round.
-- **Rails first:** the goals that a subproof leaves open cost what the goal it was put
-  down at costs, so they are built up in the same round as that goal's other variants.
-  At a goal on the rail, where the replay took a step, the other variants are the
-  alternatives to the rail: they cost the depth of the goal and one, as in breadth-first,
-  so that a rail does not bring the variants of all its goals into the first rounds.
-- **Where subproofs go down:** at the goals of cost `upto` or less (with `ground`, those
-  without variables), `count` of them at each, as `ReplayConfig` says, and followed before
-  the next round. Not at a goal that a replay opened: subproofs there would cost nothing
-  as well, and could be put down on one another without end.
-- **Completeness:** every leaf is reached in its turn, so nothing is lost. -/
-def Strategy.rails (r : Rails) (cfg : RailsConfig) : Strategy RailsState where
+/-- `follow(g, ...)`: the fragments of guide `g`, put down at goals as `cfg` says, and
+followed step by step into their premises; nothing else. Each step expands, at a goal,
+the variant for the fragment's assertion there; a branch where the goal has no such
+variant ends. When nothing is left to follow, the goals not looked at yet are looked at;
+when none of them takes a fragment, it has nothing to expand (done; inside `first`,
+asked again the next round). Its nodes are labelled `follow`. Russell's `follow-proof`,
+over many fragments; with `subproofs`, its `spr`. -/
+def Strategy.follow (r : Rails) (cfg : FollowConfig) : Strategy FollowState where
   root := none
   init := {}
   step env st := Id.run do
-    let mut st := st
-    -- the replay, first: what it has to follow, then new goals to put subproofs down at
-    let (items, rs) := replayStep r env st.replay
-    let mut items := items
-    let mut rs := rs
+    let (items0, rs0) := replayStep r env st.replay
+    let mut items := items0
+    let mut rs := rs0
+    let mut marks := st.marks
+    let mut cost := st.cost
+    -- nothing to follow: new goals to put fragments down at
     if items.isEmpty && rs.expanding.isEmpty then
+      marks := marks.update env #[.follow]
+      let goals : Array Nat := match cfg.seeds with
+        | .root => if rs.started then #[] else #[0] ++ env.hints
+        | .open => (Array.range (env.hyps.size - rs.looked)).map (rs.looked + ·)
       let mut pending := #[]
       let mut seeded := rs.seeded
-      let mut cost := st.cost
-      for h in [rs.looked:env.hyps.size] do
+      for h in goals do
         if !env.isBackwardGoal h || !env.hyps[h]!.proofs.isEmpty || seeded.contains h then continue
-        -- a goal that a replay opened is built up, not given subproofs of its own: those
-        -- would cost nothing too, and put down without end
-        if (env.hyps[h]!.parent.any st.replayed.contains) then continue
+        if !cfg.chain && env.hyps[h]!.parent.any marks.props.contains then continue
         if cfg.ground && env.hyps[h]!.expr.hasVars then continue
-        let (c, cost') := railCost env st.replayed st.onRail cfg.penalty cost h
-        cost := cost'
-        if c > cfg.upto then continue
+        if let some u := cfg.upto then
+          let (c, cost') := goalCost env marks 0 cost h
+          cost := cost'
+          if c > u then continue
         seeded := seeded.insert h
-        for k in r.at_ env h cfg.replay do pending := pending.push (h, k)
-      rs := { rs with seeded, looked := env.hyps.size, pending }
-      st := { st with cost }
+        for k in cfg.guide.at_ r env h do pending := pending.push (h, k)
+      rs := { rs with seeded, looked := env.hyps.size, started := true, pending }
       let (items', rs') := replayStep r env rs
       items := items'
       rs := rs'
-    -- what the replay follows without expanding: on to its premises in the next step
+    -- what was expanded already, by something else: on to its premises
     while items.isEmpty && !rs.expanding.isEmpty do
       let (items', rs') := replayStep r env rs
       items := items'
       rs := rs'
-    if !items.isEmpty then
-      return (.expand (items.map (·, none)),
-        { st with replay := rs, replayed := items.foldl (init := st.replayed) (·.insert ·),
-                  onRail := items.foldl (init := st.onRail) fun s p => s.insert env.props[p]!.parent })
-    -- a round of the search: the leaves of the least cost
-    let mut cost := st.cost
-    let mut depth := st.depth
-    let mut best := none
-    let mut round := #[]
-    for p in env.leafs do
-      if env.props[p]!.expanded then continue
-      let h := env.props[p]!.parent
-      let c ← if st.onRail.contains h then do
-          let (d, depth') := railCost env {} {} 0 depth h
-          depth := depth'
-          pure d
-        else do
-          let (c, cost') := railCost env st.replayed st.onRail cfg.penalty cost h
-          cost := cost'
-          pure c
-      match best with
-      | none =>
-        best := some c
-        round := #[p]
-      | some b =>
-        if c < b then
-          best := some c
-          round := #[p]
-        else if c == b then round := round.push p
-    st := { st with replay := rs, cost, depth }
-    if round.isEmpty then return (.done, st)
-    return (.expand (round.map (·, none)), st)
+    let st := { replay := rs, marks, cost }
+    if items.isEmpty then return (.done, st)
+    return (.expand (items.map (·, none)) .follow, st)
 
 /-- How far subproofs `k` and `j` agree from the top: the steps they have in common,
 the same assertion at the same place. -/

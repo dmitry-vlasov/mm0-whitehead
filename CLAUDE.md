@@ -221,15 +221,18 @@ benchmarking. The design is in `docs/DESIGN.md`, "Phase 4". Its principles:
   remain, then chooses among them. A choice is a focus: the other variants stay in the
   tree, and nothing is pruned.
 - **One DSL for tactics and filters,** extending Russell's tactic DSL. Tactics may use
-  filters; filters never use tactics.
+  filters; filters never use tactics. Tactics are composed of atoms with simple
+  meanings (`DESIGN.md`, "Composable tactics"): four sorts, filter, guide, cost and
+  tactic, each using only those before it; atoms share no state, only the labels of
+  the tree; compositions are definitions in `tactics/*.tac`.
 - **An intermediate goal is any expression, offered as a hint that may lead to a
   proof.** If it is deduced from the premises, it joins the forward frontier. If it is
   used in the proof of the main goal, it becomes a node of the backward frontier.
 - **Backward first.** How variants are chosen in the forward direction is not decided.
 - **A session:** the tree persists between requests, and one engine API serves the
   front-ends for humans and for AI.
-- **Mining and ranking are filter atoms:** linear subproofs mined from the set.mm
-  translation, and premise ranking (`DESIGN.md`, "Mining and ranking").
+- **Mining and ranking are filter atoms, guides and costs:** subproofs mined from the
+  set.mm translation, and premise ranking (`DESIGN.md`, "Mining and ranking").
 
 ## How to work
 

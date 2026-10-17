@@ -1494,14 +1494,17 @@ lists the components.
 
   Every parameter can be given by position or by name. Errors give the position and say
   what was expected.
-- **Two sorts:** a tactic may take a filter; a filter never takes a tactic. A filter in
-  a tactic's place, or a tactic in a filter's, is an error that names both sorts.
+- **Two sorts, then four:** a tactic may take a filter; a filter never takes a tactic. A
+  filter in a tactic's place, or a tactic in a filter's, is an error that names both
+  sorts. Guides and costs came on 2026-10-17 ("Composable tactics").
 - **Tactics:**
   - `bfs`, `forward`, `both`, `done`;
   - `filter(f, t)`: `t`, expanding only the variants that pass `f`;
   - `limited(t, size=, depth=)`: Russell's limiter. The size is a number of assertion
     nodes added, and the depth that of the leaves expanded;
-  - `seq(t1, t2, ...)`: each in turn.
+  - `seq(t1, t2, ...)`: each in turn;
+  - since 2026-10-17: `search`, `follow`, `first`, and `bfs` with parameters
+    ("Composable tactics").
 - **A restricted tactic** is handed a tree whose leaves are only those that pass, as
   Russell's `focus` does (`Strategy.restrict`). It works as it always does, and the
   leaves left out stay leaves: nothing is pruned. What the restriction says of a node
@@ -1511,11 +1514,12 @@ lists the components.
 - **Russell's selectors** (`all`, `frontier`, `leaf(id)`, `assertion(name)`, for `focus`
   and `track`) choose nodes; filters choose the variants of a node. They are not ported.
 
-### Composable tactics (a proposal of 2026-10-17)
+### Composable tactics (proposed and built 2026-10-17)
 
 The author's request: tactics made of atoms with simple meanings, put together by
-combinators in the DSL. `replay` and `rails` were built to measure a concept. This is
-proposed, not built; the questions are at the end.
+combinators in the DSL. `replay` and `rails` were built to measure a concept. Proposed,
+answered by the author, and built on 2026-10-17 (`Prove/Cost.lean`, `Prove/Rails.lean`,
+`Prove/Dsl.lean`, `tactics/*.tac`).
 
 #### What Russell has
 
@@ -1568,51 +1572,72 @@ Checked on 2026-10-17 in `russell-flow`.
   - following them;
   - the order of the search.
 
-#### The proposal
+#### The design
 
 - **Four sorts, each using only those before it:** filter, guide, cost, tactic.
-- **Filter** (built): a predicate over the variants of a node.
-- **Guide** (new): where the proof fragments for a goal come from:
-  - `subproofs(count, rank=, open=, min=, source=)`: the index of subproofs, as `replay`
-    takes them now;
-  - `proof`: the theorem's own proof, as `oracle` follows it (`Prove.lean`);
+- **Filter:** a predicate over the variants of a node, as before.
+- **Guide:** where the proof fragments for a goal come from:
+  - `subproofs(count, rank=, min=, source=, open=)`: the index of subproofs;
+  - `proof`: the theorem's own proof, as `oracle` follows it (`Prove.lean`): for tests;
   - later: linear chains, and the proofs of intermediate goals.
-- **Cost** (new): the order of the leaves:
-  - `depth`: the number of assertion nodes above a leaf, the leaf included;
-  - `depth(free=A, penalty=N)` is the cost of `rails`:
-    - a node that atom A expanded costs nothing;
-    - an alternative at a goal where such a node hangs costs its full depth;
-    - a goal that A left open costs N more;
+- **Cost:** the order of the leaves. `depth(L1, L2, ..., penalty=N)`:
+  - the number of assertion nodes above a leaf's goal;
+  - a node with one of the labels L1, L2, ... costs nothing;
+  - an alternative at a goal where such a node hangs costs its full depth;
+  - a goal that such a node left open costs N more;
+  - `depth` alone is the depth, and `depth(follow)` is the cost of `rails`;
   - later: the ranks of the ranking layer.
 - **Tactic atoms, one meaning each:**
-  - `search(c)`: each round, the unexpanded leaves of the least cost `c`. `bfs` is
-    `search(depth)`;
-  - `follow(g, at=root|open, upto=N, ground, chain)`: the variants that the fragments
-    of `g` name, at the goals chosen, step by step, and nothing else. It is Russell's
-    `follow-proof` over many fragments;
-  - `forward` and `done`, as now.
+  - `bfs(filter=F, size=N, depth=M)`: every leaf, round by round. With parameters, at
+    the author's answer, it is still an atom, since it takes no tactic. It means
+    `limited(filter(F, bfs), size=N, depth=M)`;
+  - `search(cost, filter=, size=, depth=)`: each round, the unexpanded leaves of the
+    least cost. `search(depth)` is `bfs` round for round, on a tree without intermediate
+    goals, whose leaves cost less and come first;
+  - `follow(g, at=open|root, upto=N, ground=, chain=)`: the fragments of guide `g`, put
+    down at the goals chosen and followed step by step, and nothing else. It is Russell's
+    `follow-proof` over many fragments:
+    - `upto=N`: only at goals with at most N assertion nodes above them that `follow` did
+      not expand;
+    - `ground`: only at goals without metavariables;
+    - `chain`: also at the goals that a fragment left open;
+  - `forward`, `both` and `done`, as before.
 - **Combinators:**
-  - in time: `seq`, `loop`, `limited`, as now;
-  - in space: `filter`, `focus`, as now;
-  - by order, new: `first(t1, t2, ...)`, which each round runs the first that has
-    something to expand;
-  - in turns: `both(t1, t2)`, a round of each in turn. `both` as it is now becomes
-    `both(bfs, forward)`.
-- **Atoms share no state; they speak through the tree.**
-  - The search loop stamps each assertion node with the atom that expanded it, and
-    `depth(free=follow)` reads the stamps. Russell's `tag` does this, for statistics.
-  - The session stamps an agent's choices `choose`. So `search(depth(free=choose))`
-    goes on first from what the agent chose.
-- **Definitions** are named compositions with parameters, as Russell's `.tac` files.
-  The built-in tactics become a prelude:
-  - `bfs = search(depth)`;
-  - `replay(...) = follow(subproofs(...), at=open, chain)`;
-  - `rails(n, ...) = first(follow(subproofs(n, ...), at=open, upto=U, ground),
-    search(depth(free=follow, penalty=P)))`.
-- **Completeness is a property of the cost.** `search(c)` is fair when, for every N,
-  only finitely many leaves cost N or less.
+  - in time: `seq`, `loop`, `limited`;
+  - in space: `filter`, `focus`;
+  - by order: `first(t1, t2, ...)`, which each round runs the first that has something to
+    expand. The others wait. `t1` is asked again every round, since what the others do
+    may give it something.
+- **Labels: atoms share no state, they speak through the tree.**
+  - The search loop writes on each assertion node it expands the label of the atom that
+    asked for it (`Env.labels`): `search`, `follow` or, in a session, `choose`.
+  - `depth(follow)` reads the labels; `follow` reads them for `upto` and `chain`.
+  - So `search(depth(choose))` goes on first from what an agent chose.
+  - Russell's `tag` does the same, for statistics.
+- **Definitions** are named compositions with parameters, as Russell's `.tac` files:
+  - one to a file, `tactics/name.tac`: comment lines `--`, its help, then
+    `name(p, q=default, ...) = body`;
+  - in the body, `@p` stands for what `p` is given. Russell's `$p` is taken: `$` marks
+    a formula here;
+  - a call of it is its body, with the arguments put in, by name, by position or by
+    default. An error in the body is shown at the call;
+  - a definition may be a tactic, a filter, a cost or a guide;
+  - the directory is `--tactics DIR`, or `tactics` here, or `tactics` in the repository
+    the program was built in;
+  - an agent may define its own with the MCP tool `define`. They last while the server
+    runs, are never written, and cannot redefine the language's.
+- **`replay` and `rails` are definitions now** (`tactics/replay.tac`,
+  `tactics/rails.tac`):
+  - `replay(...) = follow(subproofs(...), at=@at, chain=true)`;
+  - `rails(...) = first(follow(subproofs(...), at=open, upto=@upto, ground=@ground),
+    search(depth(follow, penalty=@penalty)))`.
+- **One change of meaning:** `upto` counts the nodes above a goal without the penalty.
+  `Strategy.rails` counted it, so the two differ only where both `upto` and `penalty`
+  are more than 0.
+- **Completeness is a property of the cost.** `search(c)` is fair when, for every N, only
+  finitely many leaves cost N or less.
   - `depth` is fair.
-  - `depth(free=follow)` is fair too: each fragment is finite, and without `chain` no
+  - `depth(follow)` is fair too: each fragment is finite, and without `chain` no
     fragment goes down at a goal that a fragment left open.
 - **Not ported:**
   - `or-else` is `seq` here, since building a tactic costs nothing;
@@ -1622,24 +1647,32 @@ Checked on 2026-10-17 in `russell-flow`.
 - **Mining and ranking** become guides and costs, besides the filter atoms they are now
   (CLAUDE.md, "Phase 4").
 
-#### Order of building
+#### How it was checked
 
-1. The stamps. The trees do not change (the diff tests).
-2. Costs and `search`. `search(depth)` builds the tree of `bfs`, round for round.
-3. Guides and `follow`. `follow` builds the tree of `replay`.
-4. `first`. The prelude's `rails` builds the trees of `Strategy.rails`, on the fixture
-   and in the node-limited runs on set.mm. Then `Strategy.rails` goes.
-5. Definitions, and the prelude.
-6. The thorough tests.
+- **Labels:** the labels change no tree.
+- **`search(depth)`** builds `bfs`'s tree on every theorem of the fixture: the same
+  nodes, expanded in the same order, and the same proof.
+- **`rails` and `replay` as definitions** build the trees of `Strategy.rails` and
+  `Strategy.replay`, on every theorem of the fixture, for ten configurations. The two
+  strategies left the library; they are kept in the tests as the reference
+  (`tests/Tests/Prove/RailsRef.lean`).
+- **set.mm:** before the old strategies left, the definitions and the strategies were run
+  side by side (`prove search --tactic`, 20,000 assertion nodes a theorem, so that a run
+  does not depend on the clock). The output was the same, theorem for theorem: the
+  ending, the steps, the nodes made and expanded, the tuples and the work of the joins.
+  The verifier rejected no proof.
+  - `rails(10, rank=reach, open=0, upto=1)` on every 40th theorem (1,198): 45 proved;
+  - the same on every 10th of the propositional and predicate calculus (281): 66 proved;
+  - `rails(3)` on every 40th: 24 proved;
+  - `replay(3)` on every 40th: 13 proved;
+  - `rails(3, rank=size, upto=2, ground=false)` on every 40th: 14 proved.
 
-#### Questions
+#### The author's answers (2026-10-17)
 
-1. **BFS with parameters:** do you mean one search atom whose parameter is the order,
-   `bfs` = `search(depth)`? Or should its parameters be others, such as a filter, a
-   scope or limits? (These are combinators now: `filter(f, bfs)`, `limited(bfs, ...)`.)
-2. **The stamps** change the search loop, not the expansion. Is that acceptable?
-3. **Definitions:** a prelude file in the repository, like Russell's `tactics/*.tac`. May
-   an agent also define its own in a session?
+1. **BFS with parameters:** filters, scopes and limits, as parameters of the atom.
+2. **Labels:** acceptable.
+3. **Definitions:** the author was not sure where; Russell's way was taken, a separate
+   file for each, parsed by the language.
 
 ### Intermediate goals
 
@@ -1934,7 +1967,7 @@ Checked on 2026-10-17 in `russell-flow`.
    ("Intermediate goals", "Not built").
 7. Whether a choice at one sibling should narrow the variants shown at the others, by
    the bindings of the proofs joined at their parent ("The first pilot").
-8. The composable tactics: the questions of "Composable tactics".
+8. The composable tactics: answered and built 2026-10-17 ("Composable tactics").
 
 ### Order of building (a proposal)
 

@@ -21,6 +21,15 @@ def railsTests : TestM Unit := do
   let rails := Rails.ofDb db
   let index := db.index
   let envOf (name : String) : Env := Env.init db index (db.task (id name))
+  -- replay and rails are definitions (tactics/*.tac)
+  let defs ← match ← Dsl.loadDefs "tactics" with
+    | .ok d => pure d
+    | .error _ => pure {}
+  let ctx : Dsl.Ctx := { db, rails := some rails, defs }
+  let tac (text : String) : AnyStrategy :=
+    match Dsl.parseTactic ctx text with
+    | .ok t => t
+    | .error _ => ⟨Strategy.done⟩
   -- the subproofs that fit a goal: of earlier proofs only, ranked, as many as asked
   let at0 (name : String) (cfg : ReplayConfig) : Array Nat :=
     let env := envOf name
@@ -54,10 +63,17 @@ def railsTests : TestM Unit := do
   match rails.sp.roots.find? (·.1 == id "mpd") with
   | none => check "rails: mpd's proof is read" false
   | some (_, mpdProof) =>
-    let s := (Strategy.replayFrom rails #[(0, mpdProof)]).seq (Strategy.rails rails { replay := { count := 0 } })
-    let r ← search vc (envOf "syl") s { maxProps := 100000 }
+    let s := (⟨Strategy.replayFrom rails #[(0, mpdProof)]⟩ : AnyStrategy).seq (tac "search(depth)")
+    let r ← search vc (envOf "syl") s.strategy { maxProps := 100000 }
     checkEq "rails: a rail with a goal left open, built up by the search"
       ((r.proof.map (proofText db)).getD "none") "(mpd h1 (a1i h0))"
+    -- by depth(follow), the rail's step is free, read off its label: the goal it left open
+    -- costs what the root's alternatives cost, and is built up in the same rounds
+    let s := (⟨Strategy.replayFrom rails #[(0, mpdProof)]⟩ : AnyStrategy).seq (tac "search(depth(follow))")
+    let r' ← search vc (envOf "syl") s.strategy { maxProps := 100000 }
+    check "rails: the step of a rail followed before is free for the search after it"
+      (r'.ending == .proved && r'.env.labels.any (·.2 == .follow) && r'.env.props.size ≤ r.env.props.size)
+      s!"{r'.env.props.size} against {r.env.props.size} nodes"
   -- reach: mpd's lemma at syl, (a -> b), (a -> b -> c) => a -> c, leaves one hypothesis
   -- open: ph -> ps is syl's premise, ph -> ps -> ch is not
   match rails.sp.roots.find? (·.1 == id "mpd") with
@@ -77,23 +93,20 @@ def railsTests : TestM Unit := do
   let mut same := true
   for (thm, _) in rails.sp.roots do
     let a ← search vc (Env.init db index (db.task thm)) breadthFirst { maxProps := 3000 }
-    let b ← search vc (Env.init db index (db.task thm)) (Strategy.rails rails { replay := { count := 0 } })
-      { maxProps := 3000 }
+    let b ← search vc (Env.init db index (db.task thm)) (tac "rails(0)").strategy { maxProps := 3000 }
     if a.ending != b.ending || (a.proof.map (proofText db)) != (b.proof.map (proofText db)) ||
         a.env.props.size != b.env.props.size then same := false
   check "rails: without subproofs, the same tree and proofs as breadth-first" same
   -- rails with subproofs: every proof found is checked by the verifier, as any
   let mut proved := 0
   for (thm, _) in rails.sp.roots do
-    let r ← search vc (Env.init db index (db.task thm)) (Strategy.rails rails { replay := { count := 3 } })
-      { maxProps := 3000 }
+    let r ← search vc (Env.init db index (db.task thm)) (tac "rails(3)").strategy { maxProps := 3000 }
     if r.ending == .proved && r.body.any (·.size > 0) then proved := proved + 1
   check "rails: with subproofs, theorems proved and verified" (proved ≥ 13) s!"{proved}"
   -- loop: the body again while the tree grows
   let r ← search vc (envOf "con1") ((breadthFirst.sized 100).loop 3) { maxProps := 100000 }
   check "rails: loop runs its body again" (r.env.props.size > 100) s!"{r.env.props.size}"
   -- the language
-  let ctx : Dsl.Ctx := { db, rails := some rails }
   let ok (text : String) : Bool := (Dsl.parseTactic ctx text).isOk
   check "rails: the tactics of the language"
     (ok "replay" && ok "replay(5, rank=size, min=3, source=recurring, at=root)" && ok "rails(3)" &&
@@ -103,7 +116,7 @@ def railsTests : TestM Unit := do
     match Dsl.parseTactic c text with
     | .ok _ => "accepted"
     | .error e => e.msg
-  checkEq "rails: without the subproofs" (err { db } "rails(3)") "`rails` needs the subproofs of the file"
+  checkEq "rails: without the subproofs" (err { db, defs } "rails(3)") "`follow` needs the subproofs of the file"
   checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size, small or reach, not `best`"
   checkEq "rails: a source that is not one" (err ctx "replay(source=all)") "`source` is earlier or recurring, not `all`"
 

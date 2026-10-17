@@ -24,8 +24,10 @@ def usage : String :=
                                  1,000,000 by default), each next with F (4) times those, on the
                                  theorems stopped at a limit; --max-steps N: proofs of more than N
                                  steps are left out
-  dsl                            list the tactics and filters of the language of sessions
-  mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous]
+  dsl [--tactics DIR]            list the tactics, costs, guides and filters of the language of
+                                 sessions, and the definitions of DIR (tactics/ by default:
+                                 here, or in the repository the program was built in)
+  mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous] [--tactics DIR]
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
                                  message; --anonymous: assertions are shown as A and their
@@ -45,7 +47,7 @@ def usage : String :=
                                  how far the subproofs of earlier proofs that fit the goal of a
                                  theorem agree with its known proof, for the first 1, 3 and 10
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--tactic T] [--max-facts N] [--join-cap N|all]
+               [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--max-facts N] [--join-cap N|all]
                [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
                                  forward from the premises, or both in turn. --max-facts: the
@@ -53,7 +55,8 @@ def usage : String :=
                                  new subgoal is joined with when it is made (4). --meta: the binders
                                  with these numbers are metavariables, for which values are found;
                                  --tactic: a tactic of the language for every theorem (`dsl`),
-                                 such as `seq(limited(replay(3), size=5000), bfs)`
+                                 such as `rails(10, rank=reach, open=0, upto=1)`; --tactics: the
+                                 directory of the definitions, as for `dsl`
                                  replay and search: [--jobs N] theorems at once (default: one per
                                  processor), [--max-mem GB] memory limit (default 32; above 80%
                                  the largest running theorem gives up, above 90% all running ones,
@@ -564,12 +567,16 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       if let some why := db.metasFault a.id opts.metas then
         IO.eprintln s!"{path}: --meta: {why}"
         return 1
-  -- a tactic of the language, for every theorem; with `replay`, the subproofs of the file
+  -- a tactic of the language, for every theorem; the subproofs of the file are made if it
+  -- follows them
   let tactic := strOption args "--tactic"
-  let rails : Option Prove.Rails :=
-    if tactic.any fun t => (t.splitOn "replay").length > 1 || (t.splitOn "rails").length > 1 then
-      some (Prove.Rails.ofDb db) else none
-  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails }
+  let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
+    | .ok defs => pure defs
+    | .error msg =>
+      IO.eprintln msg
+      return 1
+  let rails : Thunk Prove.Rails := Thunk.mk fun _ => Prove.Rails.ofDb db
+  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs }
   if let some text := tactic then
     if let .error e := Prove.Dsl.parseTactic (ctx 0) text then
       IO.eprintln (Prove.Dsl.ParseError.show text e)
@@ -656,11 +663,17 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
 
 /-- `mcp`: the MCP server for an agent, on stdin and stdout (`Mcp/Server.lean`). -/
 def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
+  let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
+    | .ok defs => pure defs
+    | .error msg =>
+      IO.eprintln msg
+      return 1
   match ← Mcp.Ctx.load mm0 mmb (anonymous := args.contains "--anonymous") with
   | .error msg =>
     IO.eprintln msg
     return 1
   | .ok c =>
+    let c := { c with defs }
     match strOption args "--log" with
     | some path =>
       IO.FS.withFile path .append fun h => Mcp.serve c (some h)
@@ -682,9 +695,14 @@ def main (args : List String) : IO UInt32 := do
   | ["verify", path] => verifyMmb path
   | ["verify", mm0, mmb] => verifyPair mm0 mmb
   | ["prove", "db", path] => proveDb path
-  | ["dsl"] =>
-    IO.print Prove.Dsl.help
-    return 0
+  | "dsl" :: rest =>
+    match ← Prove.Dsl.loadTactics (strOption rest "--tactics") with
+    | .ok defs =>
+      IO.print (Prove.Dsl.helpWith defs)
+      return 0
+    | .error msg =>
+      IO.eprintln msg
+      return 1
   | "mcp" :: mm0 :: mmb :: rest => mcpServe mm0 mmb rest
   | "prove" :: "replay" :: path :: rest => proveReplay path rest
   | "prove" :: "search" :: path :: rest => proveSearch path rest

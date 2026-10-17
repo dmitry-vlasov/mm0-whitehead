@@ -58,10 +58,17 @@ breadth-first:
 All proofs were checked by the verifier. Rails ranked by occurrences alone lose
 (`DESIGN.md`, "How much it helps").
 
-The composable tactics are proposed (`DESIGN.md`, "Composable tactics"), after a reading
-of Russell's tactics: one search atom with a cost for its order, guides followed, a
-combinator by order, and the stamps through which atoms speak. `rails` becomes a
-definition. The author's answers are awaited.
+The composable tactics are built (`DESIGN.md`, "Composable tactics"), after a reading of
+Russell's tactics and the author's answers:
+- four sorts, filter, guide, cost and tactic, each using only those before it;
+- the atoms `search(cost)`, `follow(guide)` and `bfs` with a filter and limits; the
+  combinator `first`, by order;
+- labels on the nodes, through which atoms speak instead of sharing state;
+- definitions in `tactics/*.tac`, read by the language, and the agent's own through the
+  MCP tool `define`.
+
+`replay` and `rails` are definitions now. They build the trees of the strategies they
+were, on the fixture and on set.mm.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -407,7 +414,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,129 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,189 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -468,6 +475,13 @@ corpus of `scripts/build-corpus.sh` built — 1,129 checks, 0 failures, in 20 se
   fit expands nothing; a rail's open goal built up; the hypotheses a rail leaves open,
   the order by reach and `open=0`; `rails(0)` builds breadth-first's tree; `loop`; the
   tools `rails` and `replay`.
+- Prover, composable tactics: the labels of bfs, rails and a choice; `search(depth)`
+  builds breadth-first's tree; `bfs` and `search` with a filter and limits are
+  `limited(filter(...))`; `first`; `follow(proof)` proves every fixture theorem; `rails`
+  and `replay` as definitions build the trees of the reference strategies, in ten
+  configurations; the errors of the new components; definitions from text and from
+  files, called by name, position and default, with their errors; the MCP tool
+  `define`.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -523,7 +537,9 @@ at those of 2026-10-12 (backward 138 of 281, peano 90 of 270, both 167 of 281). 
 intermediate goals: 153 checks, 0 failures, 1 skip; backward 134 of 281. The search
 backward with 1 s each, run three times with the binary before and after, gave 137,
 136, 135 and 136, 135, 136: the count moves by a few theorems from run to run, and the
-node-limited comparison is identical.
+node-limited comparison is identical. After the composable tactics, whose labels are
+written by the search loop (2026-10-17): 153 checks, 0 failures, 1 skip; backward 135
+of 281, peano 90 of 270, both 165 of 281, and every full replay as before.
 
 Also checked by hand: `mm0-rs compile` accepts the output of `mm0-whitehead join` for
 `x86`, `mm0`, `peano_hex`, `verifier`, `compiler` and `hello_mmc`; and a test signature
@@ -606,8 +622,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    server; what a description of the next goals narrows on set.mm; and the first
    rank, by uses; two pilots, seven theorems proved by an agent, the second with the
    names hidden; and the replay of subproofs as rails, +54% proved on set.mm at 1 s.
-   Next: the composable tactics, once the author has answered (`DESIGN.md`,
-   "Composable tactics"); ranks for the rails that open goals (the ranking layer); the human front-end;
+   The composable tactics are built. Next: ranks for the rails that open goals (the
+   ranking layer, as costs); the human front-end;
    and a pilot at a larger scale, with counts per decision, for the dataset. Open: how a human moves
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one

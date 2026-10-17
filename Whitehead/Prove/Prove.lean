@@ -19,8 +19,9 @@ open Whitehead.Mmb
 
 /-- `RuProverTacticStep`: what a strategy asks for. -/
 inductive Decision where
-  /-- Expand these assertion nodes, each with the restriction of its premises, if any. -/
-  | expand (items : Array (Nat × Option (Array Only)))
+  /-- Expand these assertion nodes, each with the restriction of its premises, if any;
+  the nodes get the label (`Env.labels`). -/
+  | expand (items : Array (Nat × Option (Array Only))) (label : Label := .search)
   /-- `RuTacticExpandForward`: advance the forward front by one wave. -/
   | forward
   | done
@@ -529,14 +530,14 @@ partial def searchLoop {σ : Type} (accept : Env → ProofTree → Array Cond �
       if more then dry := false
       else if !dry then dry := true
       else return rej.result env .exhausted
-    | .expand items =>
+    | .expand items label =>
       dry := false
       env := env.dropExpanded
       for (p, only) in items do
         if env.props[p]!.expanded then continue
         if let some stop ← overNow env limits start sid then return rej.result env .limit (stop := stop)
         let (_, env') ← (proveProp p only).run env
-        env := env'
+        env := { env' with labels := env'.labels.push (p, label) }
         -- an intermediate goal proved: its proofs become facts (a session's; none here
         -- otherwise)
         if !env.hintProofs.isEmpty then env := ((← takeHints.run env)).2

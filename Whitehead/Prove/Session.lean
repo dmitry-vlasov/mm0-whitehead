@@ -138,11 +138,11 @@ def selectFacts (s : Session) (facts : Array Nat) (f : Filter) (n : Nat) (seed :
 /-- What the DSL needs to read filters and tactics for this session: its database, the
 specification if there is one, and the variables of its theorem, `metas` being the
 binders marked as metavariables in its task (`Db.task`). -/
-def dslCtx (s : Session) (spec : Option Notation := none) (metas : Array Nat := #[]) (rails : Option Rails := none) :
-    Dsl.Ctx :=
+def dslCtx (s : Session) (spec : Option Notation := none) (metas : Array Nat := #[])
+    (rails : Option (Thunk Rails) := none) (defs : Dsl.Defs := {}) : Dsl.Ctx :=
   let db := s.env.db
   let thm := s.env.task.limit
-  { db, spec, thm, vars := fun i => db.binderImage thm metas (db.asserts[thm]!.vars[i]?.getD 0), rails }
+  { db, spec, thm, vars := fun i => db.binderImage thm metas (db.asserts[thm]!.vars[i]?.getD 0), rails, defs }
 
 /-- The goal nodes that have no proof yet. -/
 def openGoals (s : Session) : Array Nat :=
@@ -171,8 +171,9 @@ def expandAll (s : Session) (props : Array Nat) : IO Session := do
   let mut rej := rej
   let mut found := found
   for p in props do
+    if env.props[p]!.expanded then continue
     let (_, env') ← (proveProp p none).run env
-    env := ((← takeHints.run env')).2
+    env := ((← takeHints.run { env' with labels := env'.labels.push (p, .choose) })).2
     if !env.rootProofs.isEmpty then
       let (f, rej', env') := takeFound accept env rej
       env := env'
