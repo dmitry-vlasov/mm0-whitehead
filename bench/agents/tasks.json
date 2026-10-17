@@ -1,0 +1,12 @@
+[
+ {"theorem": "mt2", "known_steps": 3, "area": "propositional"},
+ {"theorem": "bibi1", "known_steps": 4, "area": "propositional"},
+ {"theorem": "eor", "known_steps": 4, "area": "propositional"},
+ {"theorem": "sucsub", "known_steps": 7, "area": "arithmetic"},
+ {"theorem": "notfal", "known_steps": 9, "area": "propositional"},
+ {"theorem": "mulmoddir", "known_steps": 13, "area": "arithmetic"},
+ {"theorem": "ssasym", "known_steps": 18, "area": "sets"},
+ {"theorem": "addcom", "known_steps": 22, "area": "arithmetic, induction"},
+ {"theorem": "dvdasymd", "known_steps": 35, "area": "divisibility"},
+ {"theorem": "divmod", "known_steps": 48, "area": "division"}
+]

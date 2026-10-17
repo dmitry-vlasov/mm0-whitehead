@@ -17,6 +17,7 @@ import Whitehead.Json
 import Whitehead.Prove.Show
 import Whitehead.Prove.Session
 import Whitehead.Mm0.Load
+import Whitehead.Mmb.Write
 
 namespace Whitehead.Mcp
 
@@ -39,6 +40,9 @@ structure Ctx where
   rails : Thunk Rails := Thunk.pure default
   /-- The definitions of the language, from `tactics/` (`Dsl.loadTactics`). -/
   defs : Dsl.Defs := {}
+  /-- Where `proof` writes the proof file with each proof found put in, as
+  `<theorem>.mmb`, for another verifier to check (`mcp --export`). -/
+  exportDir : Option System.FilePath := none
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -432,6 +436,15 @@ def proof (c : Ctx) (args : Json) : ToolM Json := do
   | none => return .obj #[("proved", .bool false)]
   | some f =>
     let lines := f.proof.lines c.db o.printer o.session.env.task.premises
+    if let some dir := c.exportDir then
+      let file := c.db.file
+      let pos := (Array.range file.stmts.size).find? fun i =>
+        let st : Mmb.Stmt := file.stmts[i]!
+        st.index == o.thm && match st.kind with | .thm _ => true | _ => false
+      if let some i := pos then
+        let bodies := (Array.replicate file.stmts.size none).set! i (some f.body)
+        IO.FS.createDirAll dir
+        IO.FS.writeBinFile (dir / s!"{c.realNames[o.thm]?.getD s!"T{o.thm}"}.mmb") (file.withBodies bodies)
     return .obj #[("proved", .bool true), ("verified", .bool (f.body.size > 0)),
       ("steps", .arr (lines.map Json.str))]
 

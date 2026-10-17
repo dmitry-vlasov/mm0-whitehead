@@ -164,6 +164,20 @@ def serverTests : TestM Unit := do
   checkEq "server: the proof, by steps" ((pf.get? "steps").map (·.compress))
     (some "[\"1: hypothesis 0 |- ph -> ps\",\"2: hypothesis 1 |- ph -> ps -> ch\",\"3: a2i 2 |- (ph -> ps) -> ph -> ch\",\"4: ax_mp 1, 3 |- ph -> ch\"]")
   checkEq "server: verified" ((pf.get? "verified").bind (·.bool?)) (some true)
+  -- --export: the proof file with the proof found put in, which a verifier checks
+  let dir : System.FilePath := ".lake/test-export"
+  if ← dir.isDir then IO.FS.removeDirAll dir
+  let _ ← callTool { c with exportDir := some dir } st 121 "proof" (.obj #[("session", Json.ofNat 0)])
+  let files := (← dir.readDir).map (·.path)
+  match files[0]? with
+  | none => check "server: the proof exported" false
+  | some f =>
+    match Whitehead.Mmb.MmbFile.parse (← IO.FS.readBinFile f) with
+    | .error e => check "server: the proof exported" false e.msg
+    | .ok file =>
+      check "server: the proof exported, and the file checked" (files.size == 1 &&
+        (Whitehead.Verify.checkProofs file).toOption.isSome) s!"{f}"
+  IO.FS.removeDirAll dir
   -- a run, in a second session
   let _ ← callTool c st 13 "start" (.obj #[("theorem", "syl")])
   let (ran, _) ← callTool c st 14 "run" (.obj #[("session", Json.ofNat 1), ("tactic", "limited(bfs, depth=3)"),
@@ -257,5 +271,22 @@ def serverTests : TestM Unit := do
   check "server: anonymous, a session by the theorem's name, and a proof by numbers"
     (!err && (ran.get? "ending").bind (·.str?) == some "proved" &&
       ((pf.get? "steps").map (·.compress)).any fun t => contains t "A6" && !contains t "mpd") pf.compress
+  -- a theorem that the specification leaves out, such as a theorem of an .mm1 file that
+  -- its .mm0 does not list: its binders from the proof file, named by its index
+  let peano : System.FilePath := ".tools/corpus/peano.mmb"
+  if !(← peano.pathExists) then
+    skip "server: a theorem the specification leaves out" "run scripts/build-corpus.sh"
+    return
+  let some p := (← Ctx.load ".tools/corpus/peano.mm0" peano).toOption
+    | check "server: peano is loaded" false; return
+  let st ← IO.mkRef ({} : State)
+  let (s0, _) ← callTool p st 1 "start" (.obj #[("theorem", "bibi1")])
+  checkEq "server: the statement of a theorem the specification leaves out, with its names"
+    ((s0.get? "goal").bind (·.get? "statement") |>.bind (·.str?)) (some "a -> (a <-> b <-> b)")
+  let (vs, err) ← callTool p st 2 "variants" (.obj #[("session", Json.ofNat 0), ("node", Json.ofNat 0),
+    ("filter", "goal($ _ -> (a <-> b) -> b $)")])
+  check "server: a pattern that names its variables" (!err && (vs.get? "count").bind (·.nat?) == some 1) vs.compress
+  let (g, err) ← callTool p st 3 "goal" (.obj #[("session", Json.ofNat 0), ("statement", "a -> (a <-> b) -> b")])
+  check "server: an intermediate goal that names them" (!err && (g.get? "goal").isSome) g.compress
 
 end Tests.Mcp

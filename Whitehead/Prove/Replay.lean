@@ -418,8 +418,8 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit)
     if opts.verbose then
       let what := match result.ending with
         | .proved => s!"proved in {steps} steps (the file has {known})"
-        | .exhausted => "nothing left to expand"
-        | .limit => "limit reached"
+        | .exhausted => s!"nothing left to expand (the file has {known})"
+        | .limit => s!"limit reached (the file has {known})"
       let c := result.env.counters
       lines := lines.push s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms; \
         {c.expanded} expanded, {result.env.hyps.size} expression nodes, {c.tuples} tuples, {c.work} work\

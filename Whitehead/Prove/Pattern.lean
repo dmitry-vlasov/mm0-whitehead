@@ -33,6 +33,8 @@ structure Notation where
   terms : Array Nat
   /-- For each axiom and theorem of the specification, its number in the proof file. -/
   thms : Array Nat
+  /-- The proof file, for the theorems that the specification leaves out (`binders`). -/
+  file : MmbFile := default
   deriving Inhabited
 
 namespace Notation
@@ -55,11 +57,26 @@ def ofSpec (st : ElabState) (f : MmbFile) : Notation := Id.run do
     | .termDef _, .term i => terms := terms.set! i s.index
     | .ax, .thm i | .thm _, .thm i => thms := thms.set! i s.index
     | _, _ => pure ()
-  return { st, terms, thms }
+  return { st, terms, thms, file := f }
 
 /-- The theorem of the specification that is theorem `thm` of the proof file. -/
 def specThm (n : Notation) (thm : Nat) : Option Nat :=
   n.thms.findIdx? (· == thm)
+
+/-- The binders of theorem `thm` of the proof file, as the specification declares them;
+for a theorem that it leaves out, such as a theorem of an `.mm1` file that its `.mm0`
+does not list, those of the proof file, named by its index. -/
+def binders (n : Notation) (thm : Nat) : Array VarDecl :=
+  match n.specThm thm with
+  | some t => n.st.env.thms[t]!.args
+  | none =>
+    let args := n.file.thmArgs thm
+    let names := n.file.thmVarNames thm
+    let bound := (Array.range args.size).filter (args[·]!.bound)
+    (Array.range args.size).map fun i =>
+      let a := args[i]!
+      { name := names[i]?, sort := a.sort, bound := a.bound,
+        deps := ((Array.range bound.size).filter fun j => (a.deps >>> j.toUInt64) &&& 1 != 0).map (bound[·]!) }
 
 /-- The names that the specification gives to the assertions of the proof file. -/
 def names (n : Notation) : Array (Nat × String) :=
@@ -78,9 +95,9 @@ whose variables are `vars` in its task. `pos` is where the opening `$` is, for t
 positions of errors. -/
 def pattern (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos : Nat := 0) :
     Except ParseError Exp := do
-  let some t := n.specThm thm
-    | throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
-  let args := n.st.env.thms[t]!.args
+  if thm ≥ n.file.thms.size && (n.specThm thm).isNone then
+    throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
+  let args := n.binders thm
   let c := { Elab.mathCtx n.st args with hole := some args.size }
   let m : MathString := { text, span := ⟨pos, pos + text.utf8ByteSize + 2⟩ }
   let e ← parseMath c m .any
@@ -110,9 +127,9 @@ file, as `pattern` does; but a hole `_` is a new variable, a metavariable, numbe
 sort is asked for, as for a theorem. -/
 def formula (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos fresh : Nat) :
     Except ParseError (Exp × Nat) := do
-  let some t := n.specThm thm
-    | throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
-  let args := n.st.env.thms[t]!.args
+  if thm ≥ n.file.thms.size && (n.specThm thm).isNone then
+    throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
+  let args := n.binders thm
   let c := { Elab.mathCtx n.st args with hole := some args.size }
   let m : MathString := { text, span := ⟨pos, pos + text.utf8ByteSize + 2⟩ }
   let e ← parseMath c m .provable

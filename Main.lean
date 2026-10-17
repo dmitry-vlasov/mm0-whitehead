@@ -27,11 +27,12 @@ def usage : String :=
   dsl [--tactics DIR]            list the tactics, costs, guides and filters of the language of
                                  sessions, and the definitions of DIR (tactics/ by default:
                                  here, or in the repository the program was built in)
-  mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous] [--tactics DIR]
+  mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous] [--tactics DIR] [--export DIR]
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
                                  message; --anonymous: assertions are shown as A and their
-                                 number, but for the theorem a session starts on
+                                 number, but for the theorem a session starts on; --export: `proof`
+                                 writes DIR/<theorem>.mmb, the file with the proof found put in
   prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--shapes]
                                  how many variants the goal nodes on the paths of the known
                                  proofs have, each node expanded against the whole database:
@@ -711,7 +712,7 @@ def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
     IO.eprintln msg
     return 1
   | .ok c =>
-    let c := { c with defs }
+    let c := { c with defs, exportDir := (strOption args "--export").map System.FilePath.mk }
     match strOption args "--log" with
     | some path =>
       IO.FS.withFile path .append fun h => Mcp.serve c (some h)

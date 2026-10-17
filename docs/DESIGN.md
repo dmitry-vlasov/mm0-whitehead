@@ -2221,6 +2221,119 @@ were looked for offline, then tried in search.
   with `guided` it loses on both (165 and 96). The atom stays, not recommended: a proof
   that needs a variant of a low place is put back too far.
 
+### The agent bench: Whitehead against MM1 (2026-10-17)
+
+**The question, the author's hypothesis:** an agent that proves with the mechanical
+engine below it, Whitehead, spends less time and fewer tokens than one that proves the
+default way, writing MM1. The expected price is memory: Whitehead's trees are large.
+
+**The bench** (`bench/agents/`):
+- **Two agents,** `claude -p`, each in a directory of its own, with the same model
+  (Sonnet 5.5), effort (high) and limits (150 turns, $5, 40 minutes):
+  - `whitehead`: the MCP server of Whitehead on peano, with `tactics/`;
+  - `mm1`: `./check`, which puts the agent's proof after the theorem's header at the end
+    of the library and compiles it with `mm0-rs`, a hole `_` showing its goal.
+  - Both: `library.mm1`, the library up to the theorem, and `./search`, a search of it.
+  - Nothing else. The user's settings, skills and other MCP servers are not loaded. A
+    file outside the directory, other shell commands and the web are denied.
+- **The tasks:** ten theorems of `peano.mm1`, of 3 to 48 steps in the known proof
+  (`tasks.json`), chosen so that their statements use no local definition, which the
+  server could print but not read: `mt2`, `bibi1`, `eor`, `sucsub`, `notfal`,
+  `mulmoddir`, `ssasym`, `addcom`, `dvdasymd`, `divmod`. `guided` alone proves the
+  first in 2 s, none of the others.
+- **Measured:**
+  - the agent: tokens (input, cache writes, cache reads, output), cost, turns, time,
+    tool calls, from the transcript;
+  - the machine: the server's CPU time and largest resident memory, by `/usr/bin/time`,
+    or the same summed over every `./check`.
+- **Accepted by `mm0-rs` in both cases:**
+  - Whitehead's proof, through the server's new `--export`: `proof` writes the `.mmb`
+    with the proof found put in;
+  - the agent's `.mm1`, compiled again by the bench.
+- **Made for it in Whitehead:**
+  - a theorem that the specification leaves out, as `peano.mm0` leaves out all but the
+    `pub` ones, has its binders from the proof file, named by its index. Its statement
+    then prints with its names, and patterns and intermediate goals can name them;
+  - `mcp --export`;
+  - the size of the known proof in the search's verbose line for every ending.
+
+**Round 1, the library as it is.** Both proved all ten. The MM1 agent was cheaper on
+every task (W/M: Whitehead's figure over MM1's):
+
+| theorem | tokens W/M | cost W/M | time W/M | Whitehead calls | MM1 calls |
+|---|---|---|---|---|---|
+| `mt2` | 1.5 | 1.1 | 1.0 | 3 | 3 |
+| `bibi1` | 1.4 | 0.9 | 1.1 | 3 | 3 |
+| `eor` | 5.2 | 2.6 | 3.2 | 16 | 4 |
+| `sucsub` | 8.1 | 4.4 | 5.3 | 31 | 7 |
+| `notfal` | 3.7 | 2.3 | 2.2 | 12 | 5 |
+| `mulmoddir` | 11.4 | 6.2 | 5.2 | 28 | 4 |
+| `ssasym` | 12.3 | 6.9 | 4.6 | 40 | 9 |
+| `addcom` | 17.5 | 9.3 | 6.6 | 65 | 5 |
+| `dvdasymd` | 23.0 | 9.9 | 4.7 | 104 | 7 |
+| `divmod` | 20.2 | 9.9 | 4.6 | 144 | 14 |
+
+- **Totals:** 14.2M tokens and $10.68 for Whitehead, 1.04M and $1.59 for MM1.
+- **The MM1 agent recalled:** for `mt2`, `bibi1`, `notfal` and `mulmoddir` it wrote
+  the library's own proof, character for character, at its first check. The model knows
+  `peano.mm1`. So this round measures recall against search.
+
+**Round 2, the theorems renamed** (`rename.py`):
+- every theorem of the library is renamed `L` and its number, in proofs, `do` blocks
+  and comments, but not in formulas or strings;
+- the renamed file compiles with `mm0-rs` with no error, and its `.mmb` proves the
+  renamed specification;
+- both agents see the same names, and the prompt no longer names the library.
+
+| theorem | tokens W/M | cost W/M | time W/M | Whitehead calls | MM1 calls |
+|---|---|---|---|---|---|
+| `mt2` | 1.0 | 0.7 | 0.5 | 3 | 5 |
+| `bibi1` | 0.6 | 0.4 | 0.7 | 3 | 6 |
+| `eor` | 2.4 | 1.2 | 1.0 | 14 | 8 |
+| `sucsub` | 5.4 | 3.1 | 3.2 | 20 | 5 |
+| `notfal` | 5.3 | 3.7 | 3.8 | 20 | 7 |
+| `mulmoddir` | 14.8 | 8.2 | 8.1 | 48 | 7 |
+| `ssasym` | 6.6 | 3.4 | 2.9 | 32 | 7 |
+| `addcom` | 39.8 | 20.9 | 27.2 | 174 | 7 |
+| `dvdasymd` | 8.2 | 4.3 | 4.2 | 80 | 15 |
+| `divmod` | 21.7 | 10.1 | 5.6 | 165 | 16 |
+
+- **MM1:** proved 10 of 10, with 1.54M tokens, $2.31, 296 s of agent time, and 15 MB at
+  most for `mm0-rs`.
+- **Whitehead:** proved 9 of 10, with 18.2M tokens, $14.00, 1,503 s, and 2.1 GB at most
+  for the server (`addcom`). On `divmod` it reached the $5 limit.
+- **The MM1 agent's proofs now are its own:** nine of ten differ from the library's.
+  `notfal` is a one-line proof. `addcom` keeps the induction of the library's. It
+  needed 1 or 2 checks, after 1 to 11 searches.
+
+**What this means:**
+- **The hypothesis does not hold here,** for this model and this interface. Whitehead
+  is cheaper only where `guided` proves the theorem at once (`mt2`, `bibi1`). Past
+  that, its agent spends 2 to 40 times the tokens, and more time.
+- **The tokens are calls.** Both agents start from about the same context (15,400
+  tokens for MM1, 18,400 for Whitehead, its tools' schemas included), and each call
+  reads all of it again.
+  - The MM1 agent searches for lemmas by their statements, writes a whole proof term,
+    and lets MM1's elaborator fill in what unification can, in 5 to 16 calls.
+  - The Whitehead agent works through the tree a step or a goal at a time: runs,
+    variants, choices, intermediate goals; 14 to 174 calls.
+- **MM1's elaborator already does what the engine was to do for the agent:** it decides
+  the metavariables by unification. What Whitehead adds is search, and an agent that
+  can name the lemmas needs little of it.
+- **Memory:** Whitehead's server took 67 MB to 2.1 GB, `mm0-rs` at most 15 MB. Its CPU
+  time was up to 128 s, `mm0-rs`'s under 0.1 s.
+- **Caveats:**
+  - one run of each pair;
+  - one model;
+  - the model knows MM1 from its training, while it meets Whitehead's tools for the
+    first time;
+  - what the model remembers of the proofs' structure is not removed by the renaming;
+  - set.mm is not tried here, since it has no MM1 source.
+- **What it suggests for the interface:** the agent should give the engine what it is
+  good at, a whole sketch, a proof term with holes or a chain of intermediate
+  statements, and have the engine close the gaps by search in one call. That is a
+  smaller number of calls, which is what the tokens follow.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

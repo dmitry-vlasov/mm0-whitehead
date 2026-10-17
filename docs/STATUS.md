@@ -80,6 +80,15 @@ added: `specific` and `recent`. With them the open rails pay, beside the closing
   170 and 170 at 5 s.
 
 The variants of a node ranked by recency, as a cost, do not pay.
+
+**The agent bench** (`bench/agents/`, `DESIGN.md`, "The agent bench"): an agent with
+Whitehead against an agent writing MM1, the same model, on ten theorems of
+`peano.mm1` from 3 to 48 steps, every proof accepted by `mm0-rs`. With the theorems
+renamed, so that the agents cannot recall their proofs, MM1 proved all ten with 1.54M
+tokens and $2.31; Whitehead proved nine with 18.2M tokens and $14.00, and up to 2.1 GB
+of memory. The author's hypothesis, that the engine makes proving cheaper for an agent,
+does not hold for this interface: the agent's tokens follow its number of calls, and the
+step-by-step tools take many.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.

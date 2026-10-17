@@ -55,9 +55,8 @@ def Notation.printer (spec : Notation) (db : Db) (constNames : Array String := #
 
 /-- The names of the binders of theorem `thm` of the proof file, from the specification. -/
 def Notation.binderNames (spec : Notation) (thm : Nat) : Array String :=
-  match spec.specThm thm with
-  | some t => spec.st.env.thms[t]!.args.map fun v => v.name.getD "_"
-  | none => #[]
+  if thm ≥ spec.file.thms.size && (spec.specThm thm).isNone then #[]
+  else (spec.binders thm).map fun v => v.name.getD "_"
 
 namespace Printer
 
