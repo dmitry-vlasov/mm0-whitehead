@@ -41,6 +41,9 @@ def usage : String :=
                                  most general lemma of each, and how much of each proof the
                                  proofs before it cover; --variants: what the lemmas of earlier
                                  proofs add to the variants at the nodes of known proofs
+  prove rails <file.mmb> [--every K] [--to B] [--rank occurrences|size|small|reach]
+                                 how far the subproofs of earlier proofs that fit the goal of a
+                                 theorem agree with its known proof, for the first 1, 3 and 10
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--tactic T] [--max-facts N] [--join-cap N|all]
                [--meta I,J,...] [--verbose]
@@ -414,6 +417,55 @@ def proveSubproofs (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"    assertions and those lemmas: {Prove.variantSummary (rows.map fun (a, _, c) => a + c)}"
   return 0
 
+/-- `prove rails`: how good the subproofs are that fit the goal of a theorem: how far the
+best of the first `count` agrees with the theorem's known proof (`Rails.agree`). -/
+def proveRails (path : String) (args : List String) : IO UInt32 := do
+  let file ←
+    match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let rails := Prove.Rails.ofDb db
+  let every := max 1 (numOption args "--every" 10)
+  let last := numOption args "--to" 1000000000
+  let index := db.index
+  let pct (n d : Nat) : String := if d == 0 then "0" else s!"{n * 1000 / d / 10}.{n * 1000 / d % 10}%"
+  let rank := match strOption args "--rank" with
+    | some "reach" => Prove.RailRank.reach
+    | some "size" => .size
+    | some "small" => .small
+    | _ => .occurrences
+  for count in [1, 3, 10] do
+    let cfg : Prove.ReplayConfig := { count, rank }
+    let mut n := 0
+    let mut fit := 0
+    let mut top := 0
+    let mut half := 0
+    let mut whole := 0
+    for (thm, root) in rails.sp.roots do
+      if thm % every != 0 || thm ≥ last then continue
+      n := n + 1
+      let env := Prove.Env.init db index (db.task thm)
+      let found := rails.at_ env 0 cfg
+      if found.isEmpty then continue
+      fit := fit + 1
+      let best := found.foldl (init := 0) fun m k => max m (rails.agree k root)
+      let size := rails.sp.sizes[root]!
+      if best ≥ 1 then top := top + 1
+      if 2 * best ≥ size then half := half + 1
+      if best == size then whole := whole + 1
+    IO.println s!"{path}: {n} theorems, every {every}th; the first {count} subproofs at the goal, by {repr rank}:"
+    IO.println s!"  some fit: {fit} ({pct fit n}); the best agrees with the known proof in its first step: {top} \
+      ({pct top n}), in half its steps or more: {half} ({pct half n}), in all: {whole} ({pct whole n})"
+  return 0
+
 /-- `prove replay`: reconstructs the proofs of a file from the assertions they use. -/
 def proveReplay (path : String) (args : List String) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
@@ -639,6 +691,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "chains" :: path :: rest => proveChains path rest
   | "prove" :: "variants" :: path :: rest => proveVariants path rest
   | "prove" :: "subproofs" :: path :: rest => proveSubproofs path rest
+  | "prove" :: "rails" :: path :: rest => proveRails path rest
   | _ =>
     IO.eprintln usage
     return 2

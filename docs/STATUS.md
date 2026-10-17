@@ -47,6 +47,16 @@ not theorems of their own. The subproofs of set.mm were measured:
 - 43.2% of the steps lie inside a subproof that an earlier proof already has;
 - the recurring ones (78,877, in two proofs or more) cover 36.5%, at about twice the
   variants (`DESIGN.md`, "Proof rails").
+
+The author chose replay over lemmas, and it is built (`rails(...)`, `replay(...)`, all
+configurable). The best configuration, `rails(10, rank=reach, open=0, upto=1)`, against
+breadth-first:
+- all of set.mm, every 40th theorem: 103 against 67 proved at 1 s per theorem (+54%),
+  and 122 against 92 at 5 s (+33%);
+- propositional and predicate calculus: 160 against 139 at 1 s, even at 5 s.
+
+All proofs were checked by the verifier. Rails ranked by occurrences alone lose
+(`DESIGN.md`, "How much it helps").
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
@@ -392,7 +402,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,109 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,129 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
@@ -448,6 +458,11 @@ corpus of `scripts/build-corpus.sh` built — 1,109 checks, 0 failures, in 20 se
   its report, and the filters `hyp` and `bare`.
 - Prover, subproofs: the distinct subproofs of the fixture, their lemmas (that of
   `a1i`'s proof is `a1i`), and what earlier proofs cover.
+- Prover, rails: the subproofs that fit a goal, only those of earlier proofs and as
+  configured; each fixture proof replayed at its root reproduces it; a rail that does not
+  fit expands nothing; a rail's open goal built up; the hypotheses a rail leaves open,
+  the order by reach and `open=0`; `rails(0)` builds breadth-first's tree; `loop`; the
+  tools `rails` and `replay`.
 - Prover, the chain miner: its counts by length, the most frequent chain and the
   coverage on the logic fixture.
 - Prover, definitions: the values of the defs of the fixture `defs.mmb` (a copy of
@@ -584,9 +599,10 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    Done: the resumable search and the session operations, backward (`choose`) and
    forward (`deduce`); the filters; the language; intermediate goals; and the MCP
    server; what a description of the next goals narrows on set.mm; and the first
-   rank, by uses; and two pilots, seven theorems proved by an agent, the second with
-   the names hidden. Next: the human front-end; and a pilot at a larger scale, with
-   counts per decision, for the dataset. Open: how a human moves
+   rank, by uses; two pilots, seven theorems proved by an agent, the second with the
+   names hidden; and the replay of subproofs as rails, +54% proved on set.mm at 1 s.
+   Next: ranks for the rails that open goals (the ranking layer); the human front-end;
+   and a pilot at a larger scale, with counts per decision, for the dataset. Open: how a human moves
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one
    sibling should narrow the variants shown at the others.

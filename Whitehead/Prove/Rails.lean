@@ -34,6 +34,10 @@ inductive RailRank where
   | size
   /-- The smallest first. -/
   | small
+  /-- Those that leave the fewest hypotheses open first: put down at the goal, the
+  hypotheses of a subproof's lemma that no premise of the theorem fits (the author's idea:
+  from the goal to the premises in one step). A subproof with none open proves the goal. -/
+  | reach
   deriving BEq, Inhabited, Repr
 
 /-- Which subproofs may be put down for a theorem. -/
@@ -60,12 +64,16 @@ structure ReplayConfig where
   minSize : Nat := 2
   source : RailSource := .earlier
   seeds : RailSeeds := .open
+  /-- Only subproofs that leave at most this many hypotheses open (see `RailRank.reach`). -/
+  maxOpen : Nat := 1000000
   deriving Inhabited, Repr
 
 structure Rails where
   sp : Subproofs
   /-- The conclusion of each subproof's most general lemma. -/
   concl : Array Exp
+  /-- The hypotheses of each subproof's lemma: its leaves that are hypotheses. -/
+  hyps : Array (Array Exp) := #[]
   /-- The conclusions that are not a bare variable, each ranked so that a theorem finds
   only the subproofs of the proofs before it. -/
   index : Index Nat
@@ -78,11 +86,23 @@ def ofDb (db : Db) : Rails := Id.run do
   let sp := Subproofs.ofDb db
   let lemmas := sp.lemmas db
   let concl := lemmas.map fun l => (l.map (·.concl)).getD default
+  let hyps := lemmas.map fun l => (l.map (·.hyps)).getD #[]
   let mut ix : Index Nat := {}
   for k in [1:sp.nodes.size] do
     if let some l := lemmas[k]! then
       if !l.concl.isVar then ix := ix.insert l.concl k (2 * sp.first[k]! + 2)
-  return { sp, concl, index := ix }
+  return { sp, concl, hyps, index := ix }
+
+/-- How many hypotheses of subproof `k`'s lemma, put down at goal `goal`, no premise of
+the theorem of `env` fits. A hypothesis is judged on its own, under the unifier of the
+lemma's conclusion with the goal. -/
+def openHyps (r : Rails) (env : Env) (goal : Exp) (k : Nat) : Nat := Id.run do
+  -- the lemma's variables are its own numbers, below those of the tree
+  let some sub := unifyExps #[goal, r.concl[k]!] {} | return r.hyps[k]!.size
+  let mut n := 0
+  for h in r.hyps[k]! do
+    if (env.premises.unify (sub.applyAll h)).isEmpty then n := n + 1
+  return n
 
 /-- The subproofs that fit goal node `h` of the tree, as `cfg` chooses and orders them. -/
 def at_ (r : Rails) (env : Env) (h : Nat) (cfg : ReplayConfig) : Array Nat := Id.run do
@@ -98,10 +118,19 @@ def at_ (r : Rails) (env : Env) (h : Nat) (cfg : ReplayConfig) : Array Nat := Id
     ok := ok.push k
   let occ (k : Nat) : Nat := r.sp.occBefore k thm
   let size (k : Nat) : Nat := r.sp.sizes[k]!
+  -- the hypotheses each leaves open, when asked for
+  let goal := env.hyps[h]!.expr
+  let opens : Std.HashMap Nat Nat :=
+    if cfg.rank == .reach || cfg.maxOpen < 1000000 then
+      ok.foldl (init := {}) fun m k => m.insert k (r.openHyps env goal k)
+    else {}
+  let kept := if cfg.maxOpen < 1000000 then ok.filter fun k => (opens[k]?.getD 0) ≤ cfg.maxOpen else ok
+  let op (k : Nat) : Nat := opens[k]?.getD 0
   let ordered := match cfg.rank with
-    | .occurrences => ok.qsort fun a b => occ a > occ b || occ a == occ b && (size a > size b || size a == size b && a < b)
-    | .size => ok.qsort fun a b => size a > size b || size a == size b && a < b
-    | .small => ok.qsort fun a b => size a < size b || size a == size b && a < b
+    | .occurrences => kept.qsort fun a b => occ a > occ b || occ a == occ b && (size a > size b || size a == size b && a < b)
+    | .size => kept.qsort fun a b => size a > size b || size a == size b && a < b
+    | .small => kept.qsort fun a b => size a < size b || size a == size b && a < b
+    | .reach => kept.qsort fun a b => op a < op b || op a == op b && (occ a > occ b || occ a == occ b && a < b)
   return ordered.extract 0 cfg.count
 
 end Rails
@@ -305,6 +334,17 @@ def Strategy.rails (r : Rails) (cfg : RailsConfig) : Strategy RailsState where
     st := { st with replay := rs, cost, depth }
     if round.isEmpty then return (.done, st)
     return (.expand (round.map (·, none)), st)
+
+/-- How far subproofs `k` and `j` agree from the top: the steps they have in common,
+the same assertion at the same place. -/
+partial def Rails.agree (r : Rails) (k j : Nat) : Nat :=
+  if k == 0 || j == 0 then 0
+  else if k == j then r.sp.sizes[k]!
+  else
+    let (a, ks) := r.sp.nodes[k]!
+    let (b, js) := r.sp.nodes[j]!
+    if a != b then 0
+    else 1 + (Array.range (min ks.size js.size)).foldl (init := 0) fun acc i => acc + r.agree ks[i]! js[i]!
 
 /-- `loop(t, n)` (`ruLoopWhileProgressTactic`): `t` from its start again each time it is
 done, while the tree grows, up to `n` times. -/

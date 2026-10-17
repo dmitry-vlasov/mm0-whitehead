@@ -1849,7 +1849,7 @@ the current goal to the premises (one of them, several, or all, which are varian
 single step; then build up the tree, in the hope that some of these paths are parts of
 the true proof.
 
-**The design that follows (proposed 2026-10-17, not built):**
+**The design that follows (proposed 2026-10-17; built, see "The replay" below):**
 
 - **The index of steps** (Russell's `ruBuildStepIndex`): every step of every proof of
   the file, by its statement. A step's variables are those of its theorem, and in a
@@ -1934,6 +1934,74 @@ the true proof.
     against 43.2%) at about 1.7 to 2.5 times the variants.
   - Either way, the filters and ranks are what an agent would choose among them with.
     The occurrences of a subproof are a natural rank.
+
+**The replay, built 2026-10-17** (`Prove/Rails.lean`; the author chose the implicit
+replay over lemmas: a pointer to a proof node, replayed, uses every connected piece of
+its subproof, since each node it makes meets the premises, the facts and its other
+variants):
+
+- **The index:** one entry for each of the 664,589 distinct subproofs below a node,
+  keyed by the conclusion of its most general lemma, without the 158 bare ones. A
+  theorem finds only those of the proofs before it.
+- **`replay(...)`:** puts subproofs down at goals and follows each step by step, by
+  position (Russell's `spr` and `follow-proof`). Every step is an ordinary expansion; a
+  branch that does not fit ends.
+- **`rails(...)`:** replay and breadth-first together, by cost.
+  - A replayed step costs nothing, and a searched one costs 1.
+  - The alternatives at a goal on a rail cost their depth, as in breadth-first.
+  - A goal a rail leaves open costs `penalty` more than the goal the rail went down at.
+  - Rails go down at goals of cost `upto` or less (ground ones only, unless
+    `ground=false`), never at goals a replay opened.
+  - Without rails it is breadth-first round for round (tested on every fixture
+    theorem). Every leaf is reached in its turn.
+- **Configurable** (the author asked for it):
+  - `count`, how many rails per goal;
+  - `rank`: occurrences in earlier proofs, size, small, or reach (the fewest
+    hypotheses left open first);
+  - `min`, the fewest steps;
+  - `source`: earlier, or recurring (in two earlier proofs);
+  - `open`, the most hypotheses a rail may leave open;
+  - `upto`, `ground`, `penalty`.
+
+  `loop(t, N)` repeats a tactic, and the MCP tools are `rails` and `replay`.
+- **Reach:** the author's idea, from the goal to the premises in one step. Put down at
+  the goal, a subproof's lemma leaves open the hypotheses that no premise of the theorem
+  fits. A subproof with none open proves the goal outright.
+
+**How much it helps** (2026-10-17). The test is `prove search --tactic` on set.mm, 12
+searches at once, against `rails(0)`, which is breadth-first itself. Every proof found
+was checked by the verifier, and none of the 52 runs had a rejected proof. The
+subproofs are those of earlier proofs only, so the measure is out of sample.
+
+- **The best configuration** is `rails(10, rank=reach, open=0, upto=1)`: at the root and
+  at the goals of the first round, the 10 subproofs that leave no hypothesis open.
+
+  | sample | per theorem | breadth-first | rails | proved that breadth-first misses | lost |
+  |---|---|---|---|---|---|
+  | all of set.mm, every 40th (1,198) | 1 s | 67 | **103** (+54%) | 41 | 5 |
+  | | 5 s | 92 | **122** (+33%) | 38 | 8 |
+  | propositional and predicate calculus, every 10th (281) | 1 s | 139 | **160** (+15%) | 33 | 12 |
+  | | 5 s | 173 | 173 | 16 | 16 |
+
+  The new proofs run from 2 to 37 steps. `upto=2` gives the same as `upto=1`, and 30
+  rails per goal the same as 10.
+- **Rails ranked by occurrences, without reach, lose.** With `rails(3)`, 70 of the
+  propositional and predicate calculus sample are proved against 139 at 1 s, and 103
+  against 173 at 5 s. A penalty narrows the loss (`rails(1, penalty=2)`: 169 against 173
+  at 5 s) but does not turn it.
+  - The cause: each rail's open goals start their own breadth-first search, and most
+    rails are not part of the proof.
+  - Measured (`prove rails`): of the first 3 rails at a theorem's goal, by occurrences,
+    the best agrees with the known proof in its first step for 12.8% of the propositional
+    and predicate theorems, in half its steps for 5.3%, and in all for 0.7%.
+  - Ranked by reach, the half-the-steps share is 8.5% (on all of set.mm, 2.5% becomes
+    4.5%, and the whole proof 0.2% becomes 1.6%).
+- **Combinations that put breadth-first first,** such as `seq(limited(rails(0),
+  size=100000), rails(3))`, end about even: 174 against 173 at 5 s.
+- **What this means:** a rail pays when it closes the goal, and costs when it opens
+  goals that are not part of the proof. Rails that leave nothing open, found by reach,
+  are where the gain is. Ranks better than occurrences are what the open rails would
+  need: phase 4's ranking layer.
 
 ### Mining and ranking (the design of 2026-10-13)
 

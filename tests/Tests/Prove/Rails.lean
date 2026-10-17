@@ -58,6 +58,21 @@ def railsTests : TestM Unit := do
     let r ← search vc (envOf "syl") s { maxProps := 100000 }
     checkEq "rails: a rail with a goal left open, built up by the search"
       ((r.proof.map (proofText db)).getD "none") "(mpd h1 (a1i h0))"
+  -- reach: mpd's lemma at syl, (a -> b), (a -> b -> c) => a -> c, leaves one hypothesis
+  -- open: ph -> ps is syl's premise, ph -> ps -> ch is not
+  match rails.sp.roots.find? (·.1 == id "mpd") with
+  | none => pure ()
+  | some (_, mpdProof) =>
+    let env := envOf "syl"
+    checkEq "rails: the hypotheses a subproof leaves open" (rails.openHyps env env.task.goal mpdProof) 1
+  let reach := (envOf "con1") |> fun env => rails.at_ env 0 { count := 1000, minSize := 1, rank := .reach }
+  let opens := reach.map fun k => rails.openHyps (envOf "con1") (envOf "con1").task.goal k
+  check "rails: by reach, the fewest open first"
+    ((Array.range (opens.size - 1)).all fun j => opens[j]! ≤ opens[j + 1]!) s!"{opens}"
+  let closing := (envOf "con1") |> fun env => rails.at_ env 0 { count := 1000, minSize := 1, rank := .reach, maxOpen := 0 }
+  check "rails: open=0 keeps those that leave nothing open"
+    (closing.all fun k => rails.openHyps (envOf "con1") (envOf "con1").task.goal k == 0 &&
+      closing.size == (opens.filter (· == 0)).size)
   -- rails without subproofs is breadth-first, round for round
   let mut same := true
   for (thm, _) in rails.sp.roots do
@@ -82,13 +97,14 @@ def railsTests : TestM Unit := do
   let ok (text : String) : Bool := (Dsl.parseTactic ctx text).isOk
   check "rails: the tactics of the language"
     (ok "replay" && ok "replay(5, rank=size, min=3, source=recurring, at=root)" && ok "rails(3)" &&
-      ok "rails(count=1, rank=small, upto=1, ground=false)" && ok "loop(seq(limited(bfs, size=100), rails(1)), 5)")
+      ok "rails(count=1, rank=small, upto=1, ground=false)" && ok "loop(seq(limited(bfs, size=100), rails(1)), 5)" &&
+      ok "rails(10, rank=reach, open=0, penalty=2)")
   let err (c : Dsl.Ctx) (text : String) : String :=
     match Dsl.parseTactic c text with
     | .ok _ => "accepted"
     | .error e => e.msg
   checkEq "rails: without the subproofs" (err { db } "rails(3)") "`rails` needs the subproofs of the file"
-  checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size or small, not `best`"
+  checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size, small or reach, not `best`"
   checkEq "rails: a source that is not one" (err ctx "replay(source=all)") "`source` is earlier or recurring, not `all`"
 
 end Tests.Prove
