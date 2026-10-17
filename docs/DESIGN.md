@@ -1795,8 +1795,8 @@ lists the components.
 1. How variants are chosen in the forward direction: decided 2026-10-16, see
    "Choosing variants".
 2. Which front-end comes first: decided 2026-10-16, the simpler one, MCP.
-3. The questions of 2026-10-13 below. They concern the chain and rank atoms, and do
-   not block the session.
+3. The questions of 2026-10-13: answered 2026-10-17 ("Proof rails"), but for question
+   3, which is asked again.
 4. How a human moves about in a huge tree. The goal panel is a first variant only.
 5. Whether a session is recorded as a file of DSL lines.
 6. Whether an intermediate goal should be usable before it is proved: whether the
@@ -1816,11 +1816,77 @@ lists the components.
 6. Filter quality measured on set.mm: what a description of the next goals narrows,
    done 2026-10-16; an agent's own filters, through the MCP server, to come.
 
+### Proof rails (the author's answers of 2026-10-17)
+
+The questions of 2026-10-13, answered by the author:
+
+1. **A linear subproof** is a chain in the proof tree of an existing theorem, from a
+   premise up to the node it proves, with the other hypotheses open. It is a linear
+   subgraph of a valid proof, and it may start at any node of that proof, not only at
+   its root.
+2. **Positions are part of a chain,** so that it can be represented as a rule. But chains
+   are not to be made into theorems of their own (derived rules): there are too many of
+   them. Instead they are **guiding rails**. One rail, or several, is put down at the
+   current goal, so that it reaches the premises in one step. The open nodes along the
+   rails are then built up into a proof of the goal.
+3. Asked again in simpler words, below.
+4. Answered: what the first design called a macro-action was a derived rule, a theorem
+   made from a chain. Answer 2 drops it.
+5. **A subproof used several times in one proof counts once; one used in several proofs
+   counts once in each.** This is how `Uses.lean` already counts.
+6. **The Russell files** (`subproof_replay`, `linear_guided`, `lgg`, `ml/`) are
+   experiments in using subproof replay in the search.
+   - Replaying a whole subproof, rather than a linear one, generalizes the idea. Extra
+     variants do no harm, so the fragments of any reachable proof are replayed at the
+     current goal, in the hope that some part of them is in the final proof.
+   - The fragments may be taken from any node of a proof. That needs an index of all
+     steps of all proofs, which is huge but may pay off.
+   - The difficulties: (a) telling reachable fragments from the others; (b) keeping
+     their number under control.
+
+**The idea, in the author's words:** use the fragments of existing proofs to reach from
+the current goal to the premises (one of them, several, or all, which are variants) in a
+single step; then build up the tree, in the hope that some of these paths are parts of
+the true proof.
+
+**The design that follows (proposed 2026-10-17, not built):**
+
+- **The index of steps** (Russell's `ruBuildStepIndex`): every step of every proof of
+  the file, by its statement. A step's variables are those of its theorem, and in a
+  replay they are metavariables. As in Russell, a statement that is a bare variable is
+  left out, since every goal fits it.
+- **A rail** at goal node G is a step of the index whose statement unifies with G. With
+  the subproof below it, it is a whole rail. With one path of it, from the step down to
+  a leaf that is a hypothesis of its theorem, the other branches left open, it is a
+  linear rail.
+- **What a rail reaches:** the leaves of the rail that are hypotheses of its own theorem
+  become goals here. Some may unify with the premises of the current task (or with
+  facts): that is what the rail reaches. It may reach one premise, several, all, or
+  none. A filter or a rank says which reach enough.
+- **Putting a rail down** expands, in the tree, the variants that the rail's steps name,
+  one step after another along it: a tactic of the layer above the engine (Russell's
+  `follow-proof` and `track`). Each expansion is an ordinary step. Nothing is added to
+  the database, and the variants that the rail does not take stay leaves. The open
+  nodes along the rail are then built up by choices, tactics and further rails.
+- **(a) Reachable:** a fragment is reachable at a theorem if every assertion it uses
+  comes before that theorem. The index keeps, for each step, the last assertion its
+  subproof uses. By default only fragments of earlier theorems are used, which are
+  always reachable and keep the measurement out of sample. A reachable fragment of a
+  later theorem is a configurable option.
+- **(b) How many:** the rails at a goal are counted, filtered and sampled like variants
+  (by their source, length, what they reach, and how often the fragment occurs), and a
+  replay tactic takes a configurable number of them.
+- **For the agent:** a `rails` tool at a goal node, with a count and a sample, and a
+  tactic to put a chosen rail down.
+- **Measured first:** on set.mm, at the nodes of known proofs, how often a rail from an
+  earlier theorem reaches the premises, and how often a rail lies along the known proof.
+
 ### Mining and ranking (the design of 2026-10-13)
 
-What follows is the first design, kept as it was written. In the design above, its
-chains and ranking become filter atoms, and its dataset comes from the oracle runs and
-the session traces.
+What follows is the first design, kept as it was written. The author's answers above
+replace it: chains are rails, not derived theorems, and "macro-actions" are dropped.
+Ranking is a filter atom (`used`), and the dataset comes from the oracle runs and the
+session traces.
 
 #### What Russell has
 
