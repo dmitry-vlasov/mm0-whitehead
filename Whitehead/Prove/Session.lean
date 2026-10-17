@@ -138,10 +138,11 @@ def selectFacts (s : Session) (facts : Array Nat) (f : Filter) (n : Nat) (seed :
 /-- What the DSL needs to read filters and tactics for this session: its database, the
 specification if there is one, and the variables of its theorem, `metas` being the
 binders marked as metavariables in its task (`Db.task`). -/
-def dslCtx (s : Session) (spec : Option Notation := none) (metas : Array Nat := #[]) : Dsl.Ctx :=
+def dslCtx (s : Session) (spec : Option Notation := none) (metas : Array Nat := #[]) (rails : Option Rails := none) :
+    Dsl.Ctx :=
   let db := s.env.db
   let thm := s.env.task.limit
-  { db, spec, thm, vars := fun i => db.binderImage thm metas (db.asserts[thm]!.vars[i]?.getD 0) }
+  { db, spec, thm, vars := fun i => db.binderImage thm metas (db.asserts[thm]!.vars[i]?.getD 0), rails }
 
 /-- The goal nodes that have no proof yet. -/
 def openGoals (s : Session) : Array Nat :=

@@ -19,6 +19,7 @@ import Tests.Prove.Chains
 import Tests.Prove.Session
 import Tests.Prove.Filter
 import Tests.Prove.Hints
+import Tests.Prove.Rails
 import Tests.Mcp
 
 def main : IO UInt32 := do
@@ -45,6 +46,7 @@ def main : IO UInt32 := do
     Tests.Prove.usesTests
     Tests.Prove.subproofTests
     Tests.Prove.hintTests
+    Tests.Prove.railsTests
     Tests.Mcp.jsonTests
     Tests.Mcp.serverTests
     Tests.Prove.fullReplayTests

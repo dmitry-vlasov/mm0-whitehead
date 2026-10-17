@@ -42,13 +42,15 @@ def usage : String :=
                                  proofs before it cover; --variants: what the lemmas of earlier
                                  proofs add to the variants at the nodes of known proofs
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--max-facts N] [--join-cap N|all] [--meta I,J,...]
-               [--verbose]
+               [--strategy bfs|forward|both] [--tactic T] [--max-facts N] [--join-cap N|all]
+               [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
                                  forward from the premises, or both in turn. --max-facts: the
                                  size of the forward front (512); --join-cap: how many facts a
                                  new subgoal is joined with when it is made (4). --meta: the binders
-                                 with these numbers are metavariables, for which values are found
+                                 with these numbers are metavariables, for which values are found;
+                                 --tactic: a tactic of the language for every theorem (`dsl`),
+                                 such as `seq(limited(replay(3), size=5000), bfs)`
                                  replay and search: [--jobs N] theorems at once (default: one per
                                  processor), [--max-mem GB] memory limit (default 32; above 80%
                                  the largest running theorem gives up, above 90% all running ones,
@@ -510,8 +512,24 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       if let some why := db.metasFault a.id opts.metas then
         IO.eprintln s!"{path}: --meta: {why}"
         return 1
+  -- a tactic of the language, for every theorem; with `replay`, the subproofs of the file
+  let tactic := strOption args "--tactic"
+  let rails : Option Prove.Rails :=
+    if tactic.any fun t => (t.splitOn "replay").length > 1 || (t.splitOn "rails").length > 1 then
+      some (Prove.Rails.ofDb db) else none
+  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails }
+  if let some text := tactic then
+    if let .error e := Prove.Dsl.parseTactic (ctx 0) text then
+      IO.eprintln (Prove.Dsl.ParseError.show text e)
+      return 1
+  -- read again for each theorem, whose variables a pattern may name
+  let custom : Option (Nat → Prove.AnyStrategy) := tactic.map fun text thm =>
+    match Prove.Dsl.parseTactic (ctx thm) text with
+    | .ok t => t
+    | .error _ => ⟨Prove.Strategy.done⟩
+  let uses := Prove.Uses.ofFile file db.asserts.size
   let start ← IO.monoMsNow
-  let (rows, bodies) ← Prove.searchAll db opts logLine
+  let (rows, bodies) ← Prove.searchAll db opts logLine custom uses
   let ms := (← IO.monoMsNow) - start
   let proved := rows.filter (·.ending == .proved)
   let steps := proved.foldl (init := 0) (· + ·.steps)

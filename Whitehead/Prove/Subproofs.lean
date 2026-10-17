@@ -41,6 +41,8 @@ structure Subproofs where
   time (`noRank` if it occurs once): the lemmas known to recur before a theorem. -/
   proofs : Array Nat := #[0]
   second : Array Nat := #[0]
+  /-- The theorems whose proofs have it, in order: how often it occurs before a theorem. -/
+  occ : Array (Array Nat) := #[#[]]
   deriving Inhabited
 
 namespace Subproofs
@@ -65,7 +67,8 @@ partial def intern (sp : Subproofs) (thm : Nat) (sk : Skeleton) : Nat × Subproo
       let k := sp.nodes.size
       return (k, { sp with nodes := sp.nodes.push (t, kids), sizes := sp.sizes.push size,
                            first := sp.first.push thm, table := sp.table.insert key k,
-                           proofs := sp.proofs.push 0, second := sp.second.push noRank })
+                           proofs := sp.proofs.push 0, second := sp.second.push noRank,
+                           occ := sp.occ.push #[] })
 
 /-- The subproofs of every proof of the file that `db.skeleton` reads. -/
 def ofDb (db : Db) : Subproofs := Id.run do
@@ -84,9 +87,19 @@ def ofDb (db : Db) : Subproofs := Id.run do
       if j == 0 || seen.contains j then continue
       seen := seen.insert j
       if sp.proofs[j]! == 1 then sp := { sp with second := sp.second.set! j s.index }
-      sp := { sp with proofs := sp.proofs.modify j (· + 1) }
+      sp := { sp with proofs := sp.proofs.modify j (· + 1), occ := sp.occ.modify j (·.push s.index) }
       stack := stack ++ sp.nodes[j]!.2
   return sp
+
+/-- In how many proofs of the theorems before `thm` subproof `k` occurs. -/
+def occBefore (sp : Subproofs) (k thm : Nat) : Nat := Id.run do
+  let ts := sp.occ[k]!
+  let mut lo := 0
+  let mut hi := ts.size
+  while lo < hi do
+    let mid := (lo + hi) / 2
+    if ts[mid]! < thm then lo := mid + 1 else hi := mid
+  return lo
 
 end Subproofs
 

@@ -26,6 +26,7 @@ import Whitehead.Prove.Measure
 import Whitehead.Prove.Show
 import Whitehead.Prove.Uses
 import Whitehead.Prove.Subproofs
+import Whitehead.Prove.Rails
 import Whitehead.Json
 import Whitehead.Mcp.Tools
 import Whitehead.Mcp.Server

@@ -34,6 +34,9 @@ structure Ctx where
   /-- The names of the assertions, by which `start` finds a theorem. With `anonymous`,
   every other tool knows an assertion only as `A` and its number. -/
   realNames : Array String := #[]
+  /-- The subproofs of the file, for `rails`, `replay` and the tactics that replay
+  (`Rails.lean`): made when they are first asked for. -/
+  rails : Thunk Rails := Thunk.pure default
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -70,7 +73,7 @@ def Ctx.load (mm0 mmb : System.FilePath) (anonymous : Bool := false) : IO (Excep
   let realNames := db.asserts.map (·.name)
   let db := if anonymous then { db with asserts := db.asserts.map fun a => { a with name := s!"A{a.id}" } } else db
   return .ok { db, index := db.index, hypIndexes := db.hypIndexes, vc := Verify.Ctx.ofFile file, spec := nt,
-               uses := Uses.ofFile file db.asserts.size, realNames }
+               uses := Uses.ofFile file db.asserts.size, realNames, rails := Thunk.mk fun _ => Rails.ofDb db }
 
 /-! ### Arguments -/
 
@@ -217,6 +220,11 @@ def goals (args : Json) : ToolM Json := do
     ("intermediate", .arr (o.session.hints.map (goalJson o))),
     ("proved", .bool o.session.found.isSome), ("nodes", Json.ofNat o.session.env.props.size)]
 
+/-- The DSL context of a session, with the subproofs of the file if the text replays. -/
+def Ctx.dsl (c : Ctx) (o : Open) (text : String) : Dsl.Ctx :=
+  let replays := (text.splitOn "replay").length > 1 || (text.splitOn "rails").length > 1
+  o.session.dslCtx (some c.spec) (rails := if replays then some c.rails.get else none)
+
 def readFilter (c : Ctx) (o : Open) (args : Json) : ToolM Filter := do
   let text ← liftE (argStrD args "filter" "all")
   match Dsl.parseFilter (o.session.dslCtx (some c.spec)) text with
@@ -279,7 +287,7 @@ def run (c : Ctx) (args : Json) : ToolM Json := do
     if !o.session.isGoal h then throw s!"{h} is not a goal node"
   let before := o.session.openGoals
   let size := o.session.env.props.size
-  let result ← match Dsl.parseTactic (o.session.dslCtx (some c.spec)) text with
+  let result ← match Dsl.parseTactic (c.dsl o text) text with
     | .ok t =>
       let t := match node? with
         | some h => t.focus h
@@ -359,6 +367,56 @@ def deduce (c : Ctx) (args : Json) : ToolM Json := do
   return .obj (#[("made", Json.ofNat made.size), ("count", Json.ofNat count),
     ("sample", .arr (sample.map (factJson o)))] ++ statusJson o t0 (← IO.monoMsNow))
 
+def railsTool (c : Ctx) (args : Json) : ToolM Json := do
+  let t0 ← IO.monoMsNow
+  let (_, o) ← getOpen args
+  let node ← liftE (argNat args "node")
+  if !o.session.isGoal node then throw s!"{node} is not a goal node"
+  let n ← liftE (argNatD args "n" 5)
+  let minSize ← liftE (argNatD args "min" 2)
+  let rank ← match ← liftE (argStrD args "rank" "occurrences") with
+    | "occurrences" => pure RailRank.occurrences
+    | "size" => pure .size
+    | "small" => pure .small
+    | w => throw s!"`rank` is occurrences, size or small, not `{w}`"
+  let source ← match ← liftE (argStrD args "source" "earlier") with
+    | "earlier" => pure RailSource.earlier
+    | "recurring" => pure .recurring
+    | w => throw s!"`source` is earlier or recurring, not `{w}`"
+  let r := c.rails.get
+  let env := o.session.env
+  let all := r.at_ env node { count := 1000000, rank, minSize, source }
+  let items := (all.extract 0 n).map fun k =>
+    Json.obj #[("rail", Json.ofNat k), ("steps", Json.ofNat r.sp.sizes[k]!),
+      ("occurrences", Json.ofNat (r.sp.occBefore k env.task.limit)),
+      ("from", Json.str c.db.asserts[r.sp.first[k]!]!.name),
+      ("proves", Json.str (o.render r.concl[k]!))]
+  return .obj #[("node", Json.ofNat node), ("count", Json.ofNat all.size), ("sample", .arr items),
+    ("ms", Json.ofNat ((← IO.monoMsNow) - t0))]
+
+def replayTool (c : Ctx) (args : Json) : ToolM Json := do
+  let t0 ← IO.monoMsNow
+  let (k, o) ← getOpen args
+  let node ← liftE (argNat args "node")
+  let chosen ← liftE (argNats args "rails")
+  if !o.session.isGoal node then throw s!"{node} is not a goal node"
+  let r := c.rails.get
+  for q in chosen do
+    if q == 0 || q ≥ r.sp.nodes.size then throw s!"there is no rail {q}"
+  let strategy := Strategy.replayFrom r (chosen.map (node, ·))
+  if let some e := o.session.runError? strategy then throw e
+  let before := o.session.openGoals
+  let { session, thm, printer } ← takeOpen k
+  let (session, _, _) ← match ← session.run strategy { maxProps := 0xFFFFFFFFFFFF, maxMs := 60000 } with
+    | .ok r => pure r
+    | .error e => throw e
+  let o : Open := { session, thm, printer }
+  putOpen k o
+  let after := session.openGoals
+  let opened := after.filter fun h => !before.contains h
+  return .obj (#[("open_goals_made", Json.ofNat opened.size), ("open", .arr ((opened.extract 0 10).map (goalJson o))),
+    ("open_before", Json.ofNat before.size), ("open_after", Json.ofNat after.size)] ++ statusJson o t0 (← IO.monoMsNow))
+
 def proof (c : Ctx) (args : Json) : ToolM Json := do
   let (_, o) ← getOpen args
   match o.session.found with
@@ -429,6 +487,16 @@ def tools : Array Tool := #[
                ("description", "the facts to deduce from")]), filterProp,
              prop "n" "integer" "the size of the sample; 10 by default",
              prop "seed" "integer" "the seed of the sample; 0 by default"] #["session", "facts"]⟩,
+  ⟨"rails", "The subproofs of earlier proofs that fit a goal node (guiding rails): how many, and a sample, each with its number of steps, in how many proofs before the theorem it occurs, the theorem whose proof it first came from, and what it proves in its most general form. Put chosen ones down with `replay`; or let the tactic `rails(...)` do it.",
+    schema #[sessionProp, prop "node" "integer" "the goal node",
+             prop "n" "integer" "the size of the sample; 5 by default",
+             prop "rank" "string" "`occurrences` (the default), `size` (the largest first) or `small`",
+             prop "min" "integer" "the fewest steps; 2 by default",
+             prop "source" "string" "`earlier` (in a proof before the theorem; the default) or `recurring` (in two)"] #["session", "node"]⟩,
+  ⟨"replay", "Puts chosen subproofs (from `rails`) down at a goal node and follows each step by step. The goals a subproof leaves open stay open, to be built up; a branch that does not fit ends.",
+    schema #[sessionProp, prop "node" "integer" "the goal node",
+             ("rails", .obj #[("type", "array"), ("items", .obj #[("type", "integer")]),
+               ("description", "the subproofs, as `rails` numbered them")])] #["session", "node", "rails"]⟩,
   ⟨"proof", "The proof found, if there is one: its steps, each with the steps it uses and its statement, checked by the verifier.",
     schema #[sessionProp] #["session"]⟩,
   ⟨"close", "Ends a session and frees its tree.", schema #[sessionProp] #["session"]⟩
@@ -459,6 +527,8 @@ def call (c : Ctx) (name : String) (args : Json) : ToolM Json := do
   | "goal" => goal c args
   | "facts" => facts c args
   | "deduce" => deduce c args
+  | "rails" => railsTool c args
+  | "replay" => replayTool c args
   | "proof" => proof c args
   | "close" => close args
   | _ => throw s!"there is no tool `{name}`"

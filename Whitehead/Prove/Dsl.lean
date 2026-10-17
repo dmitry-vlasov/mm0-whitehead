@@ -14,7 +14,7 @@ parameter can be given by position or by name.
 There are two sorts. A *filter* says which variants are kept; a *tactic* is a strategy.
 A tactic may take a filter; a filter never takes a tactic. `help` lists every component.
 -/
-import Whitehead.Prove.Combinators
+import Whitehead.Prove.Rails
 
 namespace Whitehead.Prove.Dsl
 
@@ -125,6 +125,8 @@ structure Ctx where
   spec : Option Notation := none
   thm : Nat := 0
   vars : Nat → Exp := fun _ => default
+  /-- The subproofs of the file, for `replay` (`Rails.lean`). -/
+  rails : Option Rails := none
 
 /-- A component of the language, for `help` and for the messages. -/
 structure Doc where
@@ -165,7 +167,12 @@ def docs : Array Doc := #[
   ⟨"limited", "tactic", "limited(t, size=N, depth=N)",
     "t, until N more assertion nodes are made, and only leaves at depth N or less, counted from the root (0: no limit); the time is a limit of the run"⟩,
   ⟨"seq", "tactic", "seq(t1, t2, ...)", "each tactic in turn, the next when the one before is done"⟩,
-  ⟨"focus", "tactic", "focus(N, t)", "t, only in the subtree of goal node N"⟩
+  ⟨"focus", "tactic", "focus(N, t)", "t, only in the subtree of goal node N"⟩,
+  ⟨"replay", "tactic", "replay(count=3, rank=occurrences, min=2, source=earlier, at=open)",
+    "subproofs of earlier proofs put down at goals and followed step by step: count at a goal; rank occurrences (in the most proofs before the theorem), size (the largest) or small; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two); at open (every open goal, each once) or root; unbounded alone: within limited or a time"⟩,
+  ⟨"rails", "tactic", "rails(count=3, rank=occurrences, min=2, source=earlier, upto=0, ground=true, penalty=0)",
+    "the replay of subproofs combined with breadth-first search by cost: a replayed step costs nothing, a searched one costs one, and each round expands the leaves of the least cost; subproofs go down at the goals of cost upto or less (with ground, only those without metavariables), count at each, ranked and chosen as in replay; a goal a subproof leaves open costs penalty more"⟩,
+  ⟨"loop", "tactic", "loop(t, N)", "t again from its start each time it is done, while the tree grows, up to N times"⟩
 ]
 
 /-- The list of the components, by sort. -/
@@ -215,6 +222,11 @@ def word (name key : String) (pos : Nat) : Option Ast → Except ParseError Stri
   | some (.num n _) => pure s!"{n}"
   | some a => fail a.pos s!"`{key}` of `{name}` is a name"
   | none => fail pos s!"`{name}` needs `{key}`"
+
+/-- A bare name, or `dflt` when the argument is not given. -/
+def wordOr (name key dflt : String) : Option Ast → Except ParseError String
+  | none => pure dflt
+  | a => word name key 0 a
 
 def pattern (c : Ctx) (name : String) (pos : Nat) : Option Ast → Except ParseError Exp
   | some (.math text p) =>
@@ -317,6 +329,54 @@ partial def tactic (c : Ctx) (a : Ast) : Except ParseError AnyStrategy := do
       let node ← up (num name "node" pos (arg? args "node" 0))
       let some t := arg? args "tactic" 1 | fail pos "`focus` needs a tactic"
       return (← tactic c t).focus node.down
+    | "replay" =>
+      let _ ← up (checkNames name args #["count", "rank", "min", "source", "at"])
+      let some rails := c.rails | fail pos "`replay` needs the subproofs of the file"
+      let count ← up (numOr name "count" 3 (arg? args "count" 0))
+      let rank ← up (match ← up (wordOr name "rank" "occurrences" (arg? args "rank" 1)) with
+        | ⟨"occurrences"⟩ => pure RailRank.occurrences
+        | ⟨"size"⟩ => pure .size
+        | ⟨"small"⟩ => pure .small
+        | ⟨w⟩ => fail pos s!"`rank` is occurrences, size or small, not `{w}`")
+      let minSize ← up (numOr name "min" 2 (arg? args "min" 2))
+      let source ← up (match ← up (wordOr name "source" "earlier" (arg? args "source" 3)) with
+        | ⟨"earlier"⟩ => pure RailSource.earlier
+        | ⟨"recurring"⟩ => pure .recurring
+        | ⟨w⟩ => fail pos s!"`source` is earlier or recurring, not `{w}`")
+      let seeds ← up (match ← up (wordOr name "at" "open" (arg? args "at" 4)) with
+        | ⟨"open"⟩ => pure RailSeeds.open
+        | ⟨"root"⟩ => pure .root
+        | ⟨w⟩ => fail pos s!"`at` is open or root, not `{w}`")
+      return ⟨Strategy.replay rails { count := count.down, rank := rank.down, minSize := minSize.down,
+                                      source := source.down, seeds := seeds.down }⟩
+    | "rails" =>
+      let _ ← up (checkNames name args #["count", "rank", "min", "source", "upto", "ground", "penalty"])
+      let some r := c.rails | fail pos "`rails` needs the subproofs of the file"
+      let count ← up (numOr name "count" 3 (arg? args "count" 0))
+      let rank ← up (match ← up (wordOr name "rank" "occurrences" (arg? args "rank" 1)) with
+        | ⟨"occurrences"⟩ => pure RailRank.occurrences
+        | ⟨"size"⟩ => pure .size
+        | ⟨"small"⟩ => pure .small
+        | ⟨w⟩ => fail pos s!"`rank` is occurrences, size or small, not `{w}`")
+      let minSize ← up (numOr name "min" 2 (arg? args "min" 2))
+      let source ← up (match ← up (wordOr name "source" "earlier" (arg? args "source" 3)) with
+        | ⟨"earlier"⟩ => pure RailSource.earlier
+        | ⟨"recurring"⟩ => pure .recurring
+        | ⟨w⟩ => fail pos s!"`source` is earlier or recurring, not `{w}`")
+      let upto ← up (numOr name "upto" 0 (arg? args "upto" 4))
+      let ground ← up (match ← up (wordOr name "ground" "true" (arg? args "ground" 5)) with
+        | ⟨"true"⟩ => pure true
+        | ⟨"false"⟩ => pure false
+        | ⟨w⟩ => fail pos s!"`ground` is true or false, not `{w}`")
+      let penalty ← up (numOr name "penalty" 0 (arg? args "penalty" 6))
+      return ⟨Strategy.rails r { replay := { count := count.down, rank := rank.down, minSize := minSize.down,
+                                             source := source.down }, upto := upto.down, ground := ground.down,
+                                 penalty := penalty.down }⟩
+    | "loop" =>
+      let _ ← up (checkNames name args #["tactic", "times"])
+      let some t := arg? args "tactic" 0 | fail pos "`loop` needs a tactic"
+      let n ← up (num name "times" pos (arg? args "times" 1))
+      return (← tactic c t).loop n.down
     | "seq" =>
       let _ ← up (checkNames name args #[])
       let some first := args[0]? | fail pos "`seq` needs at least one tactic"

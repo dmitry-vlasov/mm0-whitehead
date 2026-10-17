@@ -6,6 +6,7 @@ in the place of the original ones.
 -/
 import Whitehead.Mmb.Write
 import Whitehead.Prove.Prove
+import Whitehead.Prove.Combinators
 
 namespace Whitehead.Prove
 
@@ -373,14 +374,16 @@ structure SearchRow where
   deriving Inhabited
 
 /-- Searches for a proof of every theorem of `db.file` in the range, each from the
-assertions before it, with the strategy of `opts`. Returns a row per theorem and the new
-proof bodies. -/
-def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
+assertions before it, with the strategy of `opts`, or with the tactic that `custom` gives
+for the theorem (a tactic of the language, `Dsl.lean`). `uses` is for the `used` filters
+of a tactic. Returns a row per theorem and the new proof bodies. -/
+def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit)
+    (custom : Option (Nat → AnyStrategy) := none) (uses : Uses := {}) :
     IO (Array SearchRow × Array (Option ByteArray)) := do
   let f := db.file
   let vc := Verify.Ctx.ofFile f
   let index := db.index
-  let hypIndexes := if opts.strategy == "bfs" then {} else db.hypIndexes
+  let hypIndexes := if opts.strategy == "bfs" && custom.isNone then {} else db.hypIndexes
   let todo := (Array.range f.stmts.size).filter fun i =>
     let s := f.stmts[i]!
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ opts.first && s.index < opts.last &&
@@ -392,14 +395,18 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
       | _ => 0
     let start ← IO.monoMsNow
     let task := db.task s.index opts.metas
-    let env := Env.init db index task hypIndexes
+    let env := { Env.init db index task hypIndexes with uses }
     -- with metavariables what is proved is an instance of the theorem: nothing to check
     -- against, and no body for the file
     let accept := if task.metas.isEmpty then accept vc else acceptAny
-    let result ←
-      if opts.strategy == "forward" then searchWith accept env forwardOnly opts.limits
-      else if opts.strategy == "both" then searchWith accept env bidirectional opts.limits
-      else searchWith accept env breadthFirst opts.limits
+    let result ← match custom with
+      | some mk =>
+        let t := mk s.index
+        searchWith accept env t.strategy opts.limits
+      | none =>
+        if opts.strategy == "forward" then searchWith accept env forwardOnly opts.limits
+        else if opts.strategy == "both" then searchWith accept env bidirectional opts.limits
+        else searchWith accept env breadthFirst opts.limits
     let ms := (← IO.monoMsNow) - start
     let steps := (result.proof.map (·.size)).getD 0
     let body := if task.metas.isEmpty then result.body else none
@@ -413,7 +420,9 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit) :
         | .proved => s!"proved in {steps} steps (the file has {known})"
         | .exhausted => "nothing left to expand"
         | .limit => "limit reached"
-      lines := lines.push s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms\
+      let c := result.env.counters
+      lines := lines.push s!"{row.name}: {what}; {row.props} assertion nodes, {ms} ms; \
+        {c.expanded} expanded, {result.env.hyps.size} expression nodes, {c.tuples} tuples, {c.work} work\
         {if row.rejected == 0 then "" else s!", {row.rejected} proofs rejected by the verifier"}\
         {if opts.strategy == "bfs" then "" else s!", {row.facts} facts, {row.joins} joins"}"
       if result.ending == .proved && !task.metas.isEmpty then

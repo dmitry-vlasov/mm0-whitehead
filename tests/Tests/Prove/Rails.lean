@@ -1,0 +1,94 @@
+/-
+Tests of the replay of subproofs (`Prove/Rails.lean`) on `tests/fixtures/prove/logic.mmb`:
+the subproofs that fit a goal, only those of earlier proofs and as configured; a replay
+that follows a proof step by step and reproduces it; one that does not fit and expands
+nothing; one that leaves a goal open for the search to build up; `rails` without
+subproofs, which is breadth-first round for round; `loop`; and the language.
+-/
+import Whitehead.Prove.Session
+import Tests.Prove.Engine
+
+open Whitehead.Mmb Whitehead.Prove
+
+namespace Tests.Prove
+
+def railsTests : TestM Unit := do
+  let bytes ← IO.FS.readBinFile logicPath
+  let some file := MmbFile.parse bytes |>.toOption | check "rails: the fixture is read" false; return
+  let some db := Db.ofFile file |>.toOption | check "rails: the fixture becomes a database" false; return
+  let vc := Whitehead.Verify.Ctx.ofFile file
+  let id := thmId db
+  let rails := Rails.ofDb db
+  let index := db.index
+  let envOf (name : String) : Env := Env.init db index (db.task (id name))
+  -- the subproofs that fit a goal: of earlier proofs only, ranked, as many as asked
+  let at0 (name : String) (cfg : ReplayConfig) : Array Nat :=
+    let env := envOf name
+    rails.at_ env 0 cfg
+  let all := at0 "con1" { count := 1000, minSize := 1 }
+  check "rails: only subproofs of the proofs before the theorem"
+    (!all.isEmpty && all.all fun k => rails.sp.first[k]! < id "con1") s!"{all.size}"
+  check "rails: as many as asked, from the size asked"
+    ((at0 "con1" { count := 2 }).size ≤ 2 && (at0 "con1" { count := 1000, minSize := 3 }).all (rails.sp.sizes[·]! ≥ 3))
+  let bySize := at0 "con1" { count := 1000, minSize := 1, rank := .size }
+  check "rails: ranked by size, the largest first"
+    ((Array.range (bySize.size - 1)).all fun j => rails.sp.sizes[bySize[j]!]! ≥ rails.sp.sizes[bySize[j + 1]!]!)
+  let recurring := at0 "con1" { count := 1000, minSize := 1, source := .recurring }
+  check "rails: recurring, those of two earlier proofs"
+    (recurring.all fun k => rails.sp.occBefore k (id "con1") ≥ 2 && all.contains k)
+  -- each theorem's own proof, put down at its root, is followed step by step and proves it
+  let mut replayed := 0
+  for (thm, root) in rails.sp.roots do
+    let env := Env.init db index (db.task thm)
+    let r ← search vc env (Strategy.replayFrom rails #[(0, root)]) { maxProps := 100000 }
+    if r.ending == .proved then replayed := replayed + 1
+  checkEq "rails: every proof, replayed, proves its theorem" replayed rails.sp.roots.size
+  -- a subproof that does not fit: syl's proof at a1i, whose root has no variant for mpd
+  match rails.sp.roots.find? (·.1 == id "syl") with
+  | none => check "rails: syl's proof is read" false
+  | some (_, sylProof) =>
+    let r ← search vc (envOf "a1i") (Strategy.replayFrom rails #[(0, sylProof)]) { maxProps := 100000 }
+    check "rails: a subproof that does not fit expands nothing" (r.env.counters.expanded == 0 && r.proof.isNone)
+  -- mpd's proof at syl: its first premise is syl's premise ph -> ps, its second is left
+  -- open, ph -> ps -> ch, and the search builds it up from ps -> ch
+  match rails.sp.roots.find? (·.1 == id "mpd") with
+  | none => check "rails: mpd's proof is read" false
+  | some (_, mpdProof) =>
+    let s := (Strategy.replayFrom rails #[(0, mpdProof)]).seq (Strategy.rails rails { replay := { count := 0 } })
+    let r ← search vc (envOf "syl") s { maxProps := 100000 }
+    checkEq "rails: a rail with a goal left open, built up by the search"
+      ((r.proof.map (proofText db)).getD "none") "(mpd h1 (a1i h0))"
+  -- rails without subproofs is breadth-first, round for round
+  let mut same := true
+  for (thm, _) in rails.sp.roots do
+    let a ← search vc (Env.init db index (db.task thm)) breadthFirst { maxProps := 3000 }
+    let b ← search vc (Env.init db index (db.task thm)) (Strategy.rails rails { replay := { count := 0 } })
+      { maxProps := 3000 }
+    if a.ending != b.ending || (a.proof.map (proofText db)) != (b.proof.map (proofText db)) ||
+        a.env.props.size != b.env.props.size then same := false
+  check "rails: without subproofs, the same tree and proofs as breadth-first" same
+  -- rails with subproofs: every proof found is checked by the verifier, as any
+  let mut proved := 0
+  for (thm, _) in rails.sp.roots do
+    let r ← search vc (Env.init db index (db.task thm)) (Strategy.rails rails { replay := { count := 3 } })
+      { maxProps := 3000 }
+    if r.ending == .proved && r.body.any (·.size > 0) then proved := proved + 1
+  check "rails: with subproofs, theorems proved and verified" (proved ≥ 13) s!"{proved}"
+  -- loop: the body again while the tree grows
+  let r ← search vc (envOf "con1") ((breadthFirst.sized 100).loop 3) { maxProps := 100000 }
+  check "rails: loop runs its body again" (r.env.props.size > 100) s!"{r.env.props.size}"
+  -- the language
+  let ctx : Dsl.Ctx := { db, rails := some rails }
+  let ok (text : String) : Bool := (Dsl.parseTactic ctx text).isOk
+  check "rails: the tactics of the language"
+    (ok "replay" && ok "replay(5, rank=size, min=3, source=recurring, at=root)" && ok "rails(3)" &&
+      ok "rails(count=1, rank=small, upto=1, ground=false)" && ok "loop(seq(limited(bfs, size=100), rails(1)), 5)")
+  let err (c : Dsl.Ctx) (text : String) : String :=
+    match Dsl.parseTactic c text with
+    | .ok _ => "accepted"
+    | .error e => e.msg
+  checkEq "rails: without the subproofs" (err { db } "rails(3)") "`rails` needs the subproofs of the file"
+  checkEq "rails: a rank that is not one" (err ctx "rails(3, rank=best)") "`rank` is occurrences, size or small, not `best`"
+  checkEq "rails: a source that is not one" (err ctx "replay(source=all)") "`source` is earlier or recurring, not `all`"
+
+end Tests.Prove

@@ -201,6 +201,19 @@ def serverTests : TestM Unit := do
   let (ran, _) ← callTool c st 196 "run" (.obj #[("session", Json.ofNat 3), ("tactic", "bfs"), ("nodes", Json.ofNat 5)])
   check "server: a run's nodes are those it adds"
     ((ran.get? "nodes").bind (·.nat?) |>.any fun n => n > ((before.get? "nodes").bind (·.nat?)).getD 0) ran.compress
+  -- rails at syl's root: mpd's proof among them; put down, it leaves a goal open
+  let (_, _) ← callTool c st 197 "start" (.obj #[("theorem", "syl")])
+  let (rs, err) ← callTool c st 198 "rails" (.obj #[("session", Json.ofNat 4), ("node", Json.ofNat 0), ("n", Json.ofNat 50)])
+  let sample := ((rs.get? "sample").bind (·.arr?)).getD #[]
+  check "server: rails at a goal, with what they prove and where from"
+    (!err && !sample.isEmpty && sample.all fun r => ((r.get? "from").bind (·.str?)).isSome) rs.compress
+  let rail := ((sample[0]?).bind (·.get? "rail") |>.bind (·.nat?)).getD 0
+  let (rp, err) ← callTool c st 199 "replay" (.obj #[("session", Json.ofNat 4), ("node", Json.ofNat 0),
+    ("rails", .arr #[Json.ofNat rail])])
+  check "server: a rail put down" (!err && ((rp.get? "nodes").bind (·.nat?)).any (· > 0)) rp.compress
+  checkEq "server: a rail that is not one"
+    (errText (← callTool c st 200 "replay" (.obj #[("session", Json.ofNat 4), ("node", Json.ofNat 0),
+      ("rails", .arr #[Json.ofNat 100000])]))) "there is no rail 100000"
   checkEq "server: an argument the tool does not take"
     (errText (← callTool c st 191 "find" (.obj #[("pattern", "a*")]))) "`find` has no argument `pattern`; it takes `name`, `limit`"
   -- after an error the sessions are still there
