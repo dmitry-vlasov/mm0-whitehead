@@ -99,8 +99,16 @@ against 1.63M, 9.30M against 4.80M). Of 58 holes it was given, it filled 8: the 
 agent leaves open are beyond a breadth-first search, and what they ask for is decision
 procedures (arithmetic, order), the oracles of layer 2.
 
-**Next, proposed:** the learned ranking layer, with Whitehead as the environment of a
-small learned policy (`DESIGN.md`, "The learned ranking layer").
+**The learned ranking layer** (`DESIGN.md`, "The learned ranking layer"; Whitehead as the
+environment of a small learned policy):
+- the data of every MM0 file at hand (`prove export`, 23 features a variant);
+- boosted trees trained in Python, evaluated in Lean (`--model`), with the same scores;
+- the tactic `learned`, `guided` with the variants ordered by the model.
+
+On set.mm's test theorems, which the model never saw, `learned` proves 102 of 618 at 5 s,
+against 67 for `guided` and 29 for `bfs` (+52%), losing none; the compiler's, all 505; on
+mm0's own it is 4% below `guided`. Offline, the model puts the known proof's step first
+at 22.3% of the nodes, among all their variants, against 9.4% by recency.
 
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
@@ -447,7 +455,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,207 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,220 checks, 0 failures, in 20 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations

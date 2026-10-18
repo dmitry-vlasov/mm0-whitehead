@@ -115,6 +115,15 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
     for i in [0:sorted.size] do of := of.insert sorted[i]! i
     return (of[p]?.getD 0, { of, stats })
 
+/-- The place of assertion node `p` for its cost: its place by `rank`, but at most `width`
+for a variant without premises, which proves its goal at once if it applies at all: such
+a step costs at most one more than the rank's first. On the compiler's theorems a learned
+rank put one-step proofs out of reach; putting them all first instead floods the rounds
+where there are many (mm0's numerals) (`docs/DESIGN.md`, "The learned ranking layer"). -/
+def placeOf (env : Env) (pl : Places) (rank : VariantRank) (width p : Nat) : Nat × Places :=
+  let (r, pl) := pl.get env rank p
+  if env.props[p]!.rule.hyps.isEmpty then (min r width, pl) else (r, pl)
+
 /-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
 `rank`, divided by `width`. -/
 partial def rankedCost (env : Env) (m : Marks) (penalty : Nat) (rank : VariantRank) (width : Nat)
@@ -124,7 +133,7 @@ partial def rankedCost (env : Env) (m : Marks) (penalty : Nat) (rank : VariantRa
     | none => (0, (st.1.insert h 0, st.2))
     | some q =>
       let (c, (memo, pl)) := rankedCost env m penalty rank width st env.props[q]!.parent
-      let (r, pl) := pl.get env rank q
+      let (r, pl) := placeOf env pl rank width q
       let c := if !m.props.contains q then c + 1 + r / width else if m.goals.contains h then c else c + penalty
       (c, (memo.insert h c, pl))
 
@@ -155,7 +164,7 @@ def Strategy.search (c : Cost) : Strategy SearchState where
         if env.props[p]!.expanded then continue
         let h := env.props[p]!.parent
         let (k, memo') := rankedCost env marks penalty rank width memo h
-        let (r, pl) := memo'.2.get env rank p
+        let (r, pl) := placeOf env memo'.2 rank width p
         memo := (memo'.1, pl)
         let k := k + r / width
         match best with

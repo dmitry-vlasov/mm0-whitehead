@@ -2570,6 +2570,81 @@ with a value of goals (Monte Carlo tree search) comes after.
 - **peano:** 2,700 theorems in 6 s, 1,313,001 rows, 29,050 nodes with their known
   variant. 50 proofs are left out, with a shared conversion that the skeleton reader
   does not take.
+- **The corpus** (`.tools/learn/export-all.sh`):
+  - set.mm: 68,598,966 rows and 1,345,329 nodes, in 32 minutes on 20 threads;
+  - its test theorems with all their variants (every 10th from 42,850): 618 theorems,
+    76,160,788 rows, 16,631 nodes, a median of 1,076 variants a node (a mean of 4,579);
+  - the others: hello_mmc 7.0M rows, mm0 2.2M, hol and set small.
+
+**Built: training and models** (`learn/`, Python in `.tools/venv`):
+- `data.py` reads the data in batches with pyarrow, and caches it as `.npz`.
+- `train.py` trains the linear model (L-BFGS, on 5M rows at most) and the trees
+  (lambdarank, early stopping), on 30% of each file's training theorems (with
+  `--sample-train`). 6 minutes on the whole corpus.
+- `evaluate.py` gives the known variant's place among all the variants of a node, a tie
+  counted as the average place.
+- `parity.py`: Lean's scores (`prove score`) against Python's. The largest difference over
+  20,000 rows is 5e-7, the printing of the scores, for trees and linear alike.
+
+**Offline, among all the variants** of set.mm's test theorems (16,631 nodes):
+
+| model | first | in the first 5 | in the first 10 | MRR |
+|---|---|---|---|---|
+| by uses | 6.1% | 19.4% | 27.0% | 0.135 |
+| by recency | 9.4% | 28.2% | 40.6% | 0.193 |
+| linear | 18.6% | 40.9% | 53.0% | 0.296 |
+| trees (846) | 22.3% | 46.0% | 58.4% | 0.339 |
+| trees, the first 100 | 20.4% | 44.9% | 58.1% | 0.325 |
+
+- The trees put the known step first 2.4 times as often as recency.
+- 100 trees rank nearly as well as 846, at an eighth of the cost.
+- Their gains: recency 42%, uses 14%, never used 9%, how specific the conclusion is 7%,
+  the shared weight of symbols 4%.
+
+**In search** (`prove search --model trees-100.json`; the test parts only, which the
+model has not seen):
+- **Speed decides:** at a new goal, every variant is scored, a median of about a
+  thousand.
+  - With 846 trees, a search expands 2 nodes in a second at the median, where `bfs`
+    expands 42.
+  - With 100 trees it is 8 times faster. At 1 s, `guided` with the model's order proved
+    71 theorems with 846 trees, 73 with 200, 79 with 100 (width 10).
+  - The width that divides a place into a cost: 3 gave 78, 5 gave 81, 10 gave 79, 20
+    gave 75.
+- **A step without premises must not wait for its place.** On the compiler's theorems
+  the model ranked low the lemmas that prove a goal in one step, and the search lost a
+  third of what `bfs` proves (342 against 501).
+  - Putting every such step first floods mm0, where there are many (169 against 233).
+  - Capping its place at the width gives 399 on the compiler.
+  - What works is a composition: first, at the root, the variants without premises
+    (`bfs(filter=premises(0), depth=1)`: 505 of 505), then the rest. A whole first round
+    of `bfs` instead takes the whole second on set.mm, whose root has thousands of
+    variants.
+- **`learned`** (`tactics/learned.tac`): `seq(bfs(filter=premises(0), depth=1),
+  first(the closing rails, the open rail, search(depth(follow, penalty=2, by=model,
+  width=5))))`.
+
+| test part | per theorem | `bfs` | `guided` | `learned` |
+|---|---|---|---|---|
+| set.mm (618) | 1 s | 25 | 61 | **82** |
+| set.mm | 5 s | 29 | 67 | **102** |
+| the compiler, hello_mmc (505) | 1 s | 501 | 496 | **505** |
+| | 5 s | 505 | 503 | 505 |
+| mm0's own (491) | 1 s | 102 | 244 | 233 |
+| | 5 s | 247 | 248 | 238 |
+
+- **On set.mm:** `learned` proves 21 more than `guided` at 1 s and 35 more at 5 s, and
+  loses none; +52% at 5 s, and 3.5 times `bfs`. Its proofs have 3 steps at the median,
+  104 at most.
+- **On mm0** it loses 4 to 5%: the model learned mostly from set.mm (89% of the rows).
+- **The verifier** rejected no proof.
+
+**Next:**
+- training that weighs the files evenly, for mm0;
+- features that are cheaper to compute, so that more nodes are expanded in a second;
+- expert iteration: the proofs that `learned` finds, other than the known ones, are new
+  positives;
+- the value of goals.
 
 ### Mining and ranking (the design of 2026-10-13)
 

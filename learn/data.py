@@ -26,12 +26,26 @@ def read(path):
         d = {k: z[k] for k in z.files}
         d['features'] = list(d['features'])
         return d
+    import pyarrow as pa
     import pyarrow.csv as pc
-    t = pc.read_csv(path, parse_options=pc.ParseOptions(delimiter='\t'))
-    feats = [c for c in t.column_names if c not in META]
-    d = {c: t.column(c).to_numpy().astype(np.int64) for c in ['thm', 'node', 'label', 'assertion', 'variants']}
-    d['name'] = np.array(t.column('name').to_pylist(), dtype=str)
-    d['X'] = np.column_stack([t.column(c).to_numpy().astype(np.float32) for c in feats])
+    # in batches, each made compact at once: the whole table would not fit in memory
+    reader = pc.open_csv(path, parse_options=pc.ParseOptions(delimiter='\t'),
+                         read_options=pc.ReadOptions(block_size=1 << 26))
+    feats = [c for c in reader.schema.names if c not in META]
+    ints = {c: [] for c in ['thm', 'node', 'label', 'assertion', 'variants']}
+    xs, codes, names = [], [], {}
+    for batch in reader:
+        for c in ints:
+            ints[c].append(batch.column(c).to_numpy().astype(np.int64))
+        xs.append(np.column_stack([batch.column(c).to_numpy().astype(np.float32) for c in feats]))
+        # a theorem's name once: each row has the number of its name in `names`
+        col = batch.column('name').to_pylist()
+        codes.append(np.array([names.setdefault(n, len(names)) for n in col], dtype=np.int32))
+    d = {c: np.concatenate(v) for c, v in ints.items()}
+    d['X'] = np.concatenate(xs)
+    del xs
+    d['name_code'] = np.concatenate(codes)
+    d['names'] = np.array(list(names), dtype=str)
     d['features'] = feats
     np.savez(cache, **{**d, 'features': np.array(feats)})
     return d

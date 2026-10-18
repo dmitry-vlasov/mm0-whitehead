@@ -6,6 +6,7 @@ fixed, and the counts of proofs only those before the theorem.
 -/
 import Whitehead.Prove.Dataset
 import Whitehead.Prove.Model
+import Whitehead.Prove.Dsl
 import Tests.Prove.Engine
 
 open Whitehead.Mmb Whitehead.Prove
@@ -71,5 +72,23 @@ def modelTests : TestM Unit := do
   match Model.ofJson (.obj #[("features", .arr #[.str "other"]), ("mean", zeros), ("scale", ones), ("weights", w)]) with
   | .error e => check "model: other features are refused" (contains e "features") e
   | .ok _ => check "model: other features are refused" false
+  -- in a search: the variants ordered by a model, here by how much their assertion is used
+  let bytes ← IO.FS.readBinFile logicPath
+  let some file := MmbFile.parse bytes |>.toOption | return
+  let some db := Db.ofFile file |>.toOption | return
+  let vc := Whitehead.Verify.Ctx.ofFile file
+  let usesW := Whitehead.Json.arr ((Array.range featureNames.size).map fun i =>
+    .int (if featureNames[i]! == "uses_log" then 1 else 0))
+  match Model.ofJson (.obj #[("features", names), ("mean", zeros), ("scale", ones), ("weights", usesW)]) with
+  | .error e => check "model: a model in a search" false e
+  | .ok m =>
+    let ctx : Dsl.Ctx := { db, model := some m }
+    checkEq "model: by=model needs a model" ((Dsl.parseTactic { db } "search(depth(by=model, width=1))").toOption.isNone) true
+    match Dsl.parseTactic ctx "search(depth(by=model, width=1))" with
+    | .error e => check "model: a model in a search" false e.msg
+    | .ok t =>
+      let uses := Uses.ofFile file db.asserts.size
+      let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
+      check "model: a search ordered by a model proves syl" (r.ending == .proved)
 
 end Tests.Prove

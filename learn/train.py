@@ -7,7 +7,10 @@ trained on the files of `prove export` and compared on their test parts:
 - M2, boosted trees: LightGBM's lambdarank, one query a node, stopped early on the
   tuning part.
 
-    python train.py OUTDIR FILE.tsv...      (the files in the order of data.FILES)
+    python train.py OUTDIR [--sample-train F] FILE.tsv...   (the files in the order of data.FILES)
+
+With --sample-train, only that share of each file's training theorems is trained on
+(drawn by the theorem's number), to train faster; the tuning and test parts are whole.
 
 writes OUTDIR/linear.json (the means, scales and weights), OUTDIR/trees.txt (the
 LightGBM model) and OUTDIR/trees.json (its dump, which Whitehead reads: `--model`), and
@@ -22,24 +25,38 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np  # noqa: E402
 import data  # noqa: E402
 
+FEATS = []
 
-def load(paths):
-    """The rows of the files, each theorem once (by name, the first file that has it),
-    with the part of each row (0 train, 1 tune, 2 test) and its file."""
+
+def load(paths, sample=1.0):
+    """The rows of the files, each theorem once (by name, the first file that has it), with
+    the part of each row (0 train, 1 tune, 2 test) and its file. With `sample`, only that
+    share of a file's training theorems, drawn by the theorem's number."""
     seen, parts = set(), []
-    for p in paths:
+    for fi, p in enumerate(paths):
         d = data.read(p)
+        if not FEATS:
+            FEATS.append(d['features'])
         part = data.split(d)
-        names = np.unique(d['name'])
-        new = set(names) - seen
-        keep = np.isin(d['name'], list(new))
-        seen |= new
-        sub = {k: (v[keep] if isinstance(v, np.ndarray) and len(v) == len(keep) else v) for k, v in d.items()}
+        # the theorems of this file, by number, with their names
+        thm_names = {}
+        for t, c in zip(*np.unique(np.stack([d['thm'], d['name_code']]), axis=1)):
+            thm_names[int(t)] = str(d['names'][c])
+        new = {t for t, n in thm_names.items() if n not in seen}
+        seen |= {thm_names[t] for t in new}
+        keep_thm = np.array(sorted(new), dtype=np.int64)
+        keep = np.isin(d['thm'], keep_thm)
+        if sample < 1:
+            h = (d['thm'] * 2654435761 + fi * 40503) % 1000
+            keep &= (part != 0) | (h < sample * 1000)
+        sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
         sub['part'] = part[keep]
-        sub['file'] = np.full(int(keep.sum()), len(parts))
+        sub['file'] = np.full(int(keep.sum()), fi)
         parts.append((os.path.basename(p), sub))
-        print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, {len(new)} theorems of {len(names)}')
-    feats = parts[0][1]['features']
+        print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, {len(new)} theorems of {len(thm_names)}',
+              flush=True)
+        del d
+    feats = FEATS[0]
     cat = {k: np.concatenate([s[k] for _, s in parts]) for k in ['thm', 'node', 'label', 'variants', 'part', 'file', 'X']}
     cat['features'] = feats
     cat['files'] = [n for n, _ in parts]
@@ -99,9 +116,15 @@ def fit_linear(X, d, l2=1e-3):
 
 
 def main():
-    out, paths = sys.argv[1], sys.argv[2:]
+    args = sys.argv[1:]
+    sample = 1.0
+    if '--sample-train' in args:
+        i = args.index('--sample-train')
+        sample = float(args[i + 1])
+        del args[i:i + 2]
+    out, paths = args[0], args[1:]
     os.makedirs(out, exist_ok=True)
-    d = load(paths)
+    d = load(paths, sample)
     feats = d['features']
     fi = {n: i for i, n in enumerate(feats)}
     X = d['X']
@@ -127,7 +150,11 @@ def main():
     # M1
     mu, sd = train['X'].mean(0), train['X'].std(0) + 1e-6
     t0 = time.time()
-    w, loss = fit_linear((train['X'] - mu) / sd, train)
+    lin = train
+    if len(train['label']) > 5_000_000:
+        h = (train['thm'] * 2246822519 + train['file'] * 97) % 1000
+        lin = select(train, h < 5_000_000 / len(train['label']) * 1000)
+    w, loss = fit_linear((lin['X'] - mu) / sd, lin)
     print(f'linear: trained in {time.time() - t0:.0f} s, loss {loss:.4f}')
     print('  weights: ' + ', '.join(f'{n} {v:+.2f}' for n, v in sorted(zip(feats, w), key=lambda x: -abs(x[1]))))
     report('linear', lambda s: ((s['X'] - mu) / sd) @ w)
