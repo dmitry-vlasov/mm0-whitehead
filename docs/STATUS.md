@@ -88,16 +88,20 @@ renamed, so that the agents cannot recall their proofs, MM1 proved all ten with 
 tokens and $1.16; Whitehead proved nine with 18.2M tokens and $6.16 (list prices), and up
 to 2.1 GB of memory. Three runs of each pair: Whitehead 26 of 30, MM1 30 of 30. On six
 harder theorems (60 to 115 steps): Whitehead 4 of 6, MM1 6 of 6, at 4 to 20 times
-fewer tokens.
+fewer tokens. The author's hypothesis, that the engine makes proving cheaper for an
+agent, does not hold for this interface: the agent's tokens follow its number of calls,
+and the step-by-step tools take many.
 
 **Whitehead as a gap filler** (`DESIGN.md`, "Whitehead as a gap filler"): the MM1 agent
 with `./fill`, which gives the holes of its proof to Whitehead (`prove goal`, a proof as
 an MM1 term). It proved all ten and all six, but at more tokens than MM1 alone (2.67M
 against 1.63M, 9.30M against 4.80M). Of 58 holes it was given, it filled 8: the steps an
 agent leaves open are beyond a breadth-first search, and what they ask for is decision
-procedures (arithmetic, order), the oracles of layer 2. The author's hypothesis, that the engine makes proving cheaper for an agent,
-does not hold for this interface: the agent's tokens follow its number of calls, and the
-step-by-step tools take many.
+procedures (arithmetic, order), the oracles of layer 2.
+
+**Next, proposed:** the learned ranking layer, with Whitehead as the environment of a
+small learned policy (`DESIGN.md`, "The learned ranking layer").
+
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.
