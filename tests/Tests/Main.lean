@@ -22,6 +22,7 @@ import Tests.Prove.Hints
 import Tests.Prove.Rails
 import Tests.Prove.Tactics
 import Tests.Prove.Mm1
+import Tests.Prove.Dataset
 import Tests.Mcp
 
 def main : IO UInt32 := do
@@ -51,6 +52,8 @@ def main : IO UInt32 := do
     Tests.Prove.railsTests
     Tests.Prove.tacticsTests
     Tests.Prove.mm1Tests
+    Tests.Prove.datasetTests
+    Tests.Prove.modelTests
     Tests.Mcp.jsonTests
     Tests.Mcp.serverTests
     Tests.Prove.fullReplayTests

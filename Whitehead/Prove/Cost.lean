@@ -10,7 +10,7 @@ state: what an atom did, as `follow` the steps it took, the cost reads off the t
 N or less. `depth` is; `depth(follow)` too, since each fragment that `follow` follows is
 finite, and without its `chain` no fragment is put down at a goal that one left open.
 -/
-import Whitehead.Prove.Combinators
+import Whitehead.Prove.Model
 
 namespace Whitehead.Prove
 
@@ -21,7 +21,9 @@ inductive VariantRank where
   | used
   /-- By the latest proof that uses the assertion, the latest first; then by uses. -/
   | recent
-  deriving BEq, Inhabited, Repr
+  /-- By a learned model's score, the highest first (`Model.lean`). -/
+  | learned (m : Model)
+  deriving Inhabited, Repr
 
 /-- The order of the leaves for `search`. -/
 inductive Cost where
@@ -75,6 +77,8 @@ partial def goalCost (env : Env) (m : Marks) (penalty : Nat) (memo : Std.HashMap
 those of a goal's variants are found together, the first time one is asked for. -/
 structure Places where
   of : Std.HashMap Nat Nat := {}
+  /-- For a learned rank, the file's symbols, counted once. -/
+  stats : Option SymbolStats := none
   deriving Inhabited
 
 /-- The place of assertion node `p` among the variants of its goal, by `rank`. -/
@@ -88,18 +92,28 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
     let latest (q : Nat) : Nat := match env.props[q]!.step with
       | .assertion a => env.uses.latest a env.task.limit
       | .conv .. => 0
-    let key (q : Nat) : Nat × Nat := match rank with
-      | .used => (uses q, 0)
-      | .recent => (latest q, uses q)
-    let keys := kids.foldl (init := ({} : Std.HashMap Nat (Nat × Nat))) fun (m : Std.HashMap Nat (Nat × Nat)) q =>
-      m.insert q (key q)
-    let sorted := kids.qsort fun a b =>
-      let (a1, a2) := keys[a]!
-      let (b1, b2) := keys[b]!
-      a1 > b1 || a1 == b1 && (a2 > b2 || a2 == b2 && a < b)
+    let mut stats := pl.stats
+    let sorted := match rank with
+      | .learned m =>
+        let st := stats.getD (SymbolStats.ofDb env.db)
+        let scores := kids.foldl (init := ({} : Std.HashMap Nat Float)) fun (acc : Std.HashMap Nat Float) q =>
+          acc.insert q (m.score (env.features st q))
+        kids.qsort fun a b => scores[a]! > scores[b]! || scores[a]! == scores[b]! && a < b
+      | _ =>
+        let key (q : Nat) : Nat × Nat := match rank with
+          | .used => (uses q, 0)
+          | _ => (latest q, uses q)
+        let keys := kids.foldl (init := ({} : Std.HashMap Nat (Nat × Nat))) fun (m : Std.HashMap Nat (Nat × Nat)) q =>
+          m.insert q (key q)
+        kids.qsort fun a b =>
+          let (a1, a2) := keys[a]!
+          let (b1, b2) := keys[b]!
+          a1 > b1 || a1 == b1 && (a2 > b2 || a2 == b2 && a < b)
+    if let .learned _ := rank then
+      if stats.isNone then stats := some (SymbolStats.ofDb env.db)
     let mut of := pl.of
     for i in [0:sorted.size] do of := of.insert sorted[i]! i
-    return (of[p]?.getD 0, { of })
+    return (of[p]?.getD 0, { of, stats })
 
 /-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
 `rank`, divided by `width`. -/

@@ -99,7 +99,7 @@ def tacticsTests : TestM Unit := do
   let r ← runU (id "syl") (tac "search(depth(by=used, width=1))")
   check "tactics: ranked by uses, width 1, proves" (r.ending == .proved)
   checkEq "tactics: a rank without a width" (err ctx "search(depth(by=recent))") "`depth` with `by` needs a `width`"
-  checkEq "tactics: a rank that is not one" (err ctx "search(depth(by=best, width=3))") "`by` is used or recent, not `best`"
+  checkEq "tactics: a rank that is not one" (err ctx "search(depth(by=best, width=3))") "`by` is used, recent or model, not `best`"
   -- bfs with a filter and limits, as the combinators
   checkEq "tactics: bfs with its filter and limits is limited(filter(f, bfs))"
     (← sameOn (tac "bfs(filter=premises(max=1), size=500, depth=4)")

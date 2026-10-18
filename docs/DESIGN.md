@@ -2538,12 +2538,38 @@ with a value of goals (Monte Carlo tree search) comes after.
 6. Search, against `guided`. The model goes in only if it proves more.
 7. M2, the value of goals, expert iteration.
 
-**Questions:**
+**Questions, and the author's answers (2026-10-18):**
 1. Training in Python, inference in Lean? Everything in Lean is possible for M1 and M2,
-   at the price of writing the trainers.
-2. set.mm as the corpus, for its 47,611 proofs, with peano as a second check?
-3. May LightGBM be installed for M2? With no GPU here, the models stay small, which suits
-   the purpose.
+   at the price of writing the trainers. The author asked what Python brings:
+   - LightGBM's ranking objectives, and PyTorch on the GPU for M3; Lean has neither;
+   - models changed without rebuilding Lean;
+   - optimizers that are tested, rather than trainers of our own.
+
+   Its price is two languages, and a model that Lean must evaluate as Python does. The
+   features are computed by Lean alone, and a test checks the scores. The prover runs
+   without Python: it is needed for training only.
+2. The corpus: **every MM0 file at hand.** The files contain one another, so each theorem
+   is taken once (by its name, `.tools/learn/names`):
+   - peano is in peano_hex, which is in mm0 and in x86;
+   - x86 is in compiler, which is in hello_mmc and hello_assembler;
+   - so: set.mm (47,589), hello_mmc (10,134: peano, peano_hex, x86, compiler and its
+     own), mm0's own (1,085), hol (99), set (26, a small example of its own), and
+     hello_assembler's own (6). About 58,900 proofs.
+
+   The features mean the same in every file, so one model can serve them all. The split
+   is made in each file.
+3. LightGBM may be installed: it is, in `.tools/venv` (4.7.0, with numpy and scipy;
+   Python 3.14). The machine has a GPU after all, a GeForce RTX 4060 with 8 GB, for M3.
+
+**Built: the data** (`prove export`, `Prove/Features.lean`, `Prove/Dataset.lean`):
+- **The columns:** the theorem (number and name), the goal node, the label, the
+  assertion (−1 for a conversion), the node's number of variants, and 23 features.
+- **The draw:** 50 negatives a node by default (`--negatives`, 0 for all), fixed by the
+  node.
+- **Writing:** numbers with four significant digits, so peano's data is 108 MB.
+- **peano:** 2,700 theorems in 6 s, 1,313,001 rows, 29,050 nodes with their known
+  variant. 50 proofs are left out, with a shared conversion that the skeleton reader
+  does not take.
 
 ### Mining and ranking (the design of 2026-10-13)
 

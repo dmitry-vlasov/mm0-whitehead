@@ -49,6 +49,15 @@ def usage : String :=
                                  theorem agree with its known proof, for the first 1, 3 and 10;
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
+  prove export <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--ms T]
+               [--max-nodes N]
+                                 the data of the learned ranking layer: for each theorem, along
+                                 its known proof, a row for each variant of each goal node, with
+                                 its features and whether the known proof chose it (TSV);
+                                 --negatives: the others kept a node (50; 0 for all)
+  prove score <data.tsv> --model FILE
+                                 the scores of a model of the learned ranking layer for the rows
+                                 of a file of `prove export`, one a line
   prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
              [--max-nodes N] [--tactics DIR]
                                  a proof of TEXT, in the notation of the specification, under the
@@ -57,7 +66,8 @@ def usage : String :=
                                  bench. A metavariable ?a of MM1 is one of the search's. By
                                  default seq(bfs(size=20000, depth=2), guided), 5 s
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--max-facts N] [--join-cap N|all]
+               [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--model FILE] [--max-facts N]
+               [--join-cap N|all]
                [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
                                  forward from the premises, or both in turn. --max-facts: the
@@ -382,6 +392,78 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
         {Prove.rankSummary (nodes.map (·.recents[j]!))}"
   return 0
 
+/-- `prove export`: the data of the learned ranking layer (`Prove/Dataset.lean`): for each
+theorem of the range, a row for each variant of each goal node of its known proof's
+path, with its features and whether the known proof chose it. -/
+def proveExport (path : String) (args : List String) : IO UInt32 := do
+  let some out := strOption args "-o"
+    | IO.eprintln "prove export: -o OUT is needed"; return 2
+  let file ←
+    match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let (jobs, progress, memLimit) ← jobOptions args
+  let first := numOption args "--from" 0
+  let last := numOption args "--to" 1000000000
+  let every := max 1 (numOption args "--every" 1)
+  let negatives := numOption args "--negatives" 50
+  let limits : Prove.Limits :=
+    { maxProps := numOption args "--max-nodes" 500000, maxMs := numOption args "--ms" 20000,
+      maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
+  let todo := (Array.range file.stmts.size).filter fun i =>
+    let s := file.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+  let index := db.index
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let stats := Prove.SymbolStats.ofDb db
+  let start ← IO.monoMsNow
+  let results ← Prove.runJobs jobs todo.size
+    (fun k => Prove.datasetRows db index limits uses stats negatives todo[k]!) progress memLimit logLine
+  let h ← IO.FS.Handle.mk out .write
+  h.putStrLn Prove.datasetHeader
+  let mut rows := 0
+  let mut positives := 0
+  for r in results do
+    if let some lines := r then
+      for l in lines do
+        h.putStrLn l
+        rows := rows + 1
+        if (l.splitOn "\t")[3]? == some "1" then positives := positives + 1
+  IO.println s!"{path}: {todo.size} theorems, {(results.filter (·.isNone)).size} left out (a shared conversion); \
+    {rows} rows, {positives} of them the known proof's, written to {out}, in {(← IO.monoMsNow) - start} ms"
+  return 0
+
+/-- `prove score`: the scores of a model (`Prove/Model.lean`) for the rows of a file of
+`prove export`, one a line: what `learn/parity.py` compares with the scores in Python. -/
+def proveScore (path : String) (args : List String) : IO UInt32 := do
+  let some mp := strOption args "--model" | IO.eprintln "prove score: --model FILE is needed"; return 2
+  let m ← match ← Prove.Model.load mp with
+    | .ok m => pure m
+    | .error e =>
+      IO.eprintln e
+      return 1
+  let lines := (← IO.FS.readFile path).splitOn "\n" |>.filter (· != "")
+  let some head := lines.head? | return 0
+  let cols := (head.splitOn "\t").toArray
+  let idx := Prove.featureNames.filterMap fun n => cols.findIdx? (· == n)
+  if idx.size != Prove.featureNames.size then
+    IO.eprintln s!"{path}: its columns are not the features of this program"
+    return 1
+  let out ← IO.getStdout
+  for l in lines.tail do
+    let fs := (l.splitOn "\t").toArray
+    let x := idx.map fun i => (Prove.parseFloat fs[i]!).getD 0
+    out.putStrLn (toString (m.score x))
+  return 0
+
 /-- `prove subproofs`: the distinct subproofs of a file, their lemmas, how much of the
 proofs earlier proofs cover, and what the lemmas would add to the variants
 (`Prove/Subproofs.lean`). -/
@@ -622,7 +704,14 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       IO.eprintln msg
       return 1
   let rails : Thunk Prove.Rails := Thunk.mk fun _ => Prove.Rails.ofDb db
-  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs }
+  let model ← match strOption args "--model" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e =>
+        IO.eprintln e
+        return 1
+  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model }
   if let some text := tactic then
     if let .error e := Prove.Dsl.parseTactic (ctx 0) text then
       IO.eprintln (Prove.Dsl.ParseError.show text e)
@@ -825,6 +914,8 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "subproofs" :: path :: rest => proveSubproofs path rest
   | "prove" :: "rails" :: path :: rest => proveRails path rest
   | "prove" :: "goal" :: mm0 :: mmb :: rest => proveGoal mm0 mmb rest
+  | "prove" :: "export" :: path :: rest => proveExport path rest
+  | "prove" :: "score" :: path :: rest => proveScore path rest
   | _ =>
     IO.eprintln usage
     return 2
