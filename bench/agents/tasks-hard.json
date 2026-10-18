@@ -1,0 +1,8 @@
+[
+ {"theorem": "leasymd", "known_steps": 60, "area": "order"},
+ {"theorem": "ltmul1", "known_steps": 64, "area": "arithmetic"},
+ {"theorem": "dvdadd1", "known_steps": 67, "area": "divisibility"},
+ {"theorem": "prth", "known_steps": 69, "area": "pairs"},
+ {"theorem": "divlem3", "known_steps": 111, "area": "division"},
+ {"theorem": "appendnth1", "known_steps": 115, "area": "lists"}
+]

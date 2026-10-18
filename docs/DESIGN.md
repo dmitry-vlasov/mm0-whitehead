@@ -2244,6 +2244,11 @@ default way, writing MM1. The expected price is memory: Whitehead's trees are la
 - **Measured:**
   - the agent: tokens (input, cache writes, cache reads, output), cost, turns, time,
     tool calls, from the transcript;
+  - the cost is the tokens at the model's list prices (Sonnet 5.5: $2 input, $10
+    output, $0.20 cache reads per million, a cache write 2 times the input for an
+    hour). The CLI's own `total_cost_usd` is kept beside it: Claude Code 2.1.148 priced
+    Sonnet 5.5 at $5 / $6.25 / $0.50 / $25, which reproduces every run to $0.001, so its
+    figures were 2.2 times too high, and its `--max-budget-usd` of $5 was $2.20;
   - the machine: the server's CPU time and largest resident memory, by `/usr/bin/time`,
     or the same summed over every `./check`.
 - **Accepted by `mm0-rs` in both cases:**
@@ -2264,16 +2269,16 @@ every task (W/M: Whitehead's figure over MM1's):
 |---|---|---|---|---|---|
 | `mt2` | 1.5 | 1.1 | 1.0 | 3 | 3 |
 | `bibi1` | 1.4 | 0.9 | 1.1 | 3 | 3 |
-| `eor` | 5.2 | 2.6 | 3.2 | 16 | 4 |
-| `sucsub` | 8.1 | 4.4 | 5.3 | 31 | 7 |
-| `notfal` | 3.7 | 2.3 | 2.2 | 12 | 5 |
-| `mulmoddir` | 11.4 | 6.2 | 5.2 | 28 | 4 |
-| `ssasym` | 12.3 | 6.9 | 4.6 | 40 | 9 |
-| `addcom` | 17.5 | 9.3 | 6.6 | 65 | 5 |
-| `dvdasymd` | 23.0 | 9.9 | 4.7 | 104 | 7 |
-| `divmod` | 20.2 | 9.9 | 4.6 | 144 | 14 |
+| `eor` | 5.2 | 2.3 | 3.2 | 16 | 4 |
+| `sucsub` | 8.1 | 3.9 | 5.3 | 31 | 7 |
+| `notfal` | 3.7 | 2.1 | 2.2 | 12 | 5 |
+| `mulmoddir` | 11.4 | 5.5 | 5.2 | 28 | 4 |
+| `ssasym` | 12.3 | 6.3 | 4.6 | 40 | 9 |
+| `addcom` | 17.5 | 8.2 | 6.6 | 65 | 5 |
+| `dvdasymd` | 23.0 | 8.6 | 4.7 | 104 | 7 |
+| `divmod` | 20.2 | 8.8 | 4.6 | 144 | 14 |
 
-- **Totals:** 14.2M tokens and $10.68 for Whitehead, 1.04M and $1.59 for MM1.
+- **Totals:** 14.2M tokens and $4.74 for Whitehead, 1.04M and $0.81 for MM1.
 - **The MM1 agent recalled:** for `mt2`, `bibi1`, `notfal` and `mulmoddir` it wrote
   the library's own proof, character for character, at its first check. The model knows
   `peano.mm1`. So this round measures recall against search.
@@ -2290,21 +2295,61 @@ every task (W/M: Whitehead's figure over MM1's):
 | `mt2` | 1.0 | 0.7 | 0.5 | 3 | 5 |
 | `bibi1` | 0.6 | 0.4 | 0.7 | 3 | 6 |
 | `eor` | 2.4 | 1.2 | 1.0 | 14 | 8 |
-| `sucsub` | 5.4 | 3.1 | 3.2 | 20 | 5 |
-| `notfal` | 5.3 | 3.7 | 3.8 | 20 | 7 |
-| `mulmoddir` | 14.8 | 8.2 | 8.1 | 48 | 7 |
-| `ssasym` | 6.6 | 3.4 | 2.9 | 32 | 7 |
-| `addcom` | 39.8 | 20.9 | 27.2 | 174 | 7 |
-| `dvdasymd` | 8.2 | 4.3 | 4.2 | 80 | 15 |
-| `divmod` | 21.7 | 10.1 | 5.6 | 165 | 16 |
+| `sucsub` | 5.4 | 2.8 | 3.2 | 20 | 5 |
+| `notfal` | 5.3 | 3.4 | 3.8 | 20 | 7 |
+| `mulmoddir` | 14.8 | 7.4 | 8.1 | 48 | 7 |
+| `ssasym` | 6.6 | 3.1 | 2.9 | 32 | 7 |
+| `addcom` | 39.8 | 17.7 | 27.2 | 174 | 7 |
+| `dvdasymd` | 8.2 | 3.8 | 4.2 | 80 | 15 |
+| `divmod` | 21.7 | 9.1 | 5.6 | 165 | 16 |
 
-- **MM1:** proved 10 of 10, with 1.54M tokens, $2.31, 296 s of agent time, and 15 MB at
+- **MM1:** proved 10 of 10, with 1.54M tokens, $1.16, 296 s of agent time, and 15 MB at
   most for `mm0-rs`.
-- **Whitehead:** proved 9 of 10, with 18.2M tokens, $14.00, 1,503 s, and 2.1 GB at most
-  for the server (`addcom`). On `divmod` it reached the $5 limit.
+- **Whitehead:** proved 9 of 10, with 18.2M tokens, $6.16, 1,503 s, and 2.1 GB at most
+  for the server (`addcom`). On `divmod` it reached the limit, $5 in the CLI's dollars,
+  $2.10 at list prices.
 - **The MM1 agent's proofs now are its own:** nine of ten differ from the library's.
   `notfal` is a one-line proof. `addcom` keeps the induction of the library's. It
   needed 1 or 2 checks, after 1 to 11 searches.
+
+**Round 2, three runs of each pair** (2026-10-18; two more runs, `results/`): the gap
+holds in every run. Proved (+) or not (−), with the tokens in thousands:
+
+| theorem | Whitehead | MM1 | median W/M |
+|---|---|---|---|
+| `mt2` | +75 +75 +75 | +72 +50 +53 | 1.4 |
+| `bibi1` | +75 +75 +75 | +134 +149 +177 | 0.5 |
+| `eor` | +327 +336 +360 | +137 +192 +89 | 2.5 |
+| `sucsub` | +521 +832 +310 | +97 +148 +124 | 4.2 |
+| `notfal` | +527 +254 +232 | +99 +84 +98 | 2.6 |
+| `mulmoddir` | +1289 +695 +1359 | +87 +93 +90 | 14.3 |
+| `ssasym` | +880 +1777 +1886 | +134 +192 +122 | 13.2 |
+| `addcom` | +4827 +4743 −6530 | +121 +164 +179 | 29.4 |
+| `dvdasymd` | +2731 +6136 +4231 | +334 +188 +233 | 18.2 |
+| `divmod` | −6931 −6836 −6026 | +319 +556 +446 | 15.3 |
+
+- **Proved:** Whitehead 26 of 30, MM1 30 of 30.
+- **Cost at list prices:** $19.87 against $3.69.
+- **Memory, at most:** 2.1 GB against 15 MB.
+- **Where the Whitehead agent's calls go** (20 runs): 322 `variants`, 243 `choose`, 117
+  `run`, 105 `goal`, 68 `goals`, 46 `start`. A result is short (700 characters for
+  `variants`), so the cost is the calls themselves: each reads the whole context again.
+  The agent chose steps one by one, as if writing the proof term a step at a time.
+
+**Harder theorems** (`tasks-hard.json`, renamed, one run each, a limit of $10 in the
+CLI's dollars, $4.40 at list prices, 200 turns, an hour):
+
+| theorem | steps | Whitehead | MM1 | tokens W/M |
+|---|---|---|---|---|
+| `leasymd` | 60 | proved, 11.8M tokens, $3.13 | proved, 0.58M, $0.41 | 20.4 |
+| `ltmul1` | 64 | proved, 2.5M, $0.86 | proved, 0.44M, $0.26 | 5.7 |
+| `dvdadd1` | 67 | proved, 5.5M, $1.61 | proved, 0.38M, $0.25 | 14.7 |
+| `prth` | 69 | proved, 8.2M, $2.33 | proved, 0.55M, $0.35 | 14.9 |
+| `divlem3` | 111 | not proved, 12.8M, $3.84 | proved, 0.96M, $0.73 | 13.4 |
+| `appendnth1` | 115 | not proved, 7.5M, $2.81 | proved, 1.90M, $1.03 | 4.0 |
+
+The MM1 agent proved all six. The Whitehead agent stopped on the last two, judging the
+budget left too small.
 
 **What this means:**
 - **The hypothesis does not hold here,** for this model and this interface. Whitehead
@@ -2323,7 +2368,7 @@ every task (W/M: Whitehead's figure over MM1's):
 - **Memory:** Whitehead's server took 67 MB to 2.1 GB, `mm0-rs` at most 15 MB. Its CPU
   time was up to 128 s, `mm0-rs`'s under 0.1 s.
 - **Caveats:**
-  - one run of each pair;
+  - three runs of each pair of the ladder, one of the harder theorems;
   - one model;
   - the model knows MM1 from its training, while it meets Whitehead's tools for the
     first time;

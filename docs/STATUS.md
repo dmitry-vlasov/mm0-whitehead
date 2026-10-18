@@ -85,8 +85,10 @@ The variants of a node ranked by recency, as a cost, do not pay.
 Whitehead against an agent writing MM1, the same model, on ten theorems of
 `peano.mm1` from 3 to 48 steps, every proof accepted by `mm0-rs`. With the theorems
 renamed, so that the agents cannot recall their proofs, MM1 proved all ten with 1.54M
-tokens and $2.31; Whitehead proved nine with 18.2M tokens and $14.00, and up to 2.1 GB
-of memory. The author's hypothesis, that the engine makes proving cheaper for an agent,
+tokens and $1.16; Whitehead proved nine with 18.2M tokens and $6.16 (list prices), and up
+to 2.1 GB of memory. Three runs of each pair: Whitehead 26 of 30, MM1 30 of 30. On six
+harder theorems (60 to 115 steps): Whitehead 4 of 6, MM1 6 of 6, at 4 to 20 times
+fewer tokens. The author's hypothesis, that the engine makes proving cheaper for an agent,
 does not hold for this interface: the agent's tokens follow its number of calls, and the
 step-by-step tools take many.
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`

@@ -67,6 +67,36 @@ ABOUT = {
 # the server may not take more than this much virtual memory (KB)
 SERVER_VMEM = 48_000_000
 
+# List prices, $ per million tokens: input, output, cache reads (the claude-api reference
+# of 2026-10-06). A cache write costs 1.25 times the input for 5 minutes, 2 times for an
+# hour. The CLI's own `total_cost_usd`, kept as `cli_cost_usd`, is not used: Claude Code
+# 2.1.148 priced claude-sonnet-5-5 at $5 / $6.25 / $0.50 / $25 (input, cache writes,
+# reads, output), which reproduces every run of 2026-10-17 to $0.001. Its
+# --max-budget-usd is in those dollars too.
+PRICES = {
+    'claude-sonnet-5-5': (2.0, 10.0, 0.20),
+    'claude-opus-5-5': (4.0, 20.0, 0.20),
+    'claude-haiku-5-5': (0.10, 0.50, 0.01),
+    'claude-haiku-4-5-20251001': (1.0, 5.0, 0.10),
+}
+
+
+def list_cost(model_usage, main, split):
+    """The cost of a run at list prices, from the CLI's usage by model; `split` is the
+    main model's cache writes by lifetime. Returns the cost and the models without a
+    price."""
+    total, unknown = 0.0, []
+    for m, u in model_usage.items():
+        if m not in PRICES:
+            unknown.append(m)
+            continue
+        inp, out, read = PRICES[m]
+        writes = u.get('cacheCreationInputTokens', 0)
+        hour = min(writes, split.get('ephemeral_1h_input_tokens', 0)) if m == main else 0
+        total += (u.get('inputTokens', 0) * inp + u.get('outputTokens', 0) * out
+                  + u.get('cacheReadInputTokens', 0) * read + hour * 2 * inp + (writes - hour) * 1.25 * inp) / 1e6
+    return round(total, 6), unknown
+
 
 def theorem(name):
     name = NAMES.get(name, name)
@@ -192,7 +222,23 @@ def option(args, key, default):
     return default
 
 
+def check_dir(d):
+    """An agent's directory must be outside /home, which its rules deny, and have no
+    CLAUDE.md or .claude above it, which the CLI would load into the agent."""
+    if os.path.realpath(d).startswith('/home/'):
+        sys.exit(f'{d}: under /home, which the agents may not read; use a directory such as one under /tmp')
+    p = os.path.dirname(os.path.realpath(d))
+    while True:
+        for x in ('CLAUDE.md', '.claude'):
+            if os.path.exists(os.path.join(p, x)):
+                sys.exit(f'{d}: {os.path.join(p, x)} is above it, and the CLI would load it into the agent')
+        if p == '/':
+            break
+        p = os.path.dirname(p)
+
+
 def run(name, agent, d, args):
+    check_dir(d)
     model = option(args, '--model', 'claude-sonnet-5-5')
     effort = option(args, '--effort', 'high')
     turns = option(args, '--turns', '150')
@@ -272,13 +318,20 @@ def score(d):
     if result:
         u = result.get('usage', {})
         s.update({k: u.get(k, 0) for k in keys})
-        s.update({'cost_usd': result.get('total_cost_usd'), 'turns': result.get('num_turns'),
+        cost, unknown = list_cost(result.get('modelUsage', {}), meta.get('model'), u.get('cache_creation', {}))
+        s.update({'cost_usd': cost, 'cli_cost_usd': result.get('total_cost_usd'), 'unpriced_models': unknown,
+                  'turns': result.get('num_turns'),
                   'duration_s': round(result.get('duration_ms', 0) / 1000, 1),
                   'api_s': round(result.get('duration_api_ms', 0) / 1000, 1),
                   'ending': result.get('subtype'), 'final': (result.get('result') or '')[-300:]})
     else:
         s.update({k: sum(u.get(k, 0) for u in usage_by_id.values()) for k in keys})
-        s.update({'ending': 'no result (killed)'})
+        main = {'inputTokens': s['input_tokens'], 'outputTokens': s['output_tokens'],
+                'cacheReadInputTokens': s['cache_read_input_tokens'],
+                'cacheCreationInputTokens': s['cache_creation_input_tokens']}
+        hour = sum(u.get('cache_creation', {}).get('ephemeral_1h_input_tokens', 0) for u in usage_by_id.values())
+        cost, unknown = list_cost({meta.get('model'): main}, meta.get('model'), {'ephemeral_1h_input_tokens': hour})
+        s.update({'ending': 'no result (killed)', 'cost_usd': cost, 'unpriced_models': unknown})
     s['tokens'] = sum(s.get(k, 0) for k in keys)
     s['tool_calls'] = tools
     # the machine, and whether the proof is accepted by mm0-rs
