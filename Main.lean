@@ -49,6 +49,13 @@ def usage : String :=
                                  theorem agree with its known proof, for the first 1, 3 and 10;
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
+  prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
+             [--max-nodes N] [--tactics DIR]
+                                 a proof of TEXT, in the notation of the specification, under the
+                                 hypotheses of theorem NAME, from the assertions before it,
+                                 printed as an MM1 proof term (JSON): the gap filler of the agent
+                                 bench. A metavariable ?a of MM1 is one of the search's. By
+                                 default seq(bfs(size=20000, depth=2), guided), 5 s
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--max-facts N] [--join-cap N|all]
                [--meta I,J,...] [--verbose]
@@ -700,6 +707,74 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
     IO.println s!"steps on a chain of 2 or more steps that occurs at least {t} times: {n} ({pct n stats.steps}%)"
   return 0
 
+/-- `prove goal`: a proof of a statement under the hypotheses of a theorem of the file,
+from the assertions before it, printed as an MM1 proof term (`Prove/Mm1.lean`): the gap
+filler of the agent bench. A metavariable `?a` of MM1 is a metavariable of the search,
+the same name the same one. One JSON object is printed. -/
+def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
+  let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
+    | .ok defs => pure defs
+    | .error msg =>
+      IO.eprintln msg
+      return 1
+  let c ← match ← Mcp.Ctx.load mm0 mmb with
+    | .ok c => pure c
+    | .error msg =>
+      IO.eprintln msg
+      return 1
+  let say (kvs : Array (String × Json)) : IO UInt32 := do
+    IO.println (Json.obj kvs).compress
+    return 0
+  let (some name, some text) := (strOption args "--theorem", strOption args "--statement")
+    | IO.eprintln "prove goal: --theorem NAME and --statement TEXT are needed"; return 2
+  let thm ← match c.theorem name with
+    | .ok t => pure t
+    | .error e => return ← say #[("error", Json.str e)]
+  let db := c.db
+  let (holed, names) := Prove.mm1Holes text
+  let vars (i : Nat) : Prove.Exp := db.binderImage thm #[] (db.asserts[thm]!.vars[i]?.getD 0)
+  let (goal, _) ← match c.spec.formula thm vars holed 0 Prove.freshBase with
+    | .ok r => pure r
+    | .error e => return ← say #[("error", Json.str s!"the statement does not read: {e.msg}")]
+  -- the holes of one name are one metavariable, numbered from freshBase in order
+  let distinct := names.foldl (init := #[]) fun acc n => if acc.contains n then acc else acc.push n
+  let holeNodes := goal.nodes.filter fun n => Prove.Node.isVar n && Prove.Node.varId n ≥ Prove.freshBase
+  let byHole : Std.HashMap Nat Nat := holeNodes.foldl (init := {}) fun m n => m.insert (Prove.Node.varId n) (Prove.Node.ty n)
+  let same : Std.HashMap Nat Prove.SubExp := (Array.range names.size).foldl (init := {}) fun m j =>
+    let k := (distinct.findIdx? (· == names[j]!)).getD j
+    let ty := byHole[Prove.freshBase + j]?.getD 0
+    m.insert (Prove.freshBase + j) (Prove.SubExp.mk' (Prove.Node.var (Prove.freshBase + j) ty)
+      (Prove.Exp.ofVar (Prove.Node.var (Prove.freshBase + k) ty)))
+  let s : Prove.Subst := { map := same }
+  let goal := s.apply goal
+  let metas := (Array.range distinct.size).filterMap fun k =>
+    (names.findIdx? (· == distinct[k]!)).bind fun j =>
+      byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
+  let task := { db.task thm with goal, metas }
+  let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses }
+  -- by default the proofs of one or two steps first, which guided may miss for a longer
+  -- one that a rail gives: a gap is short, and its term is read
+  let tacticText := (strOption args "--tactic").getD "seq(bfs(size=20000, depth=2), guided)"
+  let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs }
+  let limits : Prove.Limits := { maxMs := numOption args "--ms" 5000, maxProps := numOption args "--max-nodes" 2000000 }
+  let pr := c.spec.printer db (c.spec.binderNames thm)
+  let hyps := db.file.thmHypNames thm
+  -- a strategy is one universe up: it is used where it is read
+  match Prove.Dsl.parseTactic dsl tacticText with
+  | .error e => say #[("error", Json.str (Prove.Dsl.ParseError.show tacticText e))]
+  | .ok strategy =>
+    let start ← IO.monoMsNow
+    let r ← Prove.searchWith Prove.acceptAny env strategy.strategy limits
+    let ms := (← IO.monoMsNow) - start
+    match r.proof with
+    | none =>
+      say #[("proved", .bool false), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size)]
+    | some t =>
+      say #[("proved", .bool true), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size),
+        ("steps", Json.ofNat t.size), ("term", Json.str (t.mm1 db pr hyps .short)),
+        ("bound", Json.str (t.mm1 db pr hyps .bound)), ("explicit", Json.str (t.mm1 db pr hyps .explicit)),
+        ("values", .arr (r.values.map fun e => Json.str (pr.render e Prove.mm1Dummy)))]
+
 /-- `mcp`: the MCP server for an agent, on stdin and stdout (`Mcp/Server.lean`). -/
 def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
   let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
@@ -749,6 +824,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "variants" :: path :: rest => proveVariants path rest
   | "prove" :: "subproofs" :: path :: rest => proveSubproofs path rest
   | "prove" :: "rails" :: path :: rest => proveRails path rest
+  | "prove" :: "goal" :: mm0 :: mmb :: rest => proveGoal mm0 mmb rest
   | _ =>
     IO.eprintln usage
     return 2

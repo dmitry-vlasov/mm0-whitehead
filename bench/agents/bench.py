@@ -171,6 +171,112 @@ if not hits:
     print('no line matches')
 '''
 
+FILL = r'''#!/usr/bin/env python3
+"""./fill [SECONDS]: what ./check does, and more. Each hole `_` of proof.mm1 whose goal
+has no metavariable is given to Whitehead, an automatic prover over the library, for
+SECONDS (5 by default); a proof it finds is put in the hole as an MM1 term, and
+proof.mm1 is written back. Then it prints what was filled, what was not, and what
+./check would print."""
+import json, os, re, subprocess, sys, time
+HERE = os.path.dirname(os.path.abspath(__file__))
+HEADER = {header!r}
+MM0RS, BIN, SPEC, MMB, TACTICS, THEOREM = {mm0rs!r}, {bin!r}, {spec!r}, {mmb!r}, {tactics!r}, {theorem!r}
+os.makedirs(os.path.join(HERE, '.check'), exist_ok=True)
+def log(entry):
+    with open(os.path.join(HERE, '.check', 'log.jsonl'), 'a') as f:
+        f.write(json.dumps(entry) + '\n')
+def timed(kind, cmd):
+    tf = os.path.join(HERE, '.check', 'time')
+    t0 = time.time()
+    r = subprocess.run(['/usr/bin/time', '-f', '%e %U %S %M', '-o', tf] + cmd, capture_output=True, text=True)
+    elapsed, user, system, rss = open(tf).read().split()[-4:]
+    log({{'t': t0, 'kind': kind, 'exit': r.returncode, 'elapsed': float(elapsed), 'user': float(user),
+         'sys': float(system), 'maxrss_kb': int(rss)}})
+    return r
+SRC = open(os.path.join(HERE, 'library.mm1')).read()
+PRE = SRC + '\ndo {{ (check-proofs #t) }};\n' + HEADER + ' =\n'
+FIRST = PRE.count('\n') + 1          # the line of the target file where the proof starts
+def compile_(proof):
+    target = os.path.join(HERE, '.check', 'target.mm1')
+    with open(target, 'w') as f:
+        f.write(PRE + proof + ';\n')
+    r = timed('check', [MM0RS, 'compile', '-n', target])
+    out = re.sub(r'\x1b\[[0-9;]*m', '', r.stdout + r.stderr)
+    return r.returncode == 0 and 'error' not in out and 'sorry' not in out, out
+def offset(proof, line, col):
+    if line < FIRST:
+        return None
+    lines = proof.split('\n')
+    k = line - FIRST
+    if k >= len(lines):
+        return None
+    return sum(len(l) + 1 for l in lines[:k]) + col - 1
+def holes(out, proof):
+    hs = []
+    for m in re.finditer(r'error: \|- (.*)\n\s*--> [^\n]*:(\d+):(\d+)', out):
+        off = offset(proof, int(m.group(2)), int(m.group(3)))
+        if off is not None and off < len(proof) and proof[off] == '_':
+            hs.append((off, m.group(1).strip()))
+    return hs
+def error_offsets(out, proof):
+    return [o for o in (offset(proof, int(m.group(1)), int(m.group(2)))
+            for m in re.finditer(r'--> [^\n]*:(\d+):(\d+)', out)) if o is not None]
+def shown(out):
+    lines = [l for l in out.splitlines() if not re.match(r'^(elab|elabbed) ', l) and not re.match(r'^\d+ sorts, ', l)]
+    return '\n'.join(lines).strip()
+path = os.path.join(HERE, 'proof.mm1')
+proof = open(path).read().strip() if os.path.exists(path) else ''
+if not proof:
+    print('proof.mm1 is empty: write the proof there, the text after `=`')
+    sys.exit(1)
+if ';' in proof or 'check-proofs' in proof:
+    print('proof.mm1 must hold the proof only, without `;`')
+    sys.exit(1)
+secs = float(sys.argv[1]) if len(sys.argv) > 1 else 5.0
+report, tried, metas = [], set(), set()
+ok, out = compile_(proof)
+for _ in range(20):
+    if ok:
+        break
+    hs = holes(out, proof)
+    metas |= {{g for _, g in hs if '?' in g}}
+    todo = [(o, g) for o, g in hs if '?' not in g and g not in tried]
+    if not todo:
+        break
+    off, goal = todo[0]
+    tried.add(goal)
+    r = timed('whitehead', [BIN, 'prove', 'goal', SPEC, MMB, '--theorem', THEOREM, '--statement', goal,
+                            '--ms', str(int(secs * 1000)), '--tactics', TACTICS])
+    try:
+        res = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        res = {{'error': (r.stderr or r.stdout).strip()[-200:]}}
+    if not res.get('proved'):
+        report.append(f"not filled: {{goal}}  ({{res.get('error') or 'no proof found in %gs' % secs}})")
+        continue
+    for form in ('term', 'bound', 'explicit'):
+        term = res[form]
+        new = proof[:off] + term + proof[off + 1:]
+        ok2, out2 = compile_(new)
+        if ok2 or not any(off <= e < off + len(term) for e in error_offsets(out2, new)):
+            proof, ok, out = new, ok2, out2
+            report.append(f"filled: {{goal}}  ({{res['steps']}} steps)")
+            break
+    else:
+        report.append(f"not filled: {{goal}}  (the proof found did not fit MM1)")
+with open(path, 'w') as f:
+    f.write(proof + '\n')
+for l in report:
+    print(l)
+for g in sorted(metas - tried):
+    print(f"not tried, it has metavariables: {{g}}")
+if ok:
+    print('OK: the proof is accepted (proof.mm1 now holds it)')
+else:
+    print(shown(out) or 'not accepted')
+    sys.exit(1)
+'''
+
 SERVER = '''#!/bin/sh
 # The MCP server of Whitehead for this run, with what it costs measured.
 ulimit -v {vmem}
@@ -192,22 +298,28 @@ def prepare(original, agent, d):
         f.write(prompt)
     search = os.path.join(d, 'search')
     with open(search, 'w') as f:
-        f.write(SEARCH.format(files=['library.mm1', 'mm1.md'] if agent == 'mm1' else ['library.mm1']))
+        f.write(SEARCH.format(files=['library.mm1', 'mm1.md'] if agent in ('mm1', 'hybrid') else ['library.mm1']))
     os.chmod(search, 0o755)
-    if agent == 'mm1':
+    if agent in ('mm1', 'hybrid'):
         check = os.path.join(d, 'check')
         with open(check, 'w') as f:
             f.write(CHECK.format(header=header, mm0rs=MM0RS))
         os.chmod(check, 0o755)
         shutil.copy(MM1_DOC, os.path.join(d, 'mm1.md'))
-    elif agent == 'whitehead':
+    if agent == 'hybrid':
+        fill = os.path.join(d, 'fill')
+        with open(fill, 'w') as f:
+            f.write(FILL.format(header=header, mm0rs=MM0RS, bin=BIN, spec=SPEC, mmb=MMB, tactics=TACTICS,
+                                theorem=name))
+        os.chmod(fill, 0o755)
+    if agent == 'whitehead':
         server = os.path.join(d, 'server.sh')
         with open(server, 'w') as f:
             f.write(SERVER.format(vmem=SERVER_VMEM, dir=d, bin=BIN, spec=SPEC, mmb=MMB, tactics=TACTICS))
         os.chmod(server, 0o755)
         with open(os.path.join(d, 'mcp.json'), 'w') as f:
             json.dump({'mcpServers': {'whitehead': {'command': server, 'args': []}}}, f)
-    else:
+    if agent not in ('mm1', 'hybrid', 'whitehead'):
         sys.exit(f'unknown agent {agent}')
     with open(os.path.join(d, 'run.json'), 'w') as f:
         json.dump({'theorem': original, 'name': name, 'agent': agent, 'library': LIBDIR or 'original'}, f)
@@ -255,8 +367,10 @@ def run(name, agent, d, args):
         cmd = common + ['--mcp-config', os.path.join(d, 'mcp.json'), '--tools', 'Read,Bash',
                         '--allowedTools', 'mcp__whitehead', 'Read', 'Bash(./search:*)']
     else:
+        fill = ['Bash(./fill)', 'Bash(./fill:*)'] if agent == 'hybrid' else []
         cmd = common + ['--tools', 'Read,Write,Edit,Bash',
-                        '--allowedTools', 'Read', 'Write', 'Edit', 'Bash(./check)', 'Bash(./check:*)', 'Bash(./search:*)']
+                        '--allowedTools', 'Read', 'Write', 'Edit', 'Bash(./check)', 'Bash(./check:*)',
+                        'Bash(./search:*)'] + fill
     meta = json.load(open(os.path.join(d, 'run.json')))
     meta.update({'model': model, 'effort': effort, 'turns_limit': int(turns), 'budget_usd': float(budget),
                  'timeout_s': timeout, 'started': time.time()})
@@ -353,10 +467,14 @@ def score(d):
     else:
         log = os.path.join(d, '.check', 'log.jsonl')
         entries = [json.loads(l) for l in open(log)] if os.path.exists(log) else []
-        s['machine'] = {'checks': len(entries), 'user_s': round(sum(e['user'] for e in entries), 2),
+        wh = [e for e in entries if e.get('kind') == 'whitehead']
+        s['machine'] = {'checks': len(entries) - len(wh), 'user_s': round(sum(e['user'] for e in entries), 2),
                         'sys_s': round(sum(e['sys'] for e in entries), 2),
                         'elapsed_s': round(sum(e['elapsed'] for e in entries), 2),
                         'maxrss_kb': max((e['maxrss_kb'] for e in entries), default=0)}
+        if agent == 'hybrid':
+            s['machine'].update({'whitehead_calls': len(wh), 'whitehead_cpu_s': round(sum(e['user'] + e['sys'] for e in wh), 2),
+                                 'whitehead_maxrss_kb': max((e['maxrss_kb'] for e in wh), default=0)})
         r = subprocess.run([os.path.join(d, 'check')], cwd=d, capture_output=True, text=True)
         s['accepted'] = r.returncode == 0 and r.stdout.startswith('OK')
         # the check run here is not the agent's

@@ -2379,6 +2379,69 @@ budget left too small.
   statements, and have the engine close the gaps by search in one call. That is a
   smaller number of calls, which is what the tokens follow.
 
+### Whitehead as a gap filler (2026-10-18)
+
+**The question:** does Whitehead pay as a gap filler beside an MM1 agent? The agent
+writes the structure of a proof, and Whitehead fills its holes by search.
+
+**What was built:**
+- `prove goal` (`Main.lean`): a proof of a statement, under a theorem's hypotheses and
+  from the assertions before it, printed as an MM1 term (`Prove/Mm1.lean`).
+  - A metavariable `?a` of MM1 is one of the search's; the same name is the same one.
+  - The terms come in three forms, tried in order. `short` gives the subproofs only, for
+    MM1's unification to infer the variables. `bound` names the bound variables with
+    `!!`. `explicit` gives every variable with `!`. A dummy is named `wd` and a number.
+    A conversion is left to MM1, which unfolds definitions itself.
+  - The default search is a breadth-first search to depth 2 first, then `guided`: the
+    proof of one or two steps is found before a longer one that a rail would give.
+  - Loading peano takes 0.2 s.
+- `./fill [SECONDS]` (`bench.py`): `./check`, and more. It takes each hole whose goal,
+  as `mm0-rs` prints it, has no metavariable, one at a time, since a filled hole can
+  decide another's metavariables. It puts the first form of the proof found that MM1
+  accepts into the hole, and writes `proof.mm1` back.
+  - A goal with a metavariable is not tried: the prover would choose the metavariable
+    to suit itself. `G -> ?a -> a = b` is "proved" with `?a := G -> a = b`.
+- The agent `hybrid`: the MM1 agent with `./fill`, and told to write the structure and
+  leave the routine steps as holes.
+
+**Results, one run of each task,** against the MM1 agent's runs of 2026-10-17/18, under
+the same limits:
+
+| | proved | tokens | cost |
+|---|---|---|---|
+| ladder, hybrid | 10 of 10 | 2.67M | $1.68 |
+| ladder, MM1 (the median of 3 runs, task by task) | 10 of 10 | 1.63M | $1.24 |
+| harder theorems, hybrid | 6 of 6 | 9.30M | $4.57 |
+| harder theorems, MM1 | 6 of 6 | 4.80M | $3.03 |
+
+- **On the ladder the agent hardly used it:** it called Whitehead in only 3 of the 10
+  tasks.
+- **On the harder theorems it used it on every task.** The hybrid agent took more tokens
+  on four (1.0 to 4.5 times) and fewer on `prth` (0.8).
+- **The holes:** of 58 tried, 8 were filled, with proofs of 1 to 41 steps:
+  - **no proof in 5 to 40 s, 38 holes.** These are arithmetic identities
+    (`b * suc q + 0 = b * q + b`), facts of order and divisibility
+    (`0 < c -> a < b -> a * c < b * c`), and sometimes the theorem itself;
+  - **14 holes name variables of the agent's own,** the variable of an induction it
+    started, which the task does not have;
+  - **3 proofs were found that MM1 did not take;**
+  - **2 holes were not tried,** for their metavariables.
+
+**What this means:**
+- **As a gap filler, breadth-first search does not pay either, on this library.** The
+  steps that an agent leaves as holes are those it finds hard, and those are beyond the
+  reach of a search that meets hundreds of variants at each node. The steps that the
+  search can reach, the agent writes itself.
+- **What the failed holes ask for is decision procedures, not search:**
+  - normalizing arithmetic (`b * suc q + 0 = b * q + b`);
+  - order and linear arithmetic;
+  - propositional tautologies, which the filler did prove (`(a -> c) /\ (b -> c) -> a -> c`).
+
+  These are the oracles of `CLAUDE.md`, layer 2: they decide a goal and give a
+  certificate, with no search.
+- **Not tried:** goals under the agent's own variables (extra variables in the task);
+  better ranks, so that the search reaches further.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

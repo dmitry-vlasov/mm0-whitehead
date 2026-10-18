@@ -22,6 +22,7 @@ import Whitehead.Prove.Pattern
 import Whitehead.Prove.Filter
 import Whitehead.Prove.Combinators
 import Whitehead.Prove.Cost
+import Whitehead.Prove.Mm1
 import Whitehead.Prove.Dsl
 import Whitehead.Prove.Measure
 import Whitehead.Prove.Show
