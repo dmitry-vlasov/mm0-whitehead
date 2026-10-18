@@ -2442,6 +2442,109 @@ the same limits:
 - **Not tried:** goals under the agent's own variables (extra variables in the task);
   better ranks, so that the search reaches further.
 
+### The learned ranking layer (a plan of 2026-10-18)
+
+**Why now:** an LLM agent pays for every call, so it should be called rarely, and at the
+top ("The agent bench", "Whitehead as a gap filler"). A small learned model pays almost
+nothing for a decision. Whitehead's tree is then its environment: the state is the tree,
+an action is the expansion of a variant, the payoff a proof. Precedents in Metamath:
+Holophrasm (Whalen, 2016) and GPT-f (Polu and Sutskever, 2020), a model scoring the next
+step and a search exploring by the scores.
+
+**What Russell has:**
+- The author's dataset (`ml/learning_data.flow`, `ml/collect_data.flow`, 2021): for each
+  assertion, its usage contexts, each a goal with its premises, positive where the
+  known proof uses the assertion and negative where it does not.
+- The models of `ml/` (centroids, medoids, LGG templates, k-NN, `premise_selector.flow`)
+  were written in 2026 with Claude: ideas, not the reference.
+
+**What is learned, in order:**
+1. **A scorer of variants:** at a goal node, how likely a variant is to be on a proof.
+   This is the main one, and the data is plentiful.
+2. **A scorer of rails:** for `subproofs(rank=...)`. The features are those of
+   `prove rails --dump`, which beat occurrences offline ("Ranks for the rails").
+3. **A value of goals,** later: how likely a goal is to be proved within a budget, from
+   the searches' own logs.
+
+**Where it plugs in, with no change to the engine:**
+- a cost, `depth(by=model)`: a step costs 1 and `λ·log(p_max / p)`, where p_max is that of
+  the best variant at its goal. The first variant costs nothing more, so a mistake of
+  the model only delays. The cost is still at least 1 a step, so `search` stays fair
+  (completeness, "Composable tactics");
+- for agents: a filter, `top(N, by=model)`, and an order of `variants`;
+- for rails: `rank=model`.
+
+**The data** (`prove export`, to build):
+- For each theorem, the full expansion along its known proof, as `oracleAll` makes it
+  and `prove variants` already walks: at each goal node of the path, every variant, the
+  known proof's labelled positive.
+- Negatives subsampled: all those that pass the known variant's shape filter (the hard
+  ones), and a sample of the rest.
+- Later, positives also from the proofs that the search finds.
+- **No leakage:** the theorems are split in the order of the file, the first 80% to train
+  on, then 10% to tune, then 10% to test. Every feature that counts proofs (uses,
+  recency, co-occurrence) counts only those before the theorem.
+- **Size:** every 40th theorem of set.mm gave 50,294 nodes of 983 variants at the median
+  ("Measurement"), so all of set.mm, with 50 variants kept a node, makes some 50 million
+  rows. A sample of theorems will do at first.
+
+**The features,** computed by one Lean function for both the export and the search, so
+that the model is served what it was trained on:
+- **the step:** its uses before the theorem, its recency, its number of premises, the
+  sizes of its new goals, whether they are ground, bare or a premise (`hyp`), the
+  metavariables it brings, how specific its conclusion is;
+- **the goal:** its depth, size and head term;
+- **the pair:** the symbols the goal shares with the assertion's conclusion and premises,
+  weighted by their rarity;
+- **the theorem:** a prior for each assertion, from the earlier theorems whose statements
+  share symbols with this one (k-NN), and P(assertion | symbols) (naive Bayes), as
+  Sledgehammer's MaSh does for premise selection. It is computed once per theorem.
+
+**The models,** each in turn and only while the one before it is beaten offline:
+- M0, the baseline: the hand ranks, by uses and by recency. The known variant comes first
+  at 8.2% and 10.4% of the nodes.
+- M1: linear, trained per node by a softmax over the node's variants, as in the rails'
+  analysis; numpy.
+- M2: gradient-boosted trees, a ranking objective. Trees are evaluated in Lean in a few
+  lines.
+- M3, later: a small neural scorer over the expressions' structure.
+- The value of goals, later.
+
+**Tooling:**
+- Lean exports the data and evaluates the models.
+- Python trains them (numpy and scipy are installed; LightGBM for M2 is to install).
+- A model is a JSON file that Lean reads (`Whitehead/Json.lean`).
+- A test checks that Lean's scores are Python's on a sample.
+
+**Evaluation,** at three levels:
+- offline: where the known variant ranks on the test theorems (first, first 5, first 10,
+  mean reciprocal rank), and by depth;
+- in search: the theorems proved at 1 s and 5 s on held-out samples, against `bfs` and
+  `guided`; the CPU per proof, and the time the model takes;
+- ablations, by feature group.
+
+**Then a loop, expert iteration:** search the training theorems with the model. The
+proofs it finds, other than the known ones, are new positives. Train again, while the
+proofs found grow. That is the part of reinforcement learning to try first. A search
+with a value of goals (Monte Carlo tree search) comes after.
+
+**Order of building:**
+1. `prove export`, with the split; the number of rows and positives.
+2. The offline evaluator, which gives again 8.2% (uses) and 10.4% (recency).
+3. The theorem prior (k-NN, naive Bayes), offline.
+4. M1, offline. The mark to beat: the known variant in the first 10 at 36.7% of the
+   nodes (recency).
+5. The model in Lean, the cost atom, the parity test.
+6. Search, against `guided`. The model goes in only if it proves more.
+7. M2, the value of goals, expert iteration.
+
+**Questions:**
+1. Training in Python, inference in Lean? Everything in Lean is possible for M1 and M2,
+   at the price of writing the trainers.
+2. set.mm as the corpus, for its 47,611 proofs, with peano as a second check?
+3. May LightGBM be installed for M2? With no GPU here, the models stay small, which suits
+   the purpose.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above
