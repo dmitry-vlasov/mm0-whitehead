@@ -117,13 +117,17 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
     return (of[p]?.getD 0, { of, stats })
 
 /-- The place of assertion node `p` for its cost: its place by `rank`, but at most `width`
-for a variant without premises, which proves its goal at once if it applies at all: such
-a step costs at most one more than the rank's first. On the compiler's theorems a learned
-rank put one-step proofs out of reach; putting them all first instead floods the rounds
-where there are many (mm0's numerals) (`docs/DESIGN.md`, "The learned ranking layer"). -/
+for a variant without premises at a goal without metavariables, which proves its goal at
+once if it applies at all: such a step costs at most one more than the rank's first. On
+the compiler's theorems a learned rank put one-step proofs out of reach; putting them all
+first instead floods the rounds where there are many (mm0's numerals) (`docs/DESIGN.md`,
+"The learned ranking layer"). At a goal with metavariables such a step only binds them,
+and every assertion without premises fits a bare one: at `?0` of `ASTIOeq1d` 3,351 of
+them came at once, so there they keep their place. -/
 def placeOf (env : Env) (pl : Places) (rank : VariantRank) (width p : Nat) : Nat × Places :=
   let (r, pl) := pl.get env rank p
-  if env.props[p]!.rule.hyps.isEmpty then (min r width, pl) else (r, pl)
+  if env.props[p]!.rule.hyps.isEmpty && !env.hyps[env.props[p]!.parent]!.expr.hasVars then (min r width, pl)
+  else (r, pl)
 
 /-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
 `rank`, divided by `width`. -/
