@@ -54,6 +54,40 @@ def datasetTests : TestM Unit := do
       (!fnodes.isEmpty && fnodes.all fun n => (found.filter fun r => r[2]! == n && r[3]! == "1").size == 1)
     if r.proof.any (sameShape · known) then checkEq "dataset: a found proof of the known shape, the known rows" found all
   | _, _ => check "dataset: the search proves syl, a proof of assertions" false
+  -- the goal rows of the search's tree (the value of goals): a row for each goal node,
+  -- the root's label the search's verdict, the others whether the node has a proof
+  let goals := (goalRows r.env stats (id "syl") r.proof.isSome 0).map fun l => (l.splitOn "\t").toArray
+  let gheader := (goalHeader.splitOn "\t").toArray
+  checkEq "goal rows: a column for each goal feature" (gheader.size - 6) goalFeatureNames.size
+  check "goal rows: a row for each goal node of the backward tree, with a field for each column"
+    (goals.size == (r.env.hyps.filter fun g => g.parent.isSome).size + 1 && goals.all (·.size == gheader.size))
+    s!"{goals.size} rows"
+  check "goal rows: the root proved, as the search says" (goals[0]?.any fun g => g[2]! == "0" && g[3]! == "1")
+  -- with metavariables, only when its step is proved too
+  let provedGoal (h : Nat) : Bool :=
+    let g := r.env.hyps[h]!
+    !g.proofs.isEmpty && (!g.expr.hasVars || g.parent.any fun q => !r.env.props[q]!.proofs.isEmpty)
+  check "goal rows: a goal is proved when its node has a proof, and its step too if it has metavariables"
+    (goals.all fun g => g[2]! == "0" || (g[3]! == "1") == provedGoal g[2]!.toNat!)
+  check "goal rows: proved goals and others" (goals.any (·[3]! == "0") && goals.any (·[3]! == "1"))
+  checkEq "goal rows: at most cap of them, the draw fixed"
+    ((goalRows r.env stats (id "syl") true 5).size, goalRows r.env stats (id "syl") true 5)
+    (5, goalRows r.env stats (id "syl") true 5)
+  -- the features of a variant's new goals are those of the goal nodes its expansion makes:
+  -- the cost reads them before, the data after
+  let env := r.env
+  let ti := env.taskInfo stats
+  let leaves := ((Array.range env.props.size).filter fun p =>
+    !env.props[p]!.expanded && env.props[p]!.rule.hyps.size > 0).extract 0 20
+  let mut same := true
+  for p in leaves do
+    let depth := env.goalDepth env.props[p]!.parent + 1
+    let before := (env.propView p).goals.get.map fun g => env.goalFeatures stats ti g depth
+    let ((), after) ← (proveProp p).run env
+    let made := after.props[p]!.children.map fun h => after.goalFeatures stats ti after.hyps[h]!.expr (after.goalDepth h)
+    if made != before then same := false
+  check s!"goal rows: the features of the new goals of {leaves.size} variants, before and after their expansion"
+    (leaves.size > 5 && same)
   -- the counts of proofs: none before the first theorem
   let some j := (Array.range file.stmts.size).find? (file.stmts[·]!.index == id "a1i") | return
   let first ← datasetRows db db.index {} uses stats 0 j
@@ -104,5 +138,33 @@ def modelTests : TestM Unit := do
       let uses := Uses.ofFile file db.asserts.size
       let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
       check "model: a search ordered by a model proves syl" (r.ending == .proved)
+      -- a value of goals: of the goal features, its score the log-odds; in a search's cost
+      let gnames := Whitehead.Json.arr (goalFeatureNames.map Whitehead.Json.str)
+      let gzeros := Whitehead.Json.arr (goalFeatureNames.map fun _ => .int 0)
+      let gones := Whitehead.Json.arr (goalFeatureNames.map fun _ => .int 1)
+      let closableW := Whitehead.Json.arr (goalFeatureNames.map fun n => .int (if n == "closable" then 2 else 0))
+      let vj := Whitehead.Json.obj #[("features", gnames), ("mean", gzeros), ("scale", gones), ("weights", closableW)]
+      check "model: a value is refused for the features of variants" (Model.ofJson vj).toOption.isNone
+      match Model.ofJson vj goalFeatureNames with
+      | .error e => check "model: a value of goals is read" false e
+      | .ok v =>
+        let x (closable : Float) := (Array.replicate goalFeatureNames.size 0).set!
+          ((goalFeatureNames.findIdx? (· == "closable")).getD 0) closable
+        checkEq "model: a value is the probability of the log-odds"
+          (#[v.value (x 0), (v.value (x 1) * 1000).round]) #[0.5, 881]
+        let text := "search(depth(by=model, width=1, value=2))"
+        checkEq "model: value=K needs a value" ((Dsl.parseTactic ctx text).toOption.isNone) true
+        checkEq "model: value=K needs a by"
+          ((Dsl.parseTactic { ctx with value := some v } "search(depth(value=2))").toOption.isNone) true
+        match Dsl.parseTactic { ctx with value := some v } text with
+        | .error e => check "model: a value in a search" false e.msg
+        | .ok t =>
+          let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
+          check "model: a search with a value of goals proves syl" (r.ending == .proved)
+          match Dsl.parseTactic { ctx with value := some v } "search(depth(by=model, width=1, value=2, absolute=1))" with
+          | .error e => check "model: an absolute value in a search" false e.msg
+          | .ok t =>
+            let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
+            check "model: a search with an absolute value of goals proves syl" (r.ending == .proved)
 
 end Tests.Prove

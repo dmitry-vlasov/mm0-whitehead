@@ -35,9 +35,18 @@ inductive Cost where
   With a rank and a `width`, a step costs one and its place among the variants of its
   goal by the rank, from 0, divided by `width`: the first `width` variants nothing more,
   the next `width` one more, and so on (a search by discrepancies). Still fair: a cost
-  only grows with the depth. -/
+  only grows with the depth.
+
+  With a `value` (a model of goals and a scale `K`, with a rank), a step that is not free
+  also costs its value term: K·Σ −ln V(g), rounded, over its new goals g, V the model's
+  probability that g is proved (at least 1/1000), less that of the best of its goal's
+  first variants (`valueOf`). A leaf pays for its own new goals and for the steps above
+  it. With `absolute`, the term itself, not its excess over the goal's best: then a leaf
+  pays for how hard all the goals on its way look, which compares the leaves across the
+  tree, but makes a long proof costly however good each of its steps is (mm0's
+  congruences, `docs/DESIGN.md`, step 4). Still fair: the term is not negative. -/
   | depth (free : Array Label := #[]) (penalty : Nat := 0) (rank : Option VariantRank := none)
-      (width : Nat := 0)
+      (width : Nat := 0) (value : Option (Model × Nat) := none) (absolute : Bool := false)
   deriving Inhabited, Repr
 
 /-- The nodes with one of a set of labels, kept up to date as the tree grows: the
@@ -129,18 +138,84 @@ def placeOf (env : Env) (pl : Places) (rank : VariantRank) (width p : Nat) : Nat
   if env.props[p]!.rule.hyps.isEmpty && !env.hyps[env.props[p]!.parent]!.expr.hasVars then (min r width, pl)
   else (r, pl)
 
+/-- The value terms of assertion nodes (`Cost.depth`), as far as they are found: they
+depend on the node's new goals alone, which do not change. -/
+structure Values where
+  of : Std.HashMap Nat Nat := {}
+  /-- For a goal node, what its variants without premises cost (`valueOf`). -/
+  first : Std.HashMap Nat Nat := {}
+  task : Option TaskInfo := none
+  deriving Inhabited
+
+/-- The value term of assertion node `q`: `scale` times Σ −ln V(g) over its new goals g,
+rounded; `stats` are the file's symbols. -/
+def Values.get (vs : Values) (env : Env) (stats : SymbolStats) (m : Model) (scale q : Nat) : Nat × Values :=
+  if let some v := vs.of[q]? then (v, vs)
+  else
+    let ti := vs.task.getD (env.taskInfo stats)
+    let depth := env.goalDepth env.props[q]!.parent + 1
+    let s := (env.propView q).goals.get.foldl (init := 0) fun acc g =>
+      acc - Float.log (max 0.001 (m.value (env.goalFeatures stats ti g depth)))
+    let v := (scale.toFloat * s).round.toUInt64.toNat
+    (v, { vs with of := vs.of.insert q v, task := some ti })
+
+/-- The value term of assertion node `q`, if the cost has a value (`Cost.depth`): its
+`Values.get` less that of the best of its goal's first `width` variants with premises —
+or, with `absolute`, itself. The file's symbols are those of the places, found here if a
+rank has not found them.
+
+A step without premises has no new goals, and costs what that best variant costs: with
+`absolute`, nothing would put it after the steps that leave goals, as the rank alone does
+(`placeOf`). -/
+def valueOf (env : Env) (value : Option (Model × Nat)) (absolute : Bool) (rank : VariantRank) (width : Nat)
+    (pl : Places) (vs : Values) (q : Nat) : Nat × Places × Values := Id.run do
+  let some (m, scale) := value | return (0, pl, vs)
+  let stats := pl.stats.getD (SymbolStats.ofDb env.db)
+  let mut pl := { pl with stats := some stats }
+  let mut vs := vs
+  let h := env.props[q]!.parent
+  -- what the best of the goal's first variants with premises costs
+  let first ← match vs.first[h]? with
+    | some v => pure v
+    | none => do
+      -- the variants with premises of the first bucket that has any
+      let mut firsts : Array (Nat × Nat) := #[]
+      for k in env.hyps[h]!.children do
+        if env.props[k]!.rule.hyps.isEmpty then continue
+        let (r, pl') := pl.get env rank k
+        pl := pl'
+        firsts := firsts.push (r / width, k)
+      let bucket := firsts.foldl (init := none) fun b (r, _) => some (b.elim r (min r))
+      let mut best : Option Nat := none
+      for (r, k) in firsts do
+        if some r != bucket then continue
+        let (v, vs') := vs.get env stats m scale k
+        vs := vs'
+        best := some (best.elim v (min v))
+      vs := { vs with first := vs.first.insert h (best.getD 0) }
+      pure (best.getD 0)
+  if env.props[q]!.rule.hyps.isEmpty then return (if absolute then first else 0, pl, vs)
+  let (v, vs') := vs.get env stats m scale q
+  return (if absolute then v else v - min v first, pl, vs')
+
 /-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
-`rank`, divided by `width`. -/
+`rank`, divided by `width`, and its value term. -/
 partial def rankedCost (env : Env) (m : Marks) (penalty : Nat) (rank : VariantRank) (width : Nat)
-    (st : Std.HashMap Nat Nat × Places) (h : Nat) : Nat × (Std.HashMap Nat Nat × Places) :=
+    (value : Option (Model × Nat)) (absolute : Bool) (st : Std.HashMap Nat Nat × Places × Values) (h : Nat) :
+    Nat × (Std.HashMap Nat Nat × Places × Values) :=
   if let some c := st.1[h]? then (c, st)
   else match env.hyps[h]!.parent with
     | none => (0, (st.1.insert h 0, st.2))
     | some q =>
-      let (c, (memo, pl)) := rankedCost env m penalty rank width st env.props[q]!.parent
+      let (c, (memo, pl, vs)) := rankedCost env m penalty rank width value absolute st env.props[q]!.parent
       let (r, pl) := placeOf env pl rank width q
-      let c := if !m.props.contains q then c + 1 + r / width else if m.goals.contains h then c else c + penalty
-      (c, (memo.insert h c, pl))
+      if !m.props.contains q then
+        let (v, pl, vs) := valueOf env value absolute rank width pl vs q
+        let c := c + 1 + r / width + v
+        (c, (memo.insert h c, pl, vs))
+      else
+        let c := if m.goals.contains h then c else c + penalty
+        (c, (memo.insert h c, pl, vs))
 
 /-- The state of `search`: the marks of its cost's labels, the costs and depths of goal
 nodes, as far as they are known, and the places of the variants, for a rank. -/
@@ -149,6 +224,7 @@ structure SearchState where
   cost : Std.HashMap Nat Nat := {}
   depth : Std.HashMap Nat Nat := {}
   places : Places := {}
+  values : Values := {}
   deriving Inhabited
 
 /-- `search(c)`: each round, the unexpanded leaves of the least cost `c`; done when there
@@ -158,20 +234,26 @@ def Strategy.search (c : Cost) : Strategy SearchState where
   root := none
   init := {}
   step env st := Id.run do
-    let .depth free penalty rank width := c
+    let .depth free penalty rank width value absolute := c
     match rank.filter fun _ => width > 0 with
     | some rank =>
       let marks := st.marks.update env free
-      let mut memo := (st.cost, st.places)
+      let mut memo := (st.cost, st.places, st.values)
       let mut best : Option Nat := none
       let mut round := #[]
+      -- with a value, the leaves by their cost without their own value term: that term is
+      -- found only for those that can still be the least, the cheapest first
+      let mut byBase : Std.HashMap Nat (Array Nat) := {}
       for p in env.leafs do
         if env.props[p]!.expanded then continue
         let h := env.props[p]!.parent
-        let (k, memo') := rankedCost env marks penalty rank width memo h
-        let (r, pl) := placeOf env memo'.2 rank width p
-        memo := (memo'.1, pl)
+        let (k, (cost, pl, vs)) := rankedCost env marks penalty rank width value absolute memo h
+        let (r, pl) := placeOf env pl rank width p
+        memo := (cost, pl, vs)
         let k := k + r / width
+        if value.isSome then
+          byBase := byBase.alter k fun ps => some ((ps.getD #[]).push p)
+          continue
         match best with
         | none =>
           best := some k
@@ -181,7 +263,23 @@ def Strategy.search (c : Cost) : Strategy SearchState where
             best := some k
             round := #[p]
           else if k == b then round := round.push p
-      let st := { st with marks, cost := memo.1, places := memo.2 }
+      for k in (byBase.toArray.map (·.1)).qsort (· < ·) do
+        if best.any (· < k) then break
+        for p in byBase[k]! do
+          let (cost, pl, vs) := memo
+          let (v, pl, vs) := valueOf env value absolute rank width pl vs p
+          memo := (cost, pl, vs)
+          let t := k + v
+          match best with
+          | none =>
+            best := some t
+            round := #[p]
+          | some b =>
+            if t < b then
+              best := some t
+              round := #[p]
+            else if t == b then round := round.push p
+      let st := { st with marks, cost := memo.1, places := memo.2.1, values := memo.2.2 }
       if round.isEmpty then return (.done, st)
       return (.expand (round.map (·, none)), st)
     | none =>

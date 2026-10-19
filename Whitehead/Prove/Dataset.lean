@@ -10,6 +10,10 @@ uses it and negative where it does not.
 
 The rows of a node are all its variants, or the known one and `negatives` others drawn
 from them; the draw is fixed by the node, so the same export gives the same rows.
+
+The data of the value of goals is another: the goal nodes of the tree that a search
+grew, each labelled by whether the search proved it (`goalRows`), as GPT-f learns its
+value from its own searches.
 -/
 import Whitehead.Prove.Features
 import Whitehead.Prove.Measure
@@ -72,5 +76,37 @@ def datasetRows (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (s
   match db.skeleton db.file.stmts[i]! with
   | .error _ | .ok none => return none
   | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel)
+
+/-- The header of the goal rows: the theorem by number and name, the goal node, the label
+(1 if the search proved it), the assertion whose premise the goal is (-1 for the root or
+an unfolding), the goal's number of variants, and the goal features. -/
+def goalHeader : String :=
+  "\t".intercalate (["thm", "name", "node", "label", "assertion", "variants"] ++ goalFeatureNames.toList)
+
+/-- The rows of the goal nodes of `env`, the tree of a search on theorem `thm`: the root,
+labelled `proved` (the search's verdict: a proof at the root may be one the verifier
+rejects), and the premises of the steps expanded, each labelled by whether it is proved.
+A goal with metavariables is proved only when its step is too: a proof of it binds them,
+and the binding must suit the step's other goals. A premise of the theorem that unifies
+with `im _G ?x` proves it at once, and taken alone such goals were all proved, and the
+steps that make them looked free (mm0's congruences, `docs/DESIGN.md`, step 4). At most
+`cap` of them (0 for all), drawn by the node. -/
+def goalRows (env : Env) (stats : SymbolStats) (thm : Nat) (proved : Bool) (cap : Nat) : Array String :=
+  let ti := env.taskInfo stats
+  let nodes := (Array.range env.hyps.size).filter fun h => h == 0 || env.hyps[h]!.parent.isSome
+  let chosen := if cap == 0 || nodes.size ≤ cap then nodes
+    else ((nodes.qsort fun a b => mixHash thm a < mixHash thm b).extract 0 cap).qsort (· < ·)
+  chosen.map fun h =>
+    let g := env.hyps[h]!
+    let a : Int := match g.parent with
+      | some q => match env.props[q]!.step with
+        | .assertion id => if (env.db.asserts[id]?.bind (·.pseudo)).isNone then id else -1
+        | _ => -1
+      | none => -1
+    let label := if h == 0 then proved
+      else !g.proofs.isEmpty && (!g.expr.hasVars || g.parent.any fun q => !env.props[q]!.proofs.isEmpty)
+    "\t".intercalate ([toString thm, env.db.asserts[thm]!.name, toString h, if label then "1" else "0",
+      toString a, toString g.children.size] ++
+      ((env.goalFeatures stats ti g.expr (env.goalDepth h)).map featureText).toList)
 
 end Whitehead.Prove

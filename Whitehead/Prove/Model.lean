@@ -7,8 +7,10 @@ A model of the learned ranking layer, as `learn/train.py` writes it (`docs/DESIG
   sends `x` left when `x ≤ threshold`; a value that LightGBM takes as missing (a zero,
   for `missing_type` `Zero`) goes the node's default way.
 
-The model names the features it was trained on, and they must be `featureNames`, in
-that order: a model of other features is refused when it is read.
+The model names the features it was trained on, and they must be those it is read for,
+in that order: `featureNames` for a rank of variants, `goalFeatureNames` for a value of
+goals. A model of other features is refused when it is read. A value is a binary model:
+its score is the log-odds that the goal is proved (`Model.value`).
 -/
 import Whitehead.Json
 import Whitehead.Prove.Features
@@ -131,23 +133,23 @@ partial def addNode (j : Json) (t : Tree) : Except String (Int × Tree) := do
   let (rc, t) ← addNode r t
   return (k, { t with left := t.left.set! k lc, right := t.right.set! k rc })
 
-/-- The features a model names must be `featureNames`. -/
-def checkFeatures (names : Array Json) : Except String Unit := do
+/-- The features a model names must be `expected`. -/
+def checkFeatures (names : Array Json) (expected : Array String) : Except String Unit := do
   let ns := names.filterMap fun n => match n with | .str s => some s | _ => none
-  if ns != featureNames then
-    throw s!"the model's features are not those of this program: {ns.size} against {featureNames.size}"
+  if ns != expected then
+    throw s!"the model's features are not those of this program: {ns.size} against {expected.size}"
 
-/-- A model from its JSON. -/
-def Model.ofJson (j : Json) : Except String Model := do
+/-- A model from its JSON, of the features `expected`. -/
+def Model.ofJson (j : Json) (expected : Array String := featureNames) : Except String Model := do
   if let some (.arr treeInfo) := j.get? "tree_info" then
     let some (.arr names) := j.get? "feature_names" | throw "the trees name no features"
-    checkFeatures names
+    checkFeatures names expected
     let ts ← treeInfo.mapM fun t => do
       let some s := t.get? "tree_structure" | throw "a tree has no structure"
       return (← addNode s {}).2
     return .trees ts
   let some (.arr names) := j.get? "features" | throw "the model names no features"
-  checkFeatures names
+  checkFeatures names expected
   let floats (key : String) : Except String (Array Float) := do
     let some (.arr xs) := j.get? key | throw s!"the model has no {key}"
     xs.mapM fun x => match jsonFloat? x with
@@ -155,10 +157,15 @@ def Model.ofJson (j : Json) : Except String Model := do
       | none => throw s!"{key}: not a number"
   return .linear (← floats "mean") (← floats "scale") (← floats "weights")
 
-/-- A model from a file. -/
-def Model.load (path : System.FilePath) : IO (Except String Model) := do
+/-- A model from a file, of the features `expected`. -/
+def Model.load (path : System.FilePath) (expected : Array String := featureNames) : IO (Except String Model) := do
   match Json.parse (← IO.FS.readFile path) with
   | .error e => return .error s!"{path}: {e.msg}"
-  | .ok j => return (Model.ofJson j).mapError fun e => s!"{path}: {e}"
+  | .ok j => return (Model.ofJson j expected).mapError fun e => s!"{path}: {e}"
+
+/-- The value of a goal with features `x`: the probability that it is proved, from the
+log-odds that a binary model scores. -/
+def Model.value (m : Model) (x : Array Float) : Float :=
+  1 / (1 + Float.exp (-(m.score x)))
 
 end Whitehead.Prove

@@ -1,6 +1,7 @@
 """Lean's scores against Python's: the same model, on the same rows of a file of
 `prove export`, through `mm0-whitehead prove score` and through LightGBM (or the linear
-model). The largest difference must be a rounding error.
+model). The largest difference must be a rounding error. A value of goals is compared on
+goal rows (`prove export --goals`).
 
     python parity.py MODEL.json DATA.tsv [ROWS]
 """
@@ -30,7 +31,8 @@ X = np.array([[float(l.rstrip('\n').split('\t')[i]) for i in cols] for l in line
 if 'tree_info' in m:
     import lightgbm as lgb
     booster = lgb.Booster(model_file=model_path.replace('.json', '.txt'))
-    py = booster.predict(X)
+    # the sum of the trees, as Lean scores: for a value of goals, the log-odds
+    py = booster.predict(X, raw_score=True)
 else:
     py = ((X - np.array(m['mean'])) / np.array(m['scale'])) @ np.array(m['weights'])
 out = subprocess.run([BIN, 'prove', 'score', sample, '--model', model_path], capture_output=True, text=True, check=True)

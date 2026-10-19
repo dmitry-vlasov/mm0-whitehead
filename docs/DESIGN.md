@@ -2697,6 +2697,60 @@ tree grown by `bfs`):
 - On the way, one join of set.mm's theorem 5529 ran for minutes past its second (above,
   the joins: the stop every 64 tuples).
 
+**Step 4, the value of goals** (2026-10-19): how likely a goal is to be proved, learned
+from the search's own trees, as GPT-f learns its value.
+- **The data** (`prove export --search learned --goals`, `goalRows`): every goal node of
+  the tree that `learned` (w-sqrt) grows in 1 s, on every theorem of each file (set.mm:
+  every 2nd), at most 200 a theorem. The label: proved by the search. A goal with
+  metavariables counts as proved only when its step is proved too: a proof binds them,
+  and the binding must suit the step's other goals (below). 3.3 million rows; 12% proved.
+- **The features** (`Env.goalFeatures`, 19): of the goal's expression and the theorem
+  alone — size, nesting, metavariables, the theorem's variables, terms and their weight,
+  how many assertions conclude with its head term, whether a premise of the theorem
+  unifies with it (`closable` for a ground goal, `closable_meta` for one with
+  metavariables), what it shares with the theorem's statement, its depth. So they are the
+  same for a new goal of a variant not yet expanded and for the node its expansion makes
+  (a test checks it): the cost reads them before, the data after.
+- **The model** (`learn/train_value.py`): LightGBM, binary, the files weighed by the square
+  root of their rows. On the test parts, the AUC is 0.83 on set.mm and 0.91 on mm0,
+  against at most 0.61 and 0.72 for one feature alone; its first 100 trees are used
+  (`value-100.json`, `--value`). Lean's scores are LightGBM's (`parity.py`, 5·10⁻⁷).
+- **In the search** (`Cost.depth`, `value=K`): a step costs also K·Σ −ln V over its new
+  goals, rounded, less that of the best of its goal's first `width` variants. A leaf pays
+  for its own new goals, found lazily (only for the leaves that can still be the least,
+  and kept), and for the steps above it. The cost only grows, so the search stays fair.
+  With `absolute=1`, the term itself, not less.
+- **Search, on the test parts, at 1 s unless said** (the w-sqrt rank; on one build):
+
+  | | `learned` | `value=4` | `value=2, absolute=1` |
+  |---|---|---|---|
+  | set.mm, 1 s | 84 | 88 | 89 |
+  | set.mm, 5 s | 104 | 107 | 114 |
+  | mm0 | 230 | 230 | 179 |
+  | the compiler | 505 | 505 | 505 |
+
+  The relative value gains a little and loses nothing; the absolute one gains 10% on
+  set.mm at 5 s and loses a fifth of mm0. `learned` keeps `value=0` by default.
+- **What went wrong first, and why** — each found on `ASTIOeq1d`, a 3-step congruence of
+  mm0 that `learned` proves in 62 expansions:
+  - With goals labelled proved whenever they had a proof, a goal like `im ?1 (eq ?2 ?3)`
+    looked certain (V = 0.94): the theorem's premise `im _G (eq …)` unifies with it at
+    once. But that binding must suit the step's other goals, and seldom does: the steps
+    that make such goals looked free, and the search expanded 4,485 nodes. Hence the
+    label and `closable_meta`.
+  - It still expanded 4,484: at the bare goal `?0` that an unfolding leaves, every
+    assertion without premises fits, and `placeOf` put them all at one after the rank's
+    first, as if each proved its goal; 3,351 came at once. That holds at a ground goal
+    only: at a goal with metavariables they keep their place now. This alone changes
+    `learned`: set.mm 104 at 5 s, against 101; the rest the same.
+  - The absolute value still loses mm0's long congruence chains (`elabFmlaeq1d`, 13
+    steps, proved in 0.4 s without it): every step pays for goals that look hard, however
+    good it is, while branches whose goals look easy go first. The term on the leaf's own
+    goals is what does it: with it alone on the steps above, nothing changes (83, 228);
+    with the steps above relative and the leaf absolute, mm0 still loses (177).
+- **Next, perhaps:** a value trained on the trees that the value itself grows (the trees
+  here are `learned`'s); or a value that knows the step's other goals, for metavariables.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

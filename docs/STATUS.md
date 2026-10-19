@@ -116,7 +116,11 @@ features 22% cheaper, after which the expansion and not the score limits a searc
 one round of expert iteration, the proofs `learned` finds for the training theorems
 added as data (3,737 on set.mm), with no gain offline or in search. A join now stops at
 its theorem's time (set.mm's theorem 5529 ran for minutes in one), and `prove search`
-has replay's tuple budgets. Next: the value of goals (step 4).
+has replay's tuple budgets. Step 4, the value of goals, learned from the search's own
+trees (`--value`, `learned(value=K)`): at value 4, set.mm's test theorems 88 at 1 s and
+107 at 5 s, against 84 and 104, mm0 and the compiler the same; with `absolute=1`, 114 at
+5 s, but mm0 loses a fifth (`DESIGN.md`, step 4). Premise-free steps are no longer put
+first at goals with metavariables, which alone gives set.mm 104 at 5 s, against 101.
 
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
@@ -463,7 +467,7 @@ point on which the sources differ, and `DESIGN.md` does the same for the `.mm0` 
 ## What passes
 
 `MM0_REPO=/path/to/mm0 lake test`, with the tools of `scripts/build-oracles.sh` and the
-corpus of `scripts/build-corpus.sh` built — 1,220 checks, 0 failures, in 20 seconds:
+corpus of `scripts/build-corpus.sh` built — 1,239 checks, 0 failures, in 33 seconds:
 
 - `.mm0`, hand-written: 123 lexer and parser checks (69 rejections); 11 checks of
   `import` resolution (5 rejections); 97 checks of formulas, notations and declarations
