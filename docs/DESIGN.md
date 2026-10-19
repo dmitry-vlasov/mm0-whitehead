@@ -2713,7 +2713,7 @@ from the search's own trees, as GPT-f learns its value.
   (a test checks it): the cost reads them before, the data after.
 - **The model** (`learn/train_value.py`): LightGBM, binary, the files weighed by the square
   root of their rows. On the test parts, the AUC is 0.83 on set.mm and 0.91 on mm0,
-  against at most 0.61 and 0.72 for one feature alone; its first 100 trees are used
+  against 0.61 and 0.72 for the best of three single features; its first 100 trees are used
   (`value-100.json`, `--value`). Lean's scores are LightGBM's (`parity.py`, 5·10⁻⁷).
 - **In the search** (`Cost.depth`, `value=K`): a step costs also K·Σ −ln V over its new
   goals, rounded, less that of the best of its goal's first `width` variants. A leaf pays
