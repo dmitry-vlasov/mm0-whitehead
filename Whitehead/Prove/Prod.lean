@@ -237,10 +237,14 @@ pairwise.
 
 With `cap`, the work stops once more than `cap` tuples are found: the caller is over its
 budget then, and what is returned past that point is not a result (`addProof`). A
-product can be exponential in the number of its sets, and nothing else stops it. -/
-def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : Array (Subst × Array Nat) := Id.run do
-  if sets.isEmpty || sets.any (·.isEmpty) then return #[]
-  if sets.size == 1 then return (Array.range sets[0]!.size).map fun k => (sets[0]![k]!, #[k])
+product can be exponential in the number of its sets, and nothing else stops it. Nor
+does the cap stop a product whose tuples fail, or whose unifiers are slow to find (theorem
+5529 of set.mm, with `learned`: minutes in one join): `stop` is asked every 64 tuples
+tried, and when it says so the work ends with none. -/
+def unifySubsProdM {m : Type → Type} [Monad m] (sets : Array (Array Subst)) (cap : Nat) (stop : m Bool) :
+    m (Option (Array (Subst × Array Nat))) := do
+  if sets.isEmpty || sets.any (·.isEmpty) then return some #[]
+  if sets.size == 1 then return some ((Array.range sets[0]!.size).map fun k => (sets[0]![k]!, #[k]))
   -- in how many sets each variable is bound; the shared ones, in the order first seen
   let mut count : Std.HashMap Nat Nat := {}
   let mut order : Array Nat := #[]
@@ -259,12 +263,15 @@ def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : A
   let finish (group : Subst) (picks : Array Nat) : Option Subst :=
     let parts := ((Array.range sets.size).map fun i => privates[i]![picks[i]!]!).filter (·.size > 0)
     if parts.isEmpty then some group else unifySubs (#[group] ++ parts)
+  let mut tried := 0
   if shared.isEmpty then
     let mut out := #[]
     for picks in tuplesUpTo (sets.map fun set => Array.range set.size) cap do
       if out.size > cap then break
+      tried := tried + 1
+      if tried % 64 == 0 && (← stop) then return none
       if let some s := finish {} picks then out := out.push (s, picks)
-    return out
+    return some out
   -- for each shared variable: the ways its images unify across the sets, each with the
   -- substitutions of every set that have the image taken (`RuSubsMatrix`)
   let mut columns : Array (Array (Subst × Array (Array Nat))) := #[]
@@ -275,7 +282,7 @@ def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : A
       match sub.lookup v with
       | none => (sub.add1 v expr).map fun s => (s, data)
       | some ex => (unifyExps #[expr, ex] sub).bind fun un => (sub.compose un).map fun s => (s, data)
-    if column.isEmpty then return #[]
+    if column.isEmpty then return some #[]
     columns := columns.push column
   -- `ruIntersectCols`: a tuple must pass for every variable. Two entries can have a
   -- tuple in common only if they share a substitution of the largest set, so the
@@ -290,26 +297,35 @@ def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : A
         having := having.modify k (·.push e)
     let mut next := #[]
     for (s, data2) in columns[c]! do
-      let mut tried : Std.HashSet Nat := {}
+      let mut seen : Std.HashSet Nat := {}
       for k in data2[widest]! do
         for e in having[k]! do
-          if !tried.contains e then
-            tried := tried.insert e
+          if !seen.contains e then
+            seen := seen.insert e
             let (subs, data) := inter[e]!
             let common := (Array.range data.size).map fun i => data[i]!.filter fun k => data2[i]!.contains k
             if !common.any (·.isEmpty) then next := next.push (subs.push s, common)
     inter := next
     -- every group has at least one tuple: past the cap, there is no use going on
-    if inter.size > cap then return inter.extract 0 (cap + 1) |>.map fun (_, data) => ({}, data.map (·[0]!))
+    if inter.size > cap then return some (inter.extract 0 (cap + 1) |>.map fun (_, data) => ({}, data.map (·[0]!)))
+    if (← stop) then return none
   -- the column unifiers of a group are unified at once, and every tuple that is left
   -- gets the result with its private bindings
   let mut out := #[]
   for (subs, data) in inter do
     if out.size > cap then break
+    tried := tried + 1
+    if tried % 64 == 0 && (← stop) then return none
     if let some group := unifySubs subs then
       for picks in tuplesUpTo data (cap - min cap out.size) do
         if out.size > cap then break
+        tried := tried + 1
+        if tried % 64 == 0 && (← stop) then return none
         if let some s := finish group picks then out := out.push (s, picks)
-  return out
+  return some out
+
+/-- `unifySubsProdM` to the end. -/
+def unifySubsProd (sets : Array (Array Subst)) (cap : Nat := 0xFFFFFFFFFFFF) : Array (Subst × Array Nat) :=
+  ((unifySubsProdM sets cap (pure false) : Id _).run).getD #[]
 
 end Whitehead.Prove

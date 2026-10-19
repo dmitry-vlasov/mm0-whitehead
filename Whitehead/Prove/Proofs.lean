@@ -285,7 +285,14 @@ def addProof (p : Nat) (hypProof : Proof) (maxTuples : Nat := noLimit)
   else
     -- stopped as soon as it would take the search past its budget
     let cap := env.tupleBudget - min env.tupleBudget (env.counters.tuples - env.counters.notUnified)
-    unified := (unifySubsProd (sets.map (·.map (·.sub))) cap).map fun (s, picks) =>
+    -- and at the theorem's time, or short of memory, as a join that has not begun
+    let deadline := env.deadline
+    let stop : BaseIO Bool := do return (← IO.monoMsNow) > deadline || (← memoryLevel.get) ≥ 2
+    let some found ← (unifySubsProdM (sets.map (·.map (·.sub))) cap stop : BaseIO _)
+      | let why := if (← memoryLevel.get) ≥ 2 then Stop.memory else .time
+        set { env with overBudget := true, stop := some why }
+        return
+    unified := found.map fun (s, picks) =>
       (s, (Array.range sets.size).map fun i => sets[i]![picks[i]!]!)
   counters := { counters with notUnified := counters.notUnified + (size - unified.size) }
   -- the budget is on the tuples that unify: each is a proof to be made and kept

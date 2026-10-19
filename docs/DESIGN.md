@@ -1000,6 +1000,14 @@ down to one at once, where memory is the limit and the rounds end. Over the memo
 limit, the watcher has every search give up and waits up to 15 s for the memory to
 come back before it ends the process.
 
+A join also looks at the clock and the memory every 64 tuples tried (`unifySubsProdM`,
+2026-10-19), and ends as `addProof` does when they are out before it begins. The tuple
+budget alone did not bound it: theorem 5529 of set.mm, searched by `learned` for 1 s,
+ran for minutes in one join, a product of 2·10¹¹ tuples whose unifiers were slow to
+find, and without a budget (`prove search` had none) the tuples were made at once, to
+48 GB. `prove search` has replay's budgets now, 300,000 tuples and 20,000,000 work
+(`--max-tuples`, `--max-work`).
+
 A proof of an assertion node is kept once per substitution of the parent's variables
 with its open conditions (`proofKey`, decided 2026-10-11): two such proofs can replace
 each other in every proof above. So the proof found need not be the known one, and the

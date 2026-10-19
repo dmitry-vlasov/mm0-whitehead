@@ -67,12 +67,14 @@ def usage : String :=
                                  default seq(bfs(size=20000, depth=2), guided), 5 s
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--model FILE] [--max-facts N]
-               [--join-cap N|all]
+               [--join-cap N|all] [--max-tuples N] [--max-work N]
                [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
                                  forward from the premises, or both in turn. --max-facts: the
                                  size of the forward front (512); --join-cap: how many facts a
-                                 new subgoal is joined with when it is made (4). --meta: the binders
+                                 new subgoal is joined with when it is made (4); --max-tuples,
+                                 --max-work: the proofs joined and the work of the joins, as for
+                                 replay (300,000 and 20,000,000). --meta: the binders
                                  with these numbers are metavariables, for which values are found;
                                  --tactic: a tactic of the language for every theorem (`dsl`),
                                  such as `rails(10, rank=reach, open=0, upto=1)`; --tactics: the
@@ -685,6 +687,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       strategy := (strOption args "--strategy").getD "bfs",
       limits := { maxProps := numOption args "--max-nodes" 100000, maxMs := numOption args "--ms" 1000,
                   maxFacts := numOption args "--max-facts" 512,
+                  maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000,
                   joinCap := if strOption args "--join-cap" == some "all" then 0xFFFFFFFFFFFF
                     else numOption args "--join-cap" 4 },
       metas := numsOption args "--meta",

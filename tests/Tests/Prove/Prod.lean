@@ -64,6 +64,14 @@ def prodTests : TestM Unit := do
   checkEq "prod: an empty set" (prod [[[("a", "ph")]], []]) []
   checkEq "prod: a variable bound in one set and used in the other"
     (prod [[[("a", "(wn b)")]], [[("b", "ph")], [("a", "(wn ps)")], [("a", "(wi ps ps)")]]]) [[0, 0], [0, 1]]
+  -- `stop`, asked every 64 tuples tried: in a product without shared variables, and in a
+  -- group's tuples
+  let hundred (s : List (String × String)) : Array Subst := Array.replicate 100 (g.sub s)
+  for (name, sets) in [("nothing in common", #[hundred [("a", "ph")], hundred [("b", "ps")]]),
+                       ("one group", #[hundred [("a", "ph")], hundred [("a", "ph")]])] do
+    let go (stop : Bool) := ((unifySubsProdM sets 0xFFFFFFFFFFFF (pure stop) : Id _).run).map (·.size)
+    checkEq s!"prod, {name}: every tuple when it does not stop" (go false) (some 10000)
+    checkEq s!"prod, {name}: none when it stops" (go true) none
   -- against trying every tuple, on random sets: the variables a b x A u are bound, the
   -- others occur in the images
   let bound := #["a", "b", "x", "A", "u"]
