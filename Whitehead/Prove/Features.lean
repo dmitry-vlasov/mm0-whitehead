@@ -15,10 +15,22 @@ import Whitehead.Prove.Combinators
 
 namespace Whitehead.Prove
 
-/-- How rare each term is in a file: in how many statements of assertions it occurs. -/
+/-- What the features read of a rule: the terms of its statement, the nodes of its
+conclusion that are not variables, whether that conclusion is a bare variable, and the
+weight of its terms. It depends on the rule alone, so it is found once. -/
+structure RuleInfo where
+  terms : Array Nat := #[]
+  conclNonvar : Nat := 0
+  conclIsVar : Bool := false
+  weight : Float := 0
+  deriving Inhabited
+
+/-- How rare each term is in a file: in how many statements of assertions it occurs; and
+what the features read of each assertion of the file, by its number. -/
 structure SymbolStats where
   df : Array Nat := #[]
   statements : Nat := 0
+  rules : Array RuleInfo := #[]
   deriving Inhabited
 
 /-- The terms that occur in `e`, each once. -/
@@ -35,6 +47,15 @@ def Assertion.terms (a : Assertion) : Array Nat :=
   (a.hyps.push a.concl).foldl (init := #[]) fun acc e =>
     e.terms.foldl (init := acc) fun acc t => if acc.contains t then acc else acc.push t
 
+/-- The weight of term `t`: the logarithm of how rare it is. -/
+def SymbolStats.idf (s : SymbolStats) (t : Nat) : Float :=
+  Float.log ((s.statements.toFloat + 1) / ((s.df[t]?.getD 0).toFloat + 1))
+
+def SymbolStats.ruleInfo (s : SymbolStats) (a : Assertion) : RuleInfo :=
+  let terms := a.terms
+  { terms, conclNonvar := (a.concl.nodes.filter fun n => !Node.isVar n).size, conclIsVar := a.concl.isVar,
+    weight := terms.foldl (init := 0) fun acc t => acc + s.idf t }
+
 def SymbolStats.ofDb (db : Db) : SymbolStats := Id.run do
   let mut df := Array.replicate db.terms.size 0
   let mut n := 0
@@ -43,11 +64,36 @@ def SymbolStats.ofDb (db : Db) : SymbolStats := Id.run do
     n := n + 1
     for t in a.terms do
       if t < df.size then df := df.modify t (· + 1)
-  return { df, statements := n }
+  let s : SymbolStats := { df, statements := n }
+  return { s with rules := db.asserts.map s.ruleInfo }
 
-/-- The weight of term `t`: the logarithm of how rare it is. -/
-def SymbolStats.idf (s : SymbolStats) (t : Nat) : Float :=
-  Float.log ((s.statements.toFloat + 1) / ((s.df[t]?.getD 0).toFloat + 1))
+/-- What the features read of a goal node: its terms and variables, its size, whether it
+has a variable, the depth of its variants, and how many it has. It is the same for all its
+variants, so it is found once for them. -/
+structure GoalInfo where
+  terms : Std.HashSet Nat := {}
+  vars : Std.HashSet Nat := {}
+  size : Nat := 0
+  hasVar : Bool := false
+  depth : Nat := 1
+  variants : Nat := 0
+  deriving Inhabited
+
+def Env.goalInfo (env : Env) (h : Nat) : GoalInfo := Id.run do
+  let goalNode := env.hyps[h]!
+  let goal := goalNode.expr
+  -- the assertion nodes from the root to a variant of the goal, it counted
+  let mut depth := 1
+  let mut g := h
+  for _ in [0:env.hyps.size] do
+    match env.hyps[g]!.parent with
+    | some q =>
+      depth := depth + 1
+      g := env.props[q]!.parent
+    | none => break
+  return { terms := goal.terms.foldl (init := {}) (·.insert ·),
+           vars := (goal.nodes.filter Node.isVar).foldl (init := {}) fun acc n => acc.insert (Node.varId n),
+           size := goal.size, hasVar := goal.nodes.any Node.isVar, depth, variants := goalNode.children.size }
 
 /-- The names of the features, in the order of `Env.features`. -/
 def featureNames : Array String := #[
@@ -97,13 +143,12 @@ def featureText (f : Float) : String :=
       let t := (cs.reverse.dropWhile (· == '0')).reverse
       String.ofList (if t.getLast? == some '.' then t.dropLast else t)
 
-/-- The features of variant `p`, in the order of `featureNames`. -/
-def Env.features (env : Env) (stats : SymbolStats) (p : Nat) : Array Float := Id.run do
+/-- The features of variant `p`, in the order of `featureNames`; `gi` is its goal's
+(`Env.goalInfo`). -/
+def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : Nat) : Array Float := Id.run do
   let prop := env.props[p]!
   let v := env.propView p
   let thm := env.task.limit
-  let goalNode := env.hyps[prop.parent]!
-  let goal := goalNode.expr
   let isAssertion := match prop.step with
     | .assertion a => (env.db.asserts[a]?.bind (·.pseudo)).isNone
     | _ => false
@@ -113,17 +158,21 @@ def Env.features (env : Env) (stats : SymbolStats) (p : Nat) : Array Float := Id
     | _ => 0
   let goals := v.goals.get
   let isVar (e : Exp) : Bool := e.nodes.any Node.isVar
-  let varsOf (e : Exp) : Array Nat := (e.nodes.filter Node.isVar).map Node.varId
-  let goalVars := varsOf goal
   let newVars := goals.foldl (init := (#[] : Array Nat)) fun acc g =>
-    (varsOf g).foldl (init := acc) fun acc x => if goalVars.contains x || acc.contains x then acc else acc.push x
-  let concl := prop.rule.concl
-  let conclNonvar := (concl.nodes.filter fun n => !Node.isVar n).size
-  let ruleTerms := prop.rule.terms
-  let goalTerms := goal.terms
-  let shared := ruleTerms.filter goalTerms.contains
+    g.nodes.foldl (init := acc) fun acc n =>
+      if !Node.isVar n then acc
+      else
+        let x := Node.varId n
+        if gi.vars.contains x || acc.contains x then acc else acc.push x
+  -- the rule's own part: from the file's table, or for an unfolding's rule, found here
+  let ri := match prop.step with
+    | .assertion a => stats.rules[a]?.getD (stats.ruleInfo prop.rule)
+    | _ => stats.ruleInfo prop.rule
+  let conclNonvar := ri.conclNonvar
+  let ruleTerms := ri.terms
+  let shared := ruleTerms.filter gi.terms.contains
   let w (ts : Array Nat) : Float := ts.foldl (init := 0) fun acc t => acc + stats.idf t
-  let ruleW := w ruleTerms
+  let ruleW := ri.weight
   let b (x : Bool) : Float := if x then 1 else 0
   let n (x : Nat) : Float := x.toFloat
   return Array.map round4 #[
@@ -140,16 +189,20 @@ def Env.features (env : Env) (stats : SymbolStats) (p : Nat) : Array Float := Id
     n (goals.foldl (init := 0) fun m g => max m g.size),
     n newVars.size,
     n conclNonvar,
-    b concl.isVar,
-    n goal.size,
-    n conclNonvar / n (max 1 goal.size),
-    b (isVar goal),
-    n (env.propDepth p),
+    b ri.conclIsVar,
+    n gi.size,
+    n conclNonvar / n (max 1 gi.size),
+    b gi.hasVar,
+    n gi.depth,
     n ruleTerms.size,
     n shared.size,
     if ruleW == 0 then 0 else w shared / ruleW,
     ruleW - w shared,
-    Float.log (1 + n goalNode.children.size)
+    Float.log (1 + n gi.variants)
   ]
+
+/-- The features of variant `p`, in the order of `featureNames`. -/
+def Env.features (env : Env) (stats : SymbolStats) (p : Nat) : Array Float :=
+  env.variantFeatures stats (env.goalInfo env.props[p]!.parent) p
 
 end Whitehead.Prove

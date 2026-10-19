@@ -67,28 +67,31 @@ def jsonFloat? : Json → Option Float
   | _ => none
 
 /-- A tree, flattened: node `i` tests feature `feature[i]` against `threshold[i]`; a child
-`c ≥ 0` is a node, `c < 0` the leaf `-c - 1`. -/
+`c ≥ 0` is a node, `c < 0` the leaf `-c - 1`. The numbers are unboxed (`FloatArray`): a
+tree is walked a hundred times for each variant of each new goal. -/
 structure Tree where
   feature : Array Nat := #[]
-  threshold : Array Float := #[]
+  threshold : FloatArray := .empty
   defaultLeft : Array Bool := #[]
   missingZero : Array Bool := #[]
   left : Array Int := #[]
   right : Array Int := #[]
-  leaves : Array Float := #[]
-  deriving Inhabited, Repr
+  leaves : FloatArray := .empty
+  deriving Inhabited
+
+instance : Repr Tree := ⟨fun t _ => s!"<a tree of {t.feature.size} nodes>"⟩
 
 /-- The value of tree `t` at `x`. -/
-def Tree.eval (t : Tree) (x : Array Float) : Float := Id.run do
-  if t.feature.isEmpty then return t.leaves[0]?.getD 0
+def Tree.eval (t : Tree) (x : FloatArray) : Float := Id.run do
+  if t.feature.isEmpty then return t.leaves.get! 0
   let mut i : Int := 0
   for _ in [0:t.feature.size + 1] do
     if i < 0 then break
     let k := i.toNat
-    let v := x[t.feature[k]!]?.getD 0
-    let goLeft := if t.missingZero[k]! && v.abs ≤ 1e-35 then t.defaultLeft[k]! else v ≤ t.threshold[k]!
+    let v := x.get! t.feature[k]!
+    let goLeft := if t.missingZero[k]! && v.abs ≤ 1e-35 then t.defaultLeft[k]! else v ≤ t.threshold.get! k
     i := if goLeft then t.left[k]! else t.right[k]!
-  return t.leaves[(-i - 1).toNat]?.getD 0
+  return t.leaves.get! (-i - 1).toNat
 
 inductive Model where
   | linear (mean scale weights : Array Float)
@@ -103,7 +106,9 @@ def Model.score (m : Model) (x : Array Float) : Float :=
     for i in [0:weights.size] do
       s := s + weights[i]! * ((x[i]?.getD 0) - mean[i]!) / scale[i]!
     return s
-  | .trees ts => ts.foldl (init := 0) fun s t => s + t.eval x
+  | .trees ts =>
+    let xs : FloatArray := ⟨x⟩
+    ts.foldl (init := 0) fun s t => s + t.eval xs
 
 /-- A tree of LightGBM's dump, added to `t`; returns the child reference of the node. -/
 partial def addNode (j : Json) (t : Tree) : Except String (Int × Tree) := do

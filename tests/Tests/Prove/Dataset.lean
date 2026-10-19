@@ -2,7 +2,8 @@
 Tests of the data of the learned ranking layer (`Prove/Features.lean`,
 `Prove/Dataset.lean`) on `tests/fixtures/prove/logic.mmb`: a row for each variant kept, a
 feature for each name, one known variant a goal node of the path, the draw of the others
-fixed, and the counts of proofs only those before the theorem.
+fixed, the counts of proofs only those before the theorem, and the rows along a proof
+that the search found.
 -/
 import Whitehead.Prove.Dataset
 import Whitehead.Prove.Model
@@ -40,6 +41,19 @@ def datasetTests : TestM Unit := do
   check "dataset: with one negative, two rows a node at most, the known one among them"
     (nodes.all fun n => let rs := few.filter (·[2]! == n); rs.size ≤ 2 && rs.any (·[3]! == "1"))
   checkEq "dataset: the draw is fixed" (← rowsOf 1) few
+  -- along a proof the search finds (expert iteration): its skeleton is followed, and a
+  -- proof of the known shape gives the known proof's rows
+  let vc := Whitehead.Verify.Ctx.ofFile file
+  let r ← searchWith (accept vc) { Env.init db db.index (db.task (id "syl")) with uses } breadthFirst
+    { maxProps := 100000 }
+  match r.proof.bind ProofTree.skeleton?, db.skeleton file.stmts[i]! with
+  | some sk, .ok (some known) =>
+    let found := (← datasetRowsOf db db.index {} uses stats 0 i sk).map fun l => (l.splitOn "\t").toArray
+    let fnodes := found.foldl (init := (#[] : Array String)) fun acc r => if acc.contains r[2]! then acc else acc.push r[2]!
+    check "dataset: along a found proof, one known variant at each goal node"
+      (!fnodes.isEmpty && fnodes.all fun n => (found.filter fun r => r[2]! == n && r[3]! == "1").size == 1)
+    if r.proof.any (sameShape · known) then checkEq "dataset: a found proof of the known shape, the known rows" found all
+  | _, _ => check "dataset: the search proves syl, a proof of assertions" false
   -- the counts of proofs: none before the first theorem
   let some j := (Array.range file.stmts.size).find? (file.stmts[·]!.index == id "a1i") | return
   let first ← datasetRows db db.index {} uses stats 0 j

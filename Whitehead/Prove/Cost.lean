@@ -96,8 +96,9 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
     let sorted := match rank with
       | .learned m =>
         let st := stats.getD (SymbolStats.ofDb env.db)
+        let gi := env.goalInfo env.props[p]!.parent
         let scores := kids.foldl (init := ({} : Std.HashMap Nat Float)) fun (acc : Std.HashMap Nat Float) q =>
-          acc.insert q (m.score (env.features st q))
+          acc.insert q (m.score (env.variantFeatures st gi q))
         kids.qsort fun a b => scores[a]! > scores[b]! || scores[a]! == scores[b]! && a < b
       | _ =>
         let key (q : Nat) : Nat × Nat := match rank with

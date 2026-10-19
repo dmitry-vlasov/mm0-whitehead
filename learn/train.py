@@ -7,10 +7,16 @@ trained on the files of `prove export` and compared on their test parts:
 - M2, boosted trees: LightGBM's lambdarank, one query a node, stopped early on the
   tuning part.
 
-    python train.py OUTDIR [--sample-train F] FILE.tsv...   (the files in the order of data.FILES)
+    python train.py OUTDIR [--sample-train F] [--weights none|sqrt|equal] [--extra X.tsv]... FILE.tsv...
+        (the files in the order of data.FILES)
 
-With --sample-train, only that share of each file's training theorems is trained on
-(drawn by the theorem's number), to train faster; the tuning and test parts are whole.
+With --sample-train, only that share of the training theorems of the first file (the
+large one) is trained on, drawn by the theorem's number, to train faster; the other
+files, the tuning and the test parts are whole. With --weights, each file's nodes weigh
+so that the file's total weight is its number of nodes (none), its square root (sqrt), or
+the same for every file (equal). With --extra, the rows of `prove export --search` (the
+proofs a search found: expert iteration) of file `NAME.*.tsv` are added to the training
+part of file `NAME.tsv`, for the theorems it trains on.
 
 writes OUTDIR/linear.json (the means, scales and weights), OUTDIR/trees.txt (the
 LightGBM model) and OUTDIR/trees.json (its dump, which Whitehead reads: `--model`), and
@@ -28,11 +34,12 @@ import data  # noqa: E402
 FEATS = []
 
 
-def load(paths, sample=1.0):
+def load(paths, sample=1.0, extras=()):
     """The rows of the files, each theorem once (by name, the first file that has it), with
     the part of each row (0 train, 1 tune, 2 test) and its file. With `sample`, only that
-    share of a file's training theorems, drawn by the theorem's number."""
-    seen, parts = set(), []
+    share of a file's training theorems, drawn by the theorem's number. The rows of
+    `extras` join the training part of their file, for all its training theorems."""
+    seen, parts, trained = set(), [], {}
     for fi, p in enumerate(paths):
         d = data.read(p)
         if not FEATS:
@@ -46,7 +53,9 @@ def load(paths, sample=1.0):
         seen |= {thm_names[t] for t in new}
         keep_thm = np.array(sorted(new), dtype=np.int64)
         keep = np.isin(d['thm'], keep_thm)
-        if sample < 1:
+        # the theorems trained on, before the sample: the extra rows of all of them are used
+        trained[os.path.basename(p)] = (fi, np.unique(d['thm'][keep & (part == 0)]))
+        if sample < 1 and fi == 0:
             h = (d['thm'] * 2654435761 + fi * 40503) % 1000
             keep &= (part != 0) | (h < sample * 1000)
         sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
@@ -56,10 +65,24 @@ def load(paths, sample=1.0):
         print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, {len(new)} theorems of {len(thm_names)}',
               flush=True)
         del d
+    for p in extras:
+        base = os.path.basename(p).split('.')[0] + '.tsv'
+        fi, thms = trained[base]
+        d = data.read(p)
+        keep = np.isin(d['thm'], thms)
+        sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
+        # the nodes of another tree of the theorem: numbers of their own
+        sub['node'] = sub['node'] + 5_000_000
+        sub['part'] = np.zeros(int(keep.sum()), dtype=np.int64)
+        sub['file'] = np.full(int(keep.sum()), fi)
+        parts.append((os.path.basename(p), sub))
+        print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, '
+              f'{len(np.unique(sub["thm"]))} theorems, added to {base}', flush=True)
+        del d
     feats = FEATS[0]
     cat = {k: np.concatenate([s[k] for _, s in parts]) for k in ['thm', 'node', 'label', 'variants', 'part', 'file', 'X']}
     cat['features'] = feats
-    cat['files'] = [n for n, _ in parts]
+    cat['files'] = [n for n, _ in parts][:len(paths)]
     return cat
 
 
@@ -122,9 +145,19 @@ def main():
         i = args.index('--sample-train')
         sample = float(args[i + 1])
         del args[i:i + 2]
+    weighting = 'none'
+    if '--weights' in args:
+        i = args.index('--weights')
+        weighting = args[i + 1]
+        del args[i:i + 2]
+    extras = []
+    while '--extra' in args:
+        i = args.index('--extra')
+        extras.append(args[i + 1])
+        del args[i:i + 2]
     out, paths = args[0], args[1:]
     os.makedirs(out, exist_ok=True)
-    d = load(paths, sample)
+    d = load(paths, sample, extras)
     feats = d['features']
     fi = {n: i for i, n in enumerate(feats)}
     X = d['X']
@@ -167,15 +200,26 @@ def main():
     def sizes(s):
         a, b = group_bounds(s)
         return b - a
+
+    def weights(s):
+        """A weight a row, the same for the rows of a node: a file's nodes share its total."""
+        a, b = group_bounds(s)
+        node_file = s['file'][a]
+        counts = np.bincount(node_file, minlength=len(d['files'])).astype(np.float64)
+        total = {'none': counts, 'sqrt': np.sqrt(counts), 'equal': np.where(counts > 0, 1.0, 0.0)}[weighting]
+        per_node = np.where(counts > 0, total / np.maximum(counts, 1), 0)[node_file]
+        per_node = per_node / per_node.mean()
+        return np.repeat(per_node, b - a)
     t0 = time.time()
-    dtrain = lgb.Dataset(train['X'], label=train['label'], group=sizes(train), feature_name=feats)
+    dtrain = lgb.Dataset(train['X'], label=train['label'], group=sizes(train), feature_name=feats,
+                         weight=weights(train))
     dtune = lgb.Dataset(tune['X'], label=tune['label'], group=sizes(tune), reference=dtrain)
     params = {'objective': 'lambdarank', 'metric': 'ndcg', 'ndcg_eval_at': [1, 5, 10], 'learning_rate': 0.05,
               'num_leaves': 63, 'min_data_in_leaf': 200, 'feature_fraction': 0.9, 'bagging_fraction': 0.8,
               'bagging_freq': 1, 'num_threads': 20, 'verbose': -1}
     model = lgb.train(params, dtrain, num_boost_round=1000, valid_sets=[dtune],
                       callbacks=[lgb.early_stopping(50, verbose=False)])
-    print(f'trees: {model.best_iteration} rounds, trained in {time.time() - t0:.0f} s')
+    print(f'trees ({weighting} weights): {model.best_iteration} rounds, trained in {time.time() - t0:.0f} s')
     imp = model.feature_importance('gain')
     print('  gain: ' + ', '.join(f'{n} {v / imp.sum() * 100:.0f}%' for n, v in sorted(zip(feats, imp), key=lambda x: -x[1])[:10]))
     report('trees', lambda s: model.predict(s['X'], num_iteration=model.best_iteration))

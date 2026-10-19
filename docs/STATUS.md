@@ -110,6 +110,14 @@ against 67 for `guided` and 29 for `bfs` (+52%), losing none; the compiler's, al
 mm0's own it is 4% below `guided`. Offline, the model puts the known proof's step first
 at 22.3% of the nodes, among all their variants, against 9.4% by recency.
 
+Then, in the order agreed on 2026-10-18 (`DESIGN.md`, steps 1–3): the files weighed by
+the square root of their nodes (mm0 65.5% first among 50 negatives, against 63.1%); the
+features 22% cheaper, after which the expansion and not the score limits a search; and
+one round of expert iteration, the proofs `learned` finds for the training theorems
+added as data (3,737 on set.mm), with no gain offline or in search. A join now stops at
+its theorem's time (set.mm's theorem 5529 ran for minutes in one), and `prove search`
+has replay's tuple budgets. Next: the value of goals (step 4).
+
 **Housekeeping, 2026-10-16**: both packages build with no warnings, and `lake build`
 now builds every library and executable of a package (`ref-search` had not compiled
 since milestone 12 without this being seen); the docs were checked against the code.

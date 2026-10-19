@@ -50,11 +50,13 @@ def usage : String :=
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
   prove export <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--ms T]
-               [--max-nodes N]
+               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--search-ms T]]
                                  the data of the learned ranking layer: for each theorem, along
                                  its known proof, a row for each variant of each goal node, with
                                  its features and whether the known proof chose it (TSV);
-                                 --negatives: the others kept a node (50; 0 for all)
+                                 --negatives: the others kept a node (50; 0 for all); --search:
+                                 along the proof that tactic T finds in --search-ms (1000) ms
+                                 instead, for the theorems where it is not the known one's shape
   prove score <data.tsv> --model FILE
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
@@ -427,8 +429,49 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   let uses := Prove.Uses.ofFile file db.asserts.size
   let stats := Prove.SymbolStats.ofDb db
   let start ← IO.monoMsNow
-  let results ← Prove.runJobs jobs todo.size
-    (fun k => Prove.datasetRows db index limits uses stats negatives todo[k]!) progress memLimit logLine
+  -- --search T: along the proofs that tactic T finds (expert iteration), those that are not
+  -- the known one's shape; otherwise along the known proofs
+  let searchTactic := strOption args "--search"
+  let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
+    | .ok defs => pure defs
+    | .error msg => IO.eprintln msg; return 1
+  let model ← match strOption args "--model" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
+  let rails : Thunk Prove.Rails := Thunk.mk fun _ => Prove.Rails.ofDb db
+  let vc := Verify.Ctx.ofFile file
+  let hypIndexes := if searchTactic.isSome then db.hypIndexes else {}
+  -- the joins have the budgets of the rows' expansion: one join can run long, past the time
+  let searchLimits : Prove.Limits := { maxProps := 20000000, maxMs := numOption args "--search-ms" 1000,
+                                       maxTuples := limits.maxTuples, maxWork := limits.maxWork }
+  let found ← IO.mkRef (0, 0, 0)
+  let rowsFor (k : Nat) : IO (Option (Array String)) := do
+    let i := todo[k]!
+    match searchTactic with
+    | none => Prove.datasetRows db index limits uses stats negatives i
+    | some text =>
+      let thm := file.stmts[i]!.index
+      let ctx : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model }
+      match Prove.Dsl.parseTactic ctx text with
+      | .error _ => return none
+      | .ok t =>
+        let env := { Prove.Env.init db index (db.task thm) hypIndexes with uses }
+        let r ← Prove.searchWith (Prove.accept vc) env t.strategy searchLimits
+        let some proof := r.proof | return none
+        let known := match db.skeleton file.stmts[i]! with
+          | .ok (some sk) => Prove.sameShape proof sk
+          | _ => false
+        match proof.skeleton? with
+        | none =>
+          found.modify fun (a, b, c) => (a + 1, b, c + 1)
+          return none
+        | some sk =>
+          found.modify fun (a, b, c) => (a + 1, b + (if known then 1 else 0), c)
+          if known then return none
+          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk)
+  let results ← Prove.runJobs jobs todo.size rowsFor progress memLimit logLine
   let h ← IO.FS.Handle.mk out .write
   h.putStrLn Prove.datasetHeader
   let mut rows := 0
@@ -439,8 +482,60 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
         h.putStrLn l
         rows := rows + 1
         if (l.splitOn "\t")[3]? == some "1" then positives := positives + 1
-  IO.println s!"{path}: {todo.size} theorems, {(results.filter (·.isNone)).size} left out (a shared conversion); \
-    {rows} rows, {positives} of them the known proof's, written to {out}, in {(← IO.monoMsNow) - start} ms"
+  if searchTactic.isSome then
+    let (n, same, conv) ← found.get
+    IO.println s!"{path}: {todo.size} theorems, {n} proved by the search, {same} as the known proof, {conv} with an \
+      unfolding of its own; {rows} rows along the {(results.filter (·.isSome)).size} others, written to {out}, \
+      in {(← IO.monoMsNow) - start} ms"
+  else
+    IO.println s!"{path}: {todo.size} theorems, {(results.filter (·.isNone)).size} left out (a shared conversion); \
+      {rows} rows, {positives} of them the known proof's, written to {out}, in {(← IO.monoMsNow) - start} ms"
+  return 0
+
+/-- `prove featbench`: where the time of a learned rank goes. For each theorem of the range,
+a tree grown by breadth-first search to `--max-nodes`, then the features of every
+variant of every goal node, and the model's scores of them, each timed. -/
+def proveFeatbench (path : String) (args : List String) : IO UInt32 := do
+  let file ← match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e => IO.eprintln (e.format path); return 1
+  let db ← match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg => IO.eprintln msg; return 1
+  let some mp := strOption args "--model" | IO.eprintln "--model FILE is needed"; return 2
+  let m ← match ← Prove.Model.load mp with
+    | .ok m => pure m
+    | .error e => IO.eprintln e; return 1
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let stats := Prove.SymbolStats.ofDb db
+  let index := db.index
+  let first := numOption args "--from" 0
+  let every := max 1 (numOption args "--every" 1000)
+  let limits : Prove.Limits := { maxProps := numOption args "--max-nodes" 20000, maxMs := 60000 }
+  let mut variants := 0
+  let mut tf := 0
+  let mut tm := 0
+  let mut sink : Float := 0
+  for s in file.stmts do
+    let .thm _ := s.kind | continue
+    if s.index < first || s.index % every != 0 then continue
+    let env := { Prove.Env.init db index (db.task s.index) with uses }
+    let r ← Prove.searchWith Prove.acceptAny env Prove.breadthFirst limits
+    let env := r.env
+    let props := (Array.range env.props.size)
+    let t0 ← IO.monoNanosNow
+    let infos := (Array.range env.hyps.size).map env.goalInfo
+    let fs := props.map fun p => env.variantFeatures stats infos[env.props[p]!.parent]! p
+    sink := sink + fs.foldl (init := 0) fun a x => a + x[0]!
+    let t1 ← IO.monoNanosNow
+    let sc := fs.map m.score
+    sink := sink + sc.foldl (init := 0) (· + ·)
+    let t2 ← IO.monoNanosNow
+    variants := variants + props.size
+    tf := tf + (t1 - t0)
+    tm := tm + (t2 - t1)
+  let per (t : Nat) : String := if variants == 0 then "-" else s!"{t / variants / 1000}.{t / variants % 1000 / 100} µs"
+  IO.println s!"{path}: {variants} variants; features {tf / 1000000} ms ({per tf} each), model {tm / 1000000} ms ({per tm} each) [{sink}]"
   return 0
 
 /-- `prove score`: the scores of a model (`Prove/Model.lean`) for the rows of a file of
@@ -919,6 +1014,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "goal" :: mm0 :: mmb :: rest => proveGoal mm0 mmb rest
   | "prove" :: "export" :: path :: rest => proveExport path rest
   | "prove" :: "score" :: path :: rest => proveScore path rest
+  | "prove" :: "featbench" :: path :: rest => proveFeatbench path rest
   | _ =>
     IO.eprintln usage
     return 2

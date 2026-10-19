@@ -2647,12 +2647,55 @@ model has not seen):
 - **On mm0** it loses 4 to 5%: the model learned mostly from set.mm (89% of the rows).
 - **The verifier** rejected no proof.
 
-**Next:**
-- training that weighs the files evenly, for mm0;
-- features that are cheaper to compute, so that more nodes are expanded in a second;
-- expert iteration: the proofs that `learned` finds, other than the known ones, are new
-  positives;
-- the value of goals.
+**Next, in order:** the files weighed evenly; cheaper features; expert iteration; the
+value of goals.
+
+**Step 1, the files weighed evenly** (`train.py --weights`): a file's nodes weigh so that
+the file's total is its number of nodes (`none`, as before), its square root (`sqrt`) or
+the same for all (`equal`).
+- With `sqrt`, mm0's test nodes have the known step first at 65.5%, against 63.1%; set.mm
+  stays at 81.7% (both among the 50 negatives a node of the data).
+- In search at 1 s: set.mm 84 (82 before), the compiler 505, mm0 229 (233). The model is
+  `.tools/learn/models/w-sqrt`, the first 100 of its trees.
+- mm0's loss is not the weighing. The theorems `learned` loses there are mostly one
+  family, the congruences `elabDefOeq1d` … `8d` and `ptCheckNotaLs_auxeq*d`: long proofs
+  of the same shape, which the rails (`guided`) find and the model's order delays.
+
+**Step 2, cheaper features** (`prove featbench`, the time of each part at every node of a
+tree grown by `bfs`):
+- What depends on the rule alone is found once for the file (`RuleInfo`), and what
+  depends on the goal once for all its variants (`GoalInfo`). The features of a variant
+  take 3.9 µs instead of 5.0, the trees' score 3.9 µs instead of 4.1 (unboxed arrays). The
+  scores are the same.
+- **The ceiling:** with the order by uses, which costs nothing, a search expands 17 nodes
+  in a second at the median, against 15 to 16 with the model. Scoring is no longer what
+  limits the search: the expansion is. And the order by uses proves 67 at 1 s on set.mm,
+  against 83 with the model, so the model's order is worth its cost.
+
+**Step 3, expert iteration, one round** (`prove export --search learned`, `train.py
+--extra`; 2026-10-19):
+- Each file's training theorems (its first 80%) are searched by `learned` with the
+  w-sqrt model for 1 s. Where the proof found is not the known one's shape
+  (`sameShape`), the rows along it (`datasetRowsOf`, the export's expansion along a
+  skeleton) join the training part of their file. A proof with an unfolding of its own
+  (`ProofTree.conv`) has no skeleton, and is passed over.
+- Found: set.mm 5,520 of 38,087, 3,737 of them in another shape (927,000 rows); the
+  compiler 2,821 of 8,109, 2,280 (430,000 rows); mm0 1,343 of 3,900, 886, of which 55
+  are trained on in mm0 (the others are the compiler's theorems too, and trained there).
+  In all, 6% of the training rows.
+- The model already put the found proofs' steps first at 69% of their nodes on set.mm
+  (the known proofs': 82%, on the test part), 43% on the compiler, 40% on mm0.
+- Retrained with them (`models/x1`, otherwise as w-sqrt): offline the same within 0.2%
+  on every file (set.mm 81.6% first, against 81.7%; mm0 65.7%, against 65.5%). In search,
+  against w-sqrt on the same build: set.mm 81 and 98 at 1 s and 5 s, against 83 and 101;
+  the compiler 505, both; mm0 230, both. **No gain**: the differences are within noise.
+- Why, probably: every training theorem already has its known proof, labelled at every
+  node of its path, and another proof of the same theorem adds a few more labels of the
+  same kind. The search's own proofs are worth more where they are the only proofs: for
+  goals without a known proof, or for a value of goals (step 4), which learns from what
+  the search did and not from the proof.
+- On the way, one join of set.mm's theorem 5529 ran for minutes past its second (above,
+  the joins: the stop every 64 tuples).
 
 ### Mining and ranking (the design of 2026-10-13)
 
