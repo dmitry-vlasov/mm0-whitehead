@@ -687,6 +687,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    sibling should narrow the variants shown at the others.
 5. The tactics system (`DESIGN.md`, "The tactics system: decision procedures as guides",
    the plan of 2026-10-21): decision procedures as guides whose skeletons the engine
-   replays; in order, scoped searches (no code), `congr`, `ctx`, `arith`, `taut`,
-   `order`; the combinators `at`, `within`, `then`, `alt`, run-time calls; labels as
-   tags; `auto` at the top.
+   replays. Done: `at`, `range`, the subgoal bench (`prove subgoals`: `learned` closes
+   67% of the determined subgoals of set.mm's test proofs in 100 ms; the failures are
+   binders and the theorem's own matter, procedures can add 7.5 points at most); `congr`
+   (mm0 +8% at 1 s, 249 against 230; set.mm unchanged). Next: `ring`, then `taut`, set
+   algebra and `order` if the gap-filler bench asks; the combinators `within`, `then`,
+   `alt`, run-time calls; labels as tags; `auto` at the top.

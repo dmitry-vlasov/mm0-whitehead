@@ -32,6 +32,7 @@ head of each.
 | Expert iteration, one round | 2026-10-19 | no gain |
 | Value of goals | 2026-10-19 | +5% at 1 s and +3% at 5 s, losing nothing; +10% at 5 s if mm0 may lose a fifth |
 | The subgoal bench: what search closes of the subgoals of known proofs | 2026-10-21 | `learned` 67% in 100 ms, 72% in 500 ms; the failures are binders and the theorem's own matter; procedures can add 7.5 points at most |
+| `congr`, the congruence procedure as a replayed skeleton | 2026-10-21 | mm0 **+8%** at 1 s (249 against 230, the best so far); set.mm unchanged |
 
 ## 1. The engine without guidance
 
@@ -417,6 +418,14 @@ arithmetic (25%), 41 propositional tautologies (21%), 37 iffs of arithmetic fact
 order facts. The decision procedures of the plan reach at most 484 subgoals, 7.5 points;
 three quarters of the failures are the choice of lemmas and witnesses. The one kind the
 search is bad at is arithmetic identities: `ring` first, `closure` not needed.
+
+**`congr`, the first procedure** (`Congr.lean`): the file's congruence and reflexivity
+lemmas mined by shape (set.mm: 489 for 127 terms), a goal `[ph ->] L = R` rewritten down
+to where its sides differ, the plan a skeleton that `follow` replays. Alone it closes 19%
+of the equality subgoals of set.mm's test part; inside `learned` it changes nothing there
+(66% against 67% on the bench; 81 and 101 against 83 and 103 in search). On mm0, whose
+failures were 13-step congruence chains, the search proves 249 of 491 at 1 s against 230,
+above `guided` (244); the compiler stays at 505.
 
 ## 8. What the experiments say, together
 

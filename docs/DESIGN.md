@@ -2951,6 +2951,58 @@ the twenties at most without measuring; on mm0, the congruence family back.
   subproof of the index or a computed skeleton.
 - **Tests on peano:** the table, the plan `(oreqd h0 (biidd))` for `oreq1d`'s statement,
   `follow(congr)` proving the one-sided lemmas from the two-sided ones.
+- **Measured** (the subgoal bench at 100 ms; the search at 1 s and 5 s; one build):
+
+  | | set.mm test part | mm0 test part | the compiler |
+  |---|---|---|---|
+  | bench, `follow(congr, at=root)` alone | 6% (`=` 19%, `<->` 3%) | | |
+  | bench, `learned` → `congruent` | 67% → 66% | 79% → 81% (`=` 87% → 89%) | |
+  | search at 1 s, `learned` → `congruent` | 83 → 81 | **230 → 249** | 505 → 505 |
+  | search at 5 s | 103 → 101 | | |
+
+  - **On mm0 the congruence family is back:** +8%, above `guided` (244) and above `bfs`
+    at 5 s (247); the best number on mm0 so far. Its proofs are chains of 13 congruence
+    steps, which the rank delayed and `congr` now takes for free.
+  - **On set.mm nothing changes.** Its congruence steps are one to three deep, and the
+    learned rank finds them already; `congr` alone closes a fifth of the equality
+    subgoals, those whose differing subterms a premise or reflexivity closes, and the
+    rest leave the same leaves the search would have reached. As the census said: on
+    set.mm the gap is not congruence.
+  - `congruent` is the tactic to use on mm0; on set.mm it is `learned` with a cost of
+    nothing, and either serves.
+
+**Next: `ring`, a design (2026-10-21).** The kind the search is worst at: an identity of
+`+`, `·`, `−`, negation and numerals under closure hypotheses, in the deduction form
+(`sigarperm`: `(A ∈ ℂ ∧ B ∈ ℂ ∧ C ∈ ℂ) → (A·B) + −(C) = (A·B) − C`).
+- **What set.mm gives it,** read from the file by shape: 93 equational lemmas in the
+  deduction form whose hypotheses are `ph -> x ∈ ℂ` (or ℝ) and whose conclusion is
+  `ph -> L = R` over the ring terms — the commutative ring axioms (`addcomd`, `addassd`,
+  `mulcomd`, `mulassd`, `adddid`, `adddird`, `addridd`, `addlidd`, `mulridd`, `mullidd`,
+  `mul01d`, `mul02d`, `negidd`, `negsubd`, `subnegd`, `negdid`, `mulneg1d`, `mulm1d`,
+  `negnegd`, …) and 73 derived cancellations; 47 closure lemmas in the deduction form
+  (`addcld`, `mulcld`, `subcld`, `negcld`, `readdcld`, `recnd`, `nnaddcld`, …).
+- **The procedure:** normalize both sides to one canonical polynomial (a sum of monomials,
+  each a product of atoms with a numeral coefficient, ordered), by a terminating rewrite
+  strategy that uses the axioms above as rules; atoms are the subterms that are not ring
+  operations, numerals other than 0 and 1 among them at first (their arithmetic, set.mm's
+  `dec*` lemmas, comes after). The proof is a skeleton:
+  - `eqtrd` chains the rewrite steps; `eqcomd` turns the right side's chain around; the
+    middle terms are metavariables that the steps determine by unification, since every
+    rule's conclusion is explicit (`addcomd` at `X + Y` fixes `?z := Y + X`), and the two
+    chains meet at the normal form, which unifies with itself;
+  - a step at a position is a one-sided congruence lemma per argument on the path
+    (`oveq1d`, `oveq2d`, chosen by `CongrTable` from the position alone) ending in the
+    rule;
+  - a rule's hypotheses `ph -> t ∈ ℂ` are closed by the closure lemmas down the structure
+    of `t`, to the theorem's premises, numerals (`2cnd`, …) and whatever the context
+    gives.
+- **The context** is the hard part: the premises are seldom `ph -> A ∈ ℂ` but a conjunction
+  antecedent `(A ∈ ℂ ∧ B ∈ ℂ ∧ C ∈ ℂ) → …`, so a leaf `ph -> A ∈ ℂ` needs the glue
+  (`simp1d`, `simpld`, `adantr`): the `ctx` tactic, which `ring` therefore needs below it.
+  First version: leave such leaves open, and let the search close them (it closes 86% of
+  closure goals); measure how many `ring` plans then close whole on the bench.
+- **Measured by** the subgoal bench's class "arithmetic identity under closure
+  hypotheses": 120 of 195 fail on the test part, 124 of 252 on the first 90%.
 
 ### Mining and ranking (the design of 2026-10-13)
 
