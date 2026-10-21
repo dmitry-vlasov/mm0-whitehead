@@ -37,6 +37,7 @@ head of each.
 | The gap filler's 53 holes refilled offline | 2026-10-21 | the agent's own variables now read (51 of 53); the procedures first fill 12, the old default 11; the rest is order, divisibility, existentials and the theorems' substance |
 | Features of the step's other goals (ranker and value) | 2026-10-21 | the value improves offline (AUC 0.834 → 0.859), the ranker and the search do not |
 | A prior per theorem (k-NN premise selection) | 2026-10-22 | the strongest feature (37% of the gain); first 81.8% → 83.6%; where the step brings 3+ variables 66% → 71%; set.mm **89** at 1 s and **105** at 5 s with the value, the best so far |
+| `order`, the cheap version: a scoped sub-search at order goals | 2026-10-22 | nothing, on set.mm and on peano |
 
 ## 1. The engine without guidance
 
@@ -452,6 +453,12 @@ of the ranker (37% of its gain, recency down from 42% to 9%): first 81.8% → 83
 66% → 71% where the step brings three or more variables. In search: set.mm 83 and 89
 (with the value) at 1 s, 104 and 105 at 5 s, against 80–85 and 101–104 before; mm0 249,
 peano 113, the compiler 505.
+
+**`order`, the cheap version:** a breadth-first sub-search at every order goal among the
+order lemmas (`at`), before `learned`'s search: on peano's subgoals 1,178 against 1,179,
+in search 113 both; on set.mm 66% against 67%, in search 81 against 83. The search finds
+the short order facts already; the rest would need a procedure, for about 1% of the
+subgoals.
 
 **The gap filler's holes, refilled offline** (`DESIGN.md`, "The gap filler again"): the 53
 holes the hybrid agent left, from its transcripts, each tactic at 5 s. A name of the

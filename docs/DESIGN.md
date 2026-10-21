@@ -3096,6 +3096,20 @@ the twenties at most without measuring; on mm0, the congruence family back.
 - **Measured by** the subgoal bench's class "arithmetic identity under closure
   hypotheses": 120 of 195 fail on the test part, 124 of 252 on the first 90%.
 
+**`order`, the cheap version (2026-10-22):** before a procedure, a sub-search at every
+order goal by `at`: `ordered` (`tactics/ordered.tac`; `ordered_setmm` in set.mm's prefix
+notation, where `a < b` is `wbr a b clt`) is `learned` with, first, at every goal `x < y`
+(and `x ≤ y` on set.mm), breadth first among the variants whose new goals are order facts
+or none, 2,000 nodes and 3 steps deep. Measured against `learned` with the prior model:
+on peano's subgoals 1,178 against 1,179 of 1,567 (`<` goals 35 of 55 both), in search 113
+both; on set.mm's test subgoals 66% against 67% (class relations 45% against 47%, the order
+class 21 against 20 of 52 failing), in search 81 against 83. **Nothing**: the search
+already finds the one- or two-step order facts, and the rest needs a procedure of linear
+arithmetic with the file's lemmas as its steps — about 1% of the determined subgoals on
+set.mm, and the peano holes that are order facts. Left for later; the way to build it is
+`ring`'s: lemmas by shape (transitivity, monotonicity of `+` and `·`, the order of
+successors), a plan, a skeleton replayed.
+
 **Built, 2026-10-21: `ring`** (`Prove/Ring.lean`, the guide `ring`, the tactic `arith` =
 `congruent` with `follow(ring, at=open, chain=true)` first):
 - **The table, by shape:** an operation is a term with fixed arguments (set.mm's
