@@ -120,6 +120,9 @@ structure RingRule where
   id : Nat
   ded : Bool
   roles : Array Nat := #[]
+  /-- The lemma states the shape the other way round (`negsubd`: `A + -B = A - B`), and
+  is applied by symmetry. -/
+  flipped : Bool := false
   deriving Inhabited, Repr
 
 /-- A ring of the file: its equality, its operations and constants, its rules by shape
@@ -350,14 +353,14 @@ def ofDb (db : Db) : RingTable := Id.run do
             symms := symms.push (rel, ded, a.id)
       -- the rules: closure hypotheses of the statement's variables, or none
       let some (vars, carrier) := closureHyps hyps | continue
-      let shapes := shapesOf l r
+      let shapes := (shapesOf l r).map (·, false) ++ (shapesOf r l).map (·, true)
       if shapes.isEmpty then continue
       let lvars := ((l.nodes ++ r.nodes).filter Node.isVar).map Node.varId
       if !hyps.isEmpty && !lvars.all vars.contains then continue
-      for m in shapes do
+      for (m, flipped) in shapes do
         -- the role of each hypothesis' variable in the shape
         let some roles := vars.mapM fun v => m.vars.findIdx? (· == v) | continue
-        found := found.push { eq := rel, m, rule := { id := a.id, ded, roles }, carrier }
+        found := found.push { eq := rel, m, rule := { id := a.id, ded, roles, flipped }, carrier }
   -- the rings: an equality with a distributivity, its addition and its multiplication;
   -- the other shapes attached by the operations they name
   let mut rings : Array Ring := #[]
@@ -367,8 +370,12 @@ def ofDb (db : Db) : RingTable := Id.run do
     let some mul := f.m.mul | continue
     if rings.any fun rg => rg.eq == f.eq && rg.add == add && rg.mul == mul then continue
     let mut rg : Ring := { eq := f.eq, add, mul }
+    -- the first lemma of a shape is kept, but one stated the right way round replaces one
+    -- that is flipped
     let put (rg : Ring) (sh : RingShape) (r : RingRule) : Ring :=
-      if rg.rules.contains (sh, r.ded) then rg else { rg with rules := rg.rules.insert (sh, r.ded) r }
+      match rg.rules[(sh, r.ded)]? with
+      | none => { rg with rules := rg.rules.insert (sh, r.ded) r }
+      | some old => if old.flipped && !r.flipped then { rg with rules := rg.rules.insert (sh, r.ded) r } else rg
     -- two rounds: the negation is named by the inverse or the subtraction, and then its
     -- own shapes attach
     for _ in [0:2] do
@@ -656,10 +663,23 @@ end RTerm
 
 namespace RingTable
 
-/-- The ring of the file whose equality `rel` is, and whose terms the sides use. -/
-def ringFor (t : RingTable) (rel : Nat) (l r : Exp) : Option Ring :=
-  t.rings.find? fun rg => rg.eq == rel &&
-    ((RTerm.ofExp rg l) != .atom l || (RTerm.ofExp rg r) != .atom r)
+/-- How much of `e` a ring reads: its operations in it, counted. -/
+partial def coverage (rg : Ring) : RTerm → Nat
+  | .atom _ | .zero | .one => 0
+  | .add a b | .mul a b | .sub a b => 1 + coverage rg a + coverage rg b
+  | .neg a => 1 + coverage rg a
+
+/-- The rings of the file whose equality `rel` is and that read something of the sides,
+the one reading most first, then the one with most rules: the file has rings besides
+the one meant (set.mm: `·` with `↑`, since exponentiation distributes over
+multiplication; `min` with `+`), and a goal is planned with each in turn. -/
+def ringsFor (t : RingTable) (rel : Nat) (l r : Exp) : Array Ring :=
+  let scored := t.rings.filterMap fun rg =>
+    if rg.eq != rel then none
+    else
+      let c := coverage rg (RTerm.ofExp rg l) + coverage rg (RTerm.ofExp rg r)
+      if c == 0 then none else some (c, rg.rules.size, rg)
+  (scored.qsort fun a b => a.1 > b.1 || a.1 == b.1 && a.2.1 > b.2.1).map (·.2.2)
 
 /-- The closure of `e` in the ring's carrier, in the deduction form: the file's closure
 lemmas down the structure of `e`, a constant's lemma at a constant; open where there is
@@ -702,7 +722,8 @@ partial def stepSkeleton (t : RingTable) (tb : CongrTable) (rg : Ring) (limit : 
   if lifted then
     let lift ← t.lift
     sk := .step lift #[sk]
-  if st.back then
+  -- backwards, or a lemma stated the other way round: by symmetry (both: as it is)
+  if st.back != rule.flipped then
     let symm ← rg.symm[ded]?
     if symm ≥ limit then none
     sk := .step symm #[sk]
@@ -782,17 +803,17 @@ partial def plan (t : RingTable) (tb : CongrTable) (rg : Ring) (limit : Nat) (de
 /-- The skeleton for goal `g` of a theorem numbered `limit`: in the inference form, or
 under the connective in the deduction form. -/
 def planGoal (t : RingTable) (tb : CongrTable) (limit : Nat) (g : Exp) : Option Skeleton :=
+  let first (ded : Bool) (rel : Nat) (l r : Exp) : Option Skeleton :=
+    (t.ringsFor rel l r).findSome? fun rg => t.plan tb rg limit ded l r
   let inference := do
     let (rel, l, r) ← CongrTable.binary g
-    let rg ← t.ringFor rel l r
-    t.plan tb rg limit false l r
+    first false rel l r
   let deduction := do
     let conn ← tb.connective
     let (c, _, body) ← CongrTable.binary g
     if c != conn then none
     let (rel, l, r) ← CongrTable.binary body
-    let rg ← t.ringFor rel l r
-    t.plan tb rg limit true l r
+    first true rel l r
   inference <|> deduction
 
 end RingTable

@@ -264,66 +264,6 @@ def verifyPair (mm0 mmb : String) : IO UInt32 := do
       matching {ms checked done}, total {ms start done}"
     return 0
 
-/-- `prove db`: what the prover reads from a proof file, with timings. -/
-def proveDb (path : String) : IO UInt32 := do
-  let bytes ← IO.FS.readBinFile path
-  let t0 ← IO.monoNanosNow
-  let file ←
-    match Mmb.MmbFile.parse bytes with
-    | .ok file => pure file
-    | .error e =>
-      IO.eprintln (e.format path)
-      return 1
-  let db ←
-    match Prove.Db.ofFile file with
-    | .ok db => pure db
-    | .error msg =>
-      IO.eprintln s!"{path}: {msg}"
-      return 1
-  let t1 ← IO.monoNanosNow
-  let ms (a b : Nat) : String := s!"{(b - a) / 1000000} ms"
-  let nodes := db.asserts.foldl (init := 0) fun n a => a.hyps.foldl (init := n + a.concl.size) (· + ·.size)
-  let pairs := db.asserts.foldl (init := 0) fun n a => n + a.disjs.size
-  IO.println s!"{path}: {db.terms.size} terms, {db.asserts.size} assertions, {nodes} expression nodes, \
-    {pairs} pairs of binders to keep apart ({ms t0 t1})"
-  -- the index is built when its size is printed: a pure value is computed where it is used
-  let t1 ← IO.monoNanosNow
-  let index := db.index
-  IO.print s!"index of the conclusions: {index.nodes.size} nodes"
-  let t2 ← IO.monoNanosNow
-  IO.println s!" ({ms t1 t2})"
-  -- the proofs as trees of assertions
-  let mut steps := 0
-  let mut proofs := 0
-  let mut withConv := 0
-  let mut biggest := 0
-  let mut over : Array Nat := #[0, 0, 0, 0]
-  for s in file.stmts do
-    if let .thm _ := s.kind then
-      match db.skeleton s with
-      | .error msg =>
-        IO.eprintln s!"{path}: theorem {file.thmName s.index}: {msg}"
-        return 1
-      | .ok none => withConv := withConv + 1
-      | .ok (some sk) =>
-        let n := sk.size 100000000
-        proofs := proofs + 1
-        steps := steps + n
-        biggest := max biggest n
-        for k in [0:4] do
-          if n > #[100, 1000, 10000, 100000][k]! then over := over.modify k (· + 1)
-  let t3 ← IO.monoNanosNow
-  IO.println s!"proofs: {proofs} as trees of {steps} steps, the largest {biggest}, {withConv} with a shared conversion left out; \
-    more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
-  -- the congruence procedure's table (`Prove/Congr.lean`)
-  let t4 ← IO.monoNanosNow
-  let tb := Prove.CongrTable.ofDb db
-  let n := tb.lemmas.fold (init := 0) fun acc _ ls => acc + ls.size
-  let terms := tb.lemmas.fold (init := ({} : Std.HashSet Nat)) fun acc k _ => acc.insert k.1
-  let ded := tb.lemmas.fold (init := 0) fun acc k ls => if k.2.2 then acc + ls.size else acc
-  IO.println s!"congruence lemmas: {n} for {terms.size} terms, {ded} in the deduction form; {tb.refl.size} reflexivity lemmas ({ms t4 (← IO.monoNanosNow)})"
-  return 0
-
 /-- A line of a report, written at once also when the output is a file: a search can
 run for an hour. -/
 def logLine (line : String) : IO Unit := do
@@ -377,6 +317,83 @@ def withSpecNames (db : Prove.Db) (file : Mmb.MmbFile) (args : List String) : IO
         if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
       return some <| (Verify.specTermNames env file).foldl (init := db) fun db (i, name) =>
         if i < db.terms.size then { db with terms := db.terms.modify i fun t => { t with name } } else db
+
+/-- `prove db`: what the prover reads from a proof file, with timings. -/
+def proveDb (path : String) (args : List String) : IO UInt32 := do
+  let bytes ← IO.FS.readBinFile path
+  let t0 ← IO.monoNanosNow
+  let file ←
+    match Mmb.MmbFile.parse bytes with
+    | .ok file => pure file
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let some db ← withSpecNames db file args | return 1
+  let t1 ← IO.monoNanosNow
+  let ms (a b : Nat) : String := s!"{(b - a) / 1000000} ms"
+  let nodes := db.asserts.foldl (init := 0) fun n a => a.hyps.foldl (init := n + a.concl.size) (· + ·.size)
+  let pairs := db.asserts.foldl (init := 0) fun n a => n + a.disjs.size
+  IO.println s!"{path}: {db.terms.size} terms, {db.asserts.size} assertions, {nodes} expression nodes, \
+    {pairs} pairs of binders to keep apart ({ms t0 t1})"
+  -- the index is built when its size is printed: a pure value is computed where it is used
+  let t1 ← IO.monoNanosNow
+  let index := db.index
+  IO.print s!"index of the conclusions: {index.nodes.size} nodes"
+  let t2 ← IO.monoNanosNow
+  IO.println s!" ({ms t1 t2})"
+  -- the proofs as trees of assertions
+  let mut steps := 0
+  let mut proofs := 0
+  let mut withConv := 0
+  let mut biggest := 0
+  let mut over : Array Nat := #[0, 0, 0, 0]
+  for s in file.stmts do
+    if let .thm _ := s.kind then
+      match db.skeleton s with
+      | .error msg =>
+        IO.eprintln s!"{path}: theorem {file.thmName s.index}: {msg}"
+        return 1
+      | .ok none => withConv := withConv + 1
+      | .ok (some sk) =>
+        let n := sk.size 100000000
+        proofs := proofs + 1
+        steps := steps + n
+        biggest := max biggest n
+        for k in [0:4] do
+          if n > #[100, 1000, 10000, 100000][k]! then over := over.modify k (· + 1)
+  let t3 ← IO.monoNanosNow
+  IO.println s!"proofs: {proofs} as trees of {steps} steps, the largest {biggest}, {withConv} with a shared conversion left out; \
+    more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
+  -- the congruence procedure's table (`Prove/Congr.lean`)
+  let t4 ← IO.monoNanosNow
+  let tb := Prove.CongrTable.ofDb db
+  let n := tb.lemmas.fold (init := 0) fun acc _ ls => acc + ls.size
+  let terms := tb.lemmas.fold (init := ({} : Std.HashSet Nat)) fun acc k _ => acc.insert k.1
+  let ded := tb.lemmas.fold (init := 0) fun acc k ls => if k.2.2 then acc + ls.size else acc
+  IO.println s!"congruence lemmas: {n} for {terms.size} terms, {ded} in the deduction form; {tb.refl.size} reflexivity lemmas ({ms t4 (← IO.monoNanosNow)})"
+  -- the ring procedure's table (`Prove/Ring.lean`)
+  let t5 ← IO.monoNanosNow
+  let rt := Prove.RingTable.ofDb db
+  let tn (k : Nat) : String := (db.terms[k]?.map (·.name)).getD s!"t{k}"
+  let an (k : Nat) : String := (db.asserts[k]?.map (·.name)).getD s!"a{k}"
+  let sh (e : Prove.Exp) : String := if e.nodes.isEmpty then "none" else db.showExp e
+  let op (o : Prove.RingOp) : String :=
+    tn o.term ++ (if o.fixed.isEmpty then "" else s!"[{", ".intercalate (o.fixed.map fun (_, f) => sh f).toList}]")
+  for rg in rt.rings do
+    IO.println s!"ring: {tn rg.eq} over {op rg.add} and {op rg.mul}, zero {sh rg.zero}, one {sh rg.one}, \
+      negation {(rg.neg.map op).getD "none"}, subtraction {(rg.sub.map op).getD "none"}, \
+      carrier {(rg.carrier.map fun (_, c) => sh c).getD "none"}; {rg.rules.size} rules, transitivity \
+      {(rg.trans.toList.map fun (d, k) => s!"{an k}{if d then "/d" else ""}") ++ (rg.trans4.toList.map fun (d, k) => s!"{an k}{if d then "/d" else ""}")}, \
+      symmetry {rg.symm.toList.map fun (d, k) => s!"{an k}{if d then "/d" else ""}"}"
+  IO.println s!"ring tables: {rt.rings.size} rings, lift {(rt.lift.map an).getD "none"}, {rt.closure.size} closure lemmas of operations, \
+    {rt.constClosure.size} of constants ({ms t5 (← IO.monoNanosNow)})"
+  return 0
 
 /-- `prove variants`: how many variants the goal nodes on the paths of the known proofs
 have (`Prove/Measure.lean`). -/
@@ -1204,7 +1221,7 @@ def main (args : List String) : IO UInt32 := do
     return code
   | ["verify", path] => verifyMmb path
   | ["verify", mm0, mmb] => verifyPair mm0 mmb
-  | ["prove", "db", path] => proveDb path
+  | "prove" :: "db" :: path :: rest => proveDb path rest
   | "dsl" :: rest =>
     match ← Prove.Dsl.loadTactics (strOption rest "--tactics") with
     | .ok defs =>

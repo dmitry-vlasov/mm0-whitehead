@@ -33,6 +33,7 @@ head of each.
 | Value of goals | 2026-10-19 | +5% at 1 s and +3% at 5 s, losing nothing; +10% at 5 s if mm0 may lose a fifth |
 | The subgoal bench: what search closes of the subgoals of known proofs | 2026-10-21 | `learned` 67% in 100 ms, 72% in 500 ms; the failures are binders and the theorem's own matter; procedures can add 7.5 points at most |
 | `congr`, the congruence procedure as a replayed skeleton | 2026-10-21 | mm0 **+8%** at 1 s (249 against 230, the best so far); set.mm unchanged |
+| `ring`, identities of a commutative ring by normalization | 2026-10-21 | peano +1 point of subgoals; set.mm unchanged: its failed "arithmetic identities" are numerals, division and `abs`, not ring identities |
 
 ## 1. The engine without guidance
 
@@ -426,6 +427,17 @@ of the equality subgoals of set.mm's test part; inside `learned` it changes noth
 (66% against 67% on the bench; 81 and 101 against 83 and 103 in search). On mm0, whose
 failures were 13-step congruence chains, the search proves 249 of 491 at 1 s against 230,
 above `guided` (244); the compiler stays at 505.
+
+**`ring`, the second procedure** (`Ring.lean`): the file's rings mined by shape (set.mm:
+the complex numbers with 41 rules, the surreals, Boolean algebras, and foreign pairs with
+a distributivity), both sides of `[ph ->] L = R` normalized to a right-nested sum of
+ordered monomials by the file's own lemmas, each step a congruence down to its position,
+the closure hypotheses planned down to the atoms. On peano it proves the identities it is
+made for (`addrass`, `mullass`, `addlass` from the lemmas before them) and adds a point
+on the bench (76% against 75%; `=` 75% against 72%). On set.mm nothing moves (67%; 85 at
+1 s): the dump of the failed arithmetic identities shows numerals and like terms (`(3·x)
++ x = 4·x`), division and `abs`, which the first version does not do, and few ring
+identities proper.
 
 ## 8. What the experiments say, together
 

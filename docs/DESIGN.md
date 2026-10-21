@@ -3004,6 +3004,75 @@ the twenties at most without measuring; on mm0, the congruence family back.
 - **Measured by** the subgoal bench's class "arithmetic identity under closure
   hypotheses": 120 of 195 fail on the test part, 124 of 252 on the first 90%.
 
+**Built, 2026-10-21: `ring`** (`Prove/Ring.lean`, the guide `ring`, the tactic `arith` =
+`congruent` with `follow(ring, at=open, chain=true)` first):
+- **The table, by shape:** an operation is a term with fixed arguments (set.mm's
+  `co x y caddc`, the symbol an argument; peano's `add x y`); a rule is `[ph ->] L = R`
+  over distinct variables whose hypotheses are closure facts `[ph ->] x ∈ S` of them, or
+  none (peano, where `nat` is a sort); a ring is an addition and a multiplication with a
+  distributivity between them, and the shapes attached to its operations: commutativity,
+  associativity, left commutativity, the units, the absorbing zero, and for a negation the
+  inverse, the double negation, the definition of subtraction, the negation of a sum and of
+  a product. Besides: transitivity in both variants (`eqtrd`: `x = y, y = z`; `eqtr4i`:
+  `x = y, z = y`, which joins two chains that end alike), symmetry, the lift of a plain
+  statement under an antecedent (`a1i`), the closure lemmas of operations (`addcld`) and
+  constants (`1cnd`), in the deduction form.
+- **Lemmas stated as implications** (`oveq1`, peano's `addeq2`, curried for several
+  hypotheses) are now read by the congruence table as a third form and applied by the
+  file's modus ponens, mined by shape (`ax-mp`, `ax_mp`); a hypothesis form is preferred
+  where the file has one. Peano states its congruences only so.
+- **The normal form:** a sum nested to the right of monomials in a fixed order, each a
+  product nested to the right of atoms in order, negated at most as a whole; subtraction
+  eliminated, negation pushed to the monomials, products distributed, units and the zero
+  removed, a monomial and its negation side by side cancelled. Like monomials are not
+  collected, and numerals other than the units are atoms. The strategy works inside out,
+  one rule at a position per step, with the rules the theorem may use: where a file lacks
+  left commutativity it goes by associativity backwards, commutativity inside,
+  associativity forward (peano's `addlass` and `mullass`, the rules themselves, are proved
+  so).
+- **The skeleton:** the two chains of steps joined by transitivity, each step the
+  congruence down to its position ending in the rule, backwards by symmetry, lifted if
+  plain under an antecedent, its closure hypotheses planned down the structure of the
+  term to the atoms, which stay open for the search.
+- **Tests on peano:** the ring (`add`, `mul`, `d0`, `d1`, no negation, no carrier; the
+  rules `addcom`, `addass`, `addlass`, `add0`, `add01`, `mulcom`, `mulass`, `mul12`,
+  `mul0`, `muladd`, `addmul`; `eqtr4i`, `eqcomi`, `eqtrd`, `a1i`), the normalization of
+  `addrass`'s sides to one normal form, and `follow(ring, at=root)` proving `addrass`,
+  `mullass` and `addlass`.
+- **The tables** (`prove db`): set.mm has 46 "rings" by shape, among them the complex
+  numbers (`wceq over co[caddc] and co[cmul], zero cc0, one c1, negation cneg,
+  subtraction co[cmin], carrier cc; 41 rules`), the surreal numbers (`cadds`, `cmuls`,
+  `c0s`, `c1s`, carrier `csur`), the decimal construction, Boolean algebras of `iff` over
+  `an` and `or`, and foreign pairs that satisfy a distributivity (`·` with `↑`, since
+  exponentiation distributes over multiplication; `min` with `+`), plus 34 closure lemmas
+  of operations and 8 of constants. A goal is planned with every ring whose equality it
+  has, the one that reads most of it first, so the foreign ones cost a failed plan at
+  most. Shapes are read in both directions (`negsubd` states `A + -B = A - B`, the reverse
+  of the subtraction's definition) and a reversed lemma is applied by symmetry; without
+  this, set.mm's subtraction was not in the ring. Peano has 21, mm0 39.
+- **Measured** (the subgoal bench at 100 ms, the search at 1 s):
+
+  | | set.mm test part | peano (every 10th) | mm0 test part |
+  |---|---|---|---|
+  | bench, `follow(ring, at=root)` alone | 1% (68 of 6,436) | 5% (84 of 1,567; `=` 15%) | |
+  | bench, `congruent` → `arith` | 67% → 67% (4,330 → 4,340) | 75% → 76% (1,182 → 1,202; `=` 72% → 75%) | |
+  | search at 1 s | 81–85, noise | 104, as `congruent` | 249 → 250 |
+
+  - **On set.mm nothing moves,** and the dump of the failed "arithmetic identities" says
+    why: most are not ring identities. They need numeral arithmetic and like terms
+    collected (`(3·x) + x = 4·x`, `2·s = s + s`, `4 = 3 + 1`), division (`x / y = x · (1 /
+    y)`), `abs`, or a fact of the context (`A − B = 0` from `A = B`); the genuine one in the
+    sample, `((3 + 1)·x) = (3·x) + x`, plans and closes. The classifier by terms
+    overstated the kind: the one the search is bad at is *arithmetic with numerals*, not
+    ring normalization.
+  - **On peano `ring` adds a point** of the determined subgoals, and three of the `=`
+    goals in a hundred; `arith` is what the gap-filler bench on peano should use.
+- **What `ring` would need to matter on set.mm:** numeral arithmetic (set.mm's `dec*`
+  lemmas and `3p1e4`-style facts), like terms collected with numeral coefficients, and
+  division as multiplication by the inverse with the side condition `≠ 0`: the full
+  `ring`/`field` of a proof assistant, a project of its own, for about 2% of the
+  determined subgoals.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

@@ -690,6 +690,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    replays. Done: `at`, `range`, the subgoal bench (`prove subgoals`: `learned` closes
    67% of the determined subgoals of set.mm's test proofs in 100 ms; the failures are
    binders and the theorem's own matter, procedures can add 7.5 points at most); `congr`
-   (mm0 +8% at 1 s, 249 against 230; set.mm unchanged). Next: `ring`, then `taut`, set
-   algebra and `order` if the gap-filler bench asks; the combinators `within`, `then`,
-   `alt`, run-time calls; labels as tags; `auto` at the top.
+   (mm0 +8% at 1 s, 249 against 230; set.mm unchanged); `ring` (peano +1 point of
+   subgoals; set.mm unchanged, its failed arithmetic being numerals, division and `abs`,
+   not ring identities). Open: numeral arithmetic for `ring`; `taut`, set algebra and
+   `order` if the gap-filler bench asks; the combinators `within`, `then`, `alt`,
+   run-time calls; labels as tags; `auto` at the top.
