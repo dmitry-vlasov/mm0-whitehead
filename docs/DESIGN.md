@@ -2819,7 +2819,29 @@ sets exported again, the models trained again (`m1`, `v3`).
   local, and the choice is of the lemma — what the proof is about. The next lever is a
   prior per theorem, as the plan had it and as premise selection does (MaSh): the
   assertions used by the proofs of the earlier theorems whose statements resemble this
-  one. Not built so far.
+  one.
+
+**Step 6, the prior per theorem (2026-10-22; `Prior.lean`).** The statements of the file
+as weighted term vectors (a term's weight its rarity; terms in more than a fifth of the
+statements left out), an inverted index, and the assertions each proof uses. For a
+theorem, its 100 nearest earlier theorems by cosine similarity each vote with their
+similarity for the assertions of their proofs; the vote is a feature of the step
+(`prior_knn`, and `prior_hit` whether there is one; 30 features). Only earlier theorems
+count, so the test stays out of sample.
+- **Offline it is the strongest feature:** 37% of the trees' gain, `prior_hit` 13% more,
+  recency 9% (it had 42%). The known step is first at 83.6% on set.mm's test part (81.8%
+  before), 67.9% on mm0 (66.2%), 73.4% on the compiler (72.6%); in the first 5 at 95.8%
+  (94.8%).
+- **In search** (`m2`, with the value `v3`): set.mm 83 at 1 s and **89 with the value**
+  (85 before), 104 and **105** at 5 s (102, 101); mm0 249; peano 113 (110); the compiler
+  505. A few points, in the direction the offline gain promised, and the best set.mm
+  numbers so far with `learned(value=4)`.
+- **Where it helps most is where the rank was weakest:** the known step is first at 70.5%
+  where it brings three or more new variables (66.2% before), in the first 5 at 90.1%
+  (86.9%); where the goal has metavariables, 80.3% (78.0%); where it has none, 87.4%
+  (86.4%). The lemma the proof is about is what the neighbours know.
+- **Cost:** the prior of a theorem is one query, a few milliseconds, at the start of its
+  search; the index of set.mm takes a second to build.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

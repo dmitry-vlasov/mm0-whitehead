@@ -695,6 +695,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    not ring identities). The gap filler's 53 holes refilled offline: the agent's own
    variables read now (51 of 53), the procedures at the root then the old default fill
    12 against 11; the rest are order, divisibility, existentials and the theorems'
-   substance. Open: numeral arithmetic for `ring`; `order`; `taut` and set algebra; the
-   combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the
-   top.
+   substance. The learned layer again (steps 5–6): features of the step's other goals
+   (the value's AUC 0.834 → 0.859, nothing in search) and a prior per theorem, k-NN
+   premise selection by the statements (the strongest feature; set.mm's test part 89 at
+   1 s and 105 at 5 s with `learned(value=4)`, the best so far). Open: `order`; numeral
+   arithmetic for `ring`; `taut` and set algebra; the combinators `within`, `then`,
+   `alt`, run-time calls; labels as tags; `auto` at the top.
