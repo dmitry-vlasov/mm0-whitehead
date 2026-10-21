@@ -32,7 +32,7 @@ def replay (rails : Rails) (cfg : ReplayConfig) (seeds : RailSeeds := .open) : S
       for h in goals do
         if seeded.contains h then continue
         seeded := seeded.insert h
-        for k in rails.at_ env h cfg do pending := pending.push (h, k)
+        for k in rails.at_ env h cfg do pending := pending.push (h, Fragment.indexed k)
       st := { st with seeded, looked := env.hyps.size, started := true, pending }
       if pending.isEmpty then return (.done, st)
       let (items', st'') := replayStep rails env st
@@ -116,7 +116,7 @@ def rails (r : Rails) (cfg : RailsConfig) : Strategy RailsState where
         cost := cost'
         if c > cfg.upto then continue
         seeded := seeded.insert h
-        for k in r.at_ env h cfg.replay do pending := pending.push (h, k)
+        for k in r.at_ env h cfg.replay do pending := pending.push (h, Fragment.indexed k)
       rs := { rs with seeded, looked := env.hyps.size, pending }
       st := { st with cost }
       let (items', rs') := replayStep r env rs

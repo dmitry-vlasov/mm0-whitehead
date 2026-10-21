@@ -20,6 +20,7 @@ import Tests.Prove.Session
 import Tests.Prove.Filter
 import Tests.Prove.Hints
 import Tests.Prove.Rails
+import Tests.Prove.Congr
 import Tests.Prove.Tactics
 import Tests.Prove.Mm1
 import Tests.Prove.Dataset
@@ -50,6 +51,7 @@ def main : IO UInt32 := do
     Tests.Prove.subproofTests
     Tests.Prove.hintTests
     Tests.Prove.railsTests
+    Tests.Prove.congrTests
     Tests.Prove.tacticsTests
     Tests.Prove.mm1Tests
     Tests.Prove.datasetTests

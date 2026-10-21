@@ -25,6 +25,7 @@ goal, by which rank, from what size, and from which proofs. Where they are put d
 -/
 import Whitehead.Prove.Subproofs
 import Whitehead.Prove.Cost
+import Whitehead.Prove.Congr
 
 namespace Whitehead.Prove
 
@@ -83,6 +84,8 @@ structure Rails where
   /-- The conclusions that are not a bare variable, each ranked so that a theorem finds
   only the subproofs of the proofs before it. -/
   index : Index Nat
+  /-- The congruence and reflexivity lemmas of the file, for the guide `congr`. -/
+  congr : CongrTable := {}
   deriving Inhabited
 
 namespace Rails
@@ -97,7 +100,7 @@ def ofDb (db : Db) : Rails := Id.run do
   for k in [1:sp.nodes.size] do
     if let some l := lemmas[k]! then
       if !l.concl.isVar then ix := ix.insert l.concl k (2 * sp.first[k]! + 2)
-  return { sp, concl, hyps, index := ix }
+  return { sp, concl, hyps, index := ix, congr := CongrTable.ofDb db }
 
 /-- How many hypotheses of subproof `k`'s lemma, put down at goal `goal`, no premise of
 the theorem of `env` fits. A hypothesis is judged on its own, under the unifier of the
@@ -164,42 +167,59 @@ def Env.isBackwardGoal (env : Env) (h : Nat) : Bool := Id.run do
     | none => return false
   return false
 
-/-- The state of a replay: the subproofs to put down, each at a goal node; the assertion
-nodes expanded in the last step, each with its subproof, whose premises come next; the
+/-- A fragment to follow: a subproof of the index, by its node; or a proof that a procedure
+computed, as the assertions it applies and how they nest (`Skeleton`), a hypothesis leaf
+being a goal it leaves open. -/
+inductive Fragment where
+  | indexed (k : Nat)
+  | computed (sk : Skeleton)
+  deriving Inhabited
+
+/-- The top of a fragment: its assertion, and for each premise the fragment below, none
+where it leaves the goal open. -/
+def Rails.fragTop (rails : Rails) : Fragment → Option (Nat × Array (Option Fragment))
+  | .indexed k =>
+    let (a, kids) := rails.sp.nodes[k]!
+    some (a, kids.map fun c => if c == 0 then none else some (.indexed c))
+  | .computed (.step a cs) => some (a, cs.map fun c => match c with | .hyp _ => none | s => some (.computed s))
+  | .computed (.hyp _) => none
+
+/-- The state of a replay: the fragments to put down, each at a goal node; the assertion
+nodes expanded in the last step, each with its fragment, whose premises come next; the
 goal nodes looked at; and how far the goal nodes have been looked at. -/
 structure ReplayState where
-  pending : Array (Nat × Nat) := #[]
-  expanding : Array (Nat × Nat) := #[]
+  pending : Array (Nat × Fragment) := #[]
+  expanding : Array (Nat × Fragment) := #[]
   seeded : Std.HashSet Nat := {}
   looked : Nat := 0
   started : Bool := false
   deriving Inhabited
 
-/-- One step of a replay: the premises of what was expanded, then each pending subproof's
+/-- One step of a replay: the premises of what was expanded, then each pending fragment's
 top assertion at its goal. Returns the assertion nodes to expand and the state. -/
 def replayStep (rails : Rails) (env : Env) (st : ReplayState) : Array Nat × ReplayState := Id.run do
   let mut pending := st.pending
-  for (p, k) in st.expanding do
-    let kids := rails.sp.nodes[k]!.2
+  for (p, f) in st.expanding do
+    let some (_, kids) := rails.fragTop f | continue
     let goals := env.props[p]!.children
     for i in [0:min kids.size goals.size] do
-      if kids[i]! != 0 then pending := pending.push (goals[i]!, kids[i]!)
+      if let some c := kids[i]! then pending := pending.push (goals[i]!, c)
   let mut items := #[]
   let mut expanding := #[]
-  for (h, k) in pending do
-    let a := rails.sp.nodes[k]!.1
-    -- the variant for the subproof's assertion; none: this branch of the fragment ends
+  for (h, f) in pending do
+    let some (a, _) := rails.fragTop f | continue
+    -- the variant for the fragment's assertion; none: this branch of the fragment ends
     match env.hyps[h]!.children.find? fun p => env.props[p]!.step == .assertion a with
     | none => pure ()
     | some p =>
       if !env.props[p]!.expanded && !items.contains p then items := items.push p
-      expanding := expanding.push (p, k)
+      expanding := expanding.push (p, f)
   return (items, { st with pending := #[], expanding })
 
 /-- Subproofs `pairs`, each put down at its goal node, and followed; then done. -/
 def Strategy.replayFrom (rails : Rails) (pairs : Array (Nat × Nat)) : Strategy ReplayState where
   root := none
-  init := { pending := pairs, started := true }
+  init := { pending := pairs.map fun (h, k) => (h, .indexed k), started := true }
   step env st :=
     let (items, st) := replayStep rails env st
     if items.isEmpty && st.expanding.isEmpty then (.done, st) else (.expand (items.map (·, none)) .follow, st)
@@ -214,14 +234,20 @@ inductive Guide where
   /-- The theorem's own proof, when it is a theorem of the file (`oracle` does the same
   from the proof's statements): for tests. -/
   | proof
+  /-- Congruence: the goal `[ph ->] L = R` or `L <-> R` rewritten by the file's congruence
+  lemmas down to where its sides differ (`Congr.lean`). -/
+  | congr
   deriving Inhabited, Repr
 
 /-- The fragments of guide `g` for goal node `h`. -/
-def Guide.at_ (g : Guide) (r : Rails) (env : Env) (h : Nat) : Array Nat :=
+def Guide.at_ (g : Guide) (r : Rails) (env : Env) (h : Nat) : Array Fragment :=
   match g with
-  | .subproofs cfg => r.at_ env h cfg
+  | .subproofs cfg => (r.at_ env h cfg).map .indexed
   | .proof => match r.sp.roots.find? (·.1 == env.task.limit) with
-    | some (_, k) => #[k]
+    | some (_, k) => #[.indexed k]
+    | none => #[]
+  | .congr => match r.congr.planGoal env.task.limit env.hyps[h]!.expr with
+    | some sk => #[.computed sk]
     | none => #[]
 
 /-- Where `follow` puts fragments down. -/
