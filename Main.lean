@@ -1217,9 +1217,11 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
       byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
   let task := { db.task thm with goal, metas, consts := (db.task thm).consts ++ extraConsts }
   let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses }
-  -- by default the proofs of one or two steps first, which guided may miss for a longer
-  -- one that a rail gives: a gap is short, and its term is read
-  let tacticText := (strOption args "--tactic").getD "seq(bfs(size=20000, depth=2), guided)"
+  -- by default the procedures at the root first (ring, congruence: a hole that is an
+  -- identity closes in milliseconds), then the proofs of one or two steps, which guided
+  -- may miss for a longer one that a rail gives: a gap is short, and its term is read
+  let tacticText := (strOption args "--tactic").getD
+    "first(follow(ring, at=root), follow(congr, at=root), seq(bfs(size=20000, depth=2), guided))"
   let model ← match strOption args "--model" with
     | none => pure none
     | some p => match ← Prove.Model.load p with

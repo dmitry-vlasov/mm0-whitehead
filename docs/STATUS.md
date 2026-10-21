@@ -692,6 +692,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    binders and the theorem's own matter, procedures can add 7.5 points at most); `congr`
    (mm0 +8% at 1 s, 249 against 230; set.mm unchanged); `ring` (peano +1 point of
    subgoals; set.mm unchanged, its failed arithmetic being numerals, division and `abs`,
-   not ring identities). Open: numeral arithmetic for `ring`; `taut`, set algebra and
-   `order` if the gap-filler bench asks; the combinators `within`, `then`, `alt`,
-   run-time calls; labels as tags; `auto` at the top.
+   not ring identities). The gap filler's 53 holes refilled offline: the agent's own
+   variables read now (51 of 53), the procedures at the root then the old default fill
+   12 against 11; the rest are order, divisibility, existentials and the theorems'
+   substance. Open: numeral arithmetic for `ring`; `order`; `taut` and set algebra; the
+   combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the
+   top.

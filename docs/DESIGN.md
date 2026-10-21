@@ -2450,6 +2450,39 @@ the same limits:
 - **Not tried:** goals under the agent's own variables (extra variables in the task);
   better ranks, so that the search reaches further.
 
+**The gap filler again, offline (2026-10-21).** The 53 holes of the hybrid agent's runs
+(their statements, from the `fill` reports in the transcripts) refilled with each tactic
+at 5 s, no agent and no tokens:
+- **The agent's own variables** (16 of the 53 holes, "unknown variable or term `y`") are
+  now variables of the task: a name the theorem does not have gets a sort by trial, regular
+  before bound, the last name's moving fastest, since the parser meets a name before it
+  checks the sorts around it (`Notation.formula`'s `extra`, `Task.consts` extended, the
+  printer naming it). 51 of the 53 read now; the two left have metavariables. `suc y <
+  len (a : l) -> y < len l` is proved in 40 ms.
+- **Filled, of the 51** (the old default is `seq(bfs(size=20000, depth=2), guided)`):
+
+  | filler | filled |
+  |---|---|
+  | the old default | 11 (8 of the 37 that read before) |
+  | `guided` | 11 |
+  | `learned`, `congruent` | 7 |
+  | `arith` (the procedures, then `learned`) | 8 |
+  | `procedural` (the procedures, then `guided`), alone | 11 |
+  | **the procedures at the root, then the old default** — the new default | **12** |
+
+  - **The procedures add one hole,** `b * suc q + 0 = b * q + b`, the only ring identity
+    among them, once `ring` reads peano's successor as `+ 1` (`add12`). The other holes
+    are order and divisibility (`0 < c -> a < b -> a·c < b·c`, `n ∥ a -> n ∥ b -> n ∥ a + b`),
+    existentials, pairs, and the substance of the theorems (`a + x = b -> b + y = a -> a =
+    b`): `order` territory, or none.
+  - **The learned rank hurts on peano** (7 against 11): the model is set.mm's. For a file it
+    was not trained on, `guided` or `procedural`.
+  - **A breadth-first prefix of 20,000 nodes before the procedures** loses the ring hole
+    (`seq(bfs(size=20000, depth=2), procedural)`: not in 5 s; with 2,000 nodes, 37 ms;
+    the procedures first, 22 ms): the procedures belong before the search.
+- **Not run again:** the agent itself. The offline refill says what the new filler would
+  give it: one more hole of 51, and 14 holes that read where they did not.
+
 ### The learned ranking layer (a plan of 2026-10-18)
 
 **Why now:** an LLM agent pays for every call, so it should be called rarely, and at the

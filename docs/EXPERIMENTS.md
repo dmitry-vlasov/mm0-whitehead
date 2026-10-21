@@ -34,6 +34,7 @@ head of each.
 | The subgoal bench: what search closes of the subgoals of known proofs | 2026-10-21 | `learned` 67% in 100 ms, 72% in 500 ms; the failures are binders and the theorem's own matter; procedures can add 7.5 points at most |
 | `congr`, the congruence procedure as a replayed skeleton | 2026-10-21 | mm0 **+8%** at 1 s (249 against 230, the best so far); set.mm unchanged |
 | `ring`, identities of a commutative ring by normalization | 2026-10-21 | peano +1 point of subgoals; set.mm unchanged: its failed "arithmetic identities" are numerals, division and `abs`, not ring identities |
+| The gap filler's 53 holes refilled offline | 2026-10-21 | the agent's own variables now read (51 of 53); the procedures first fill 12, the old default 11; the rest is order, divisibility, existentials and the theorems' substance |
 
 ## 1. The engine without guidance
 
@@ -438,6 +439,14 @@ on the bench (76% against 75%; `=` 75% against 72%). On set.mm nothing moves (67
 1 s): the dump of the failed arithmetic identities shows numerals and like terms (`(3·x)
 + x = 4·x`), division and `abs`, which the first version does not do, and few ring
 identities proper.
+
+**The gap filler's holes, refilled offline** (`DESIGN.md`, "The gap filler again"): the 53
+holes the hybrid agent left, from its transcripts, each tactic at 5 s. A name of the
+agent's own in a hole (16 holes) is now a variable of the task, its sort found by trial:
+51 of 53 read. The old default fills 11, `learned` 7 (the model is set.mm's), the
+procedures at the root then the old default 12 — the one ring identity among the holes.
+The rest are order and divisibility facts, existentials, pairs and the theorems' own
+steps.
 
 ## 8. What the experiments say, together
 
