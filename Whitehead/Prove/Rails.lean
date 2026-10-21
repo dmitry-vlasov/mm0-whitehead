@@ -26,6 +26,7 @@ goal, by which rank, from what size, and from which proofs. Where they are put d
 import Whitehead.Prove.Subproofs
 import Whitehead.Prove.Cost
 import Whitehead.Prove.Congr
+import Whitehead.Prove.Ring
 
 namespace Whitehead.Prove
 
@@ -86,6 +87,8 @@ structure Rails where
   index : Index Nat
   /-- The congruence and reflexivity lemmas of the file, for the guide `congr`. -/
   congr : CongrTable := {}
+  /-- The rings of the file, for the guide `ring`. -/
+  ring : RingTable := {}
   deriving Inhabited
 
 namespace Rails
@@ -100,7 +103,7 @@ def ofDb (db : Db) : Rails := Id.run do
   for k in [1:sp.nodes.size] do
     if let some l := lemmas[k]! then
       if !l.concl.isVar then ix := ix.insert l.concl k (2 * sp.first[k]! + 2)
-  return { sp, concl, hyps, index := ix, congr := CongrTable.ofDb db }
+  return { sp, concl, hyps, index := ix, congr := CongrTable.ofDb db, ring := RingTable.ofDb db }
 
 /-- How many hypotheses of subproof `k`'s lemma, put down at goal `goal`, no premise of
 the theorem of `env` fits. A hypothesis is judged on its own, under the unifier of the
@@ -237,6 +240,9 @@ inductive Guide where
   /-- Congruence: the goal `[ph ->] L = R` or `L <-> R` rewritten by the file's congruence
   lemmas down to where its sides differ (`Congr.lean`). -/
   | congr
+  /-- The identities of a commutative ring: both sides of `[ph ->] L = R` normalized by
+  the file's own lemmas (`Ring.lean`). -/
+  | ring
   deriving Inhabited, Repr
 
 /-- The fragments of guide `g` for goal node `h`. -/
@@ -247,6 +253,9 @@ def Guide.at_ (g : Guide) (r : Rails) (env : Env) (h : Nat) : Array Fragment :=
     | some (_, k) => #[.indexed k]
     | none => #[]
   | .congr => match r.congr.planGoal env.task.limit env.hyps[h]!.expr with
+    | some sk => #[.computed sk]
+    | none => #[]
+  | .ring => match r.ring.planGoal r.congr env.task.limit env.hyps[h]!.expr with
     | some sk => #[.computed sk]
     | none => #[]
 

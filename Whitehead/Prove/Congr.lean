@@ -15,8 +15,10 @@ distinct. In the deduction form the antecedent is one variable `ph`, first in ev
 hypothesis and in the conclusion, under whatever term the file uses for the implication
 (`wi`, `im`). A reflexivity lemma has no hypotheses and concludes `[ph ->] x R x`. So
 set.mm's `oveq1d`, `fveq2d`, `eleq1d`, `anbi12d`, `eqidd`, `biidd` and peano's `oreq1d`,
-`aneqd`, `eqidd` are read, each with the positions it rewrites; the implication forms
-(`oveq1`, `A = B -> …`) are not, yet.
+`aneqd`, `eqidd` are read, each with the positions it rewrites. A lemma stated as an
+implication without hypotheses (`oveq1`: `A = B -> (A F C) = (B F C)`; peano's `addeq2`;
+curried for several) is read too, and applied by the file's modus ponens (`ax-mp`,
+`ax_mp`: hypotheses `x` and `x -> y`, mined by shape), one application a hypothesis.
 
 The procedure's proof is a skeleton (`Skeleton`), replayed by `follow` (`Rails.lean`): the
 engine makes the substitutions by unification and emits the proof, as the plan of
@@ -36,7 +38,21 @@ structure CongrLemma where
   positions : Array (Option Nat)
   /-- For each hypothesis, in order, the argument it rewrites. -/
   hypPos : Array Nat
+  /-- Stated as an implication, its hypotheses the antecedents: applied by modus ponens. -/
+  impl : Bool := false
   deriving Inhabited, Repr
+
+/-- A form in which an assertion states something: as it is; as a deduction, every
+hypothesis and the conclusion under one antecedent variable; or as a curried implication
+without hypotheses, the antecedents its hypotheses. -/
+structure Form where
+  ded : Bool := false
+  impl : Bool := false
+  /-- The connective of the deduction or the implication. -/
+  conn : Option Nat := none
+  hyps : Array Exp
+  concl : Exp
+  deriving Inhabited
 
 /-- The congruence and reflexivity lemmas of a file, by shape. -/
 structure CongrTable where
@@ -47,6 +63,8 @@ structure CongrTable where
   refl : Std.HashMap (Nat × Bool) Nat := {}
   /-- The term of the deduction form's antecedent, `ph -> …`, if the file has one. -/
   connective : Option Nat := none
+  /-- Modus ponens, `x, x -> y ⊢ y`: the lemma, and whether the premise comes first. -/
+  mp : Option (Nat × Bool) := none
   deriving Inhabited
 
 namespace CongrTable
@@ -67,25 +85,46 @@ def varApp (e : Exp) : Option (Nat × Array Nat) := do
   let (t, args) ← app e
   if args.all (·.isVar) then some (t, args.map fun a => Node.varId a.nodes[0]!) else none
 
-/-- The statements of `a` in its forms: the inference form as they are; and the deduction
-form, the antecedent variable and the connective stripped from every hypothesis and the
-conclusion, if they all have the same (`ded`, the connective, the hypotheses, the
-conclusion). -/
-def forms (a : Assertion) : Array (Bool × Option Nat × Array Exp × Exp) := Id.run do
-  let mut out := #[(false, none, a.hyps, a.concl)]
+/-- The statements of `a` in its forms: as they are; as a deduction, the antecedent
+variable and the connective stripped from every hypothesis and the conclusion, if they
+all have the same; and, without hypotheses, as a curried implication, its antecedents
+the hypotheses, under the connective the deduction form of the file uses (`conn`; any
+binary term if none is known). -/
+def forms (a : Assertion) (conn : Option Nat := none) : Array Form := Id.run do
+  let mut out := #[{ hyps := a.hyps, concl := a.concl : Form }]
   if let some (c, ante, body) := binary a.concl then
     if ante.isVar then
       let v := ante.nodes[0]!
       let hyps := a.hyps.filterMap fun h => match binary h with
         | some (c', ante', body') => if c' == c && ante'.isTheVar v then some body' else none
         | none => none
-      if hyps.size == a.hyps.size && !body.hasVar (Node.varId v) then out := out.push (true, some c, hyps, body)
+      if hyps.size == a.hyps.size && !body.hasVar (Node.varId v) then
+        out := out.push { ded := true, conn := some c, hyps, concl := body }
+  if a.hyps.isEmpty then
+    if let some (c, h, rest) := binary a.concl then
+      if conn.all (· == c) then
+        let mut hyps := #[h]
+        let mut body := rest
+        for _ in [0:8] do
+          match binary body with
+          | some (c', h', rest') => if c' == c then hyps := hyps.push h'; body := rest' else break
+          | none => break
+        -- every prefix of the antecedents is a reading: `x -> y -> z` states `z` from
+        -- `x, y`, and `y -> z` from `x`
+        let mut b := body
+        let mut hs := hyps
+        for _ in [0:hyps.size] do
+          out := out.push { impl := true, conn := some c, hyps := hs, concl := b }
+          let some last := hs.back? | break
+          hs := hs.pop
+          b := Exp.mkApp c a.concl.ty #[last, b]
   return out
 
 /-- The congruence lemma that `a` is, in one of its forms: the form, its connective, the
 term rewritten, the relation of the conclusion, and the lemma. -/
-def congrOf (a : Assertion) : Option (Bool × Option Nat × Nat × Nat × CongrLemma) := Id.run do
-  for (ded, conn, hyps, concl) in forms a do
+def congrOf (a : Assertion) (conn : Option Nat := none) : Option (Bool × Option Nat × Nat × Nat × CongrLemma) := Id.run do
+  for f in forms a conn do
+    let (ded, conn, hyps, concl) := (f.ded, f.conn, f.hyps, f.concl)
     if hyps.isEmpty then continue
     let some (rel, l, r) := binary concl | continue
     let some (t, ls) := varApp l | continue
@@ -112,40 +151,71 @@ def congrOf (a : Assertion) : Option (Bool × Option Nat × Nat × Nat × CongrL
     -- all the variables distinct: one for an argument that is the same, two for one that differs
     let vars := (ls ++ rs).foldl (init := (#[] : Array Nat)) fun acc v => if acc.contains v then acc else acc.push v
     if vars.size != ls.size + hypPos.size then continue
-    return some (ded, conn, t, rel, { id := a.id, positions, hypPos })
+    return some (ded, conn, t, rel, { id := a.id, positions, hypPos, impl := f.impl })
   return none
 
 /-- The reflexivity lemma that `a` is, in one of its forms: the form, its connective and
 the relation. -/
 def reflOf (a : Assertion) : Option (Bool × Option Nat × Nat) := Id.run do
   if !a.hyps.isEmpty then return none
-  for (ded, conn, _, concl) in forms a do
-    let some (rel, l, r) := binary concl | continue
-    if l.isVar && l == r then return some (ded, conn, rel)
+  for f in forms a do
+    if f.impl then continue
+    let some (rel, l, r) := binary f.concl | continue
+    if l.isVar && l == r then return some (f.ded, f.conn, rel)
   return none
+
+/-- Modus ponens, if `a` is it: `x, x -> y ⊢ y`, with whether the premise comes first. -/
+def mpOf (a : Assertion) : Option (Nat × Bool) := do
+  if a.hyps.size != 2 || !a.concl.isVar then none
+  let y := a.concl
+  let imp (h : Exp) (x : Exp) : Bool := match binary h with
+    | some (_, x', y') => x' == x && y' == y && x != y
+    | none => false
+  if a.hyps[0]!.isVar && imp a.hyps[1]! a.hyps[0]! then some (a.id, true)
+  else if a.hyps[1]!.isVar && imp a.hyps[0]! a.hyps[1]! then some (a.id, false)
+  else none
 
 /-- The table of a file. -/
 def ofDb (db : Db) : CongrTable := Id.run do
   let mut t : CongrTable := {}
+  -- the connective and modus ponens first: the implication forms are read under them
   for a in db.asserts do
     if a.pseudo.isSome then continue
-    if let some (ded, conn, term, rel, l) := congrOf a then
-      if ded && t.connective.isNone then t := { t with connective := conn }
+    if t.mp.isNone then t := { t with mp := mpOf a }
+    if t.connective.isNone then
+      if let some (true, conn, _, _, _) := congrOf a then t := { t with connective := conn }
+      else if let some (true, conn, _) := reflOf a then t := { t with connective := conn }
+  for a in db.asserts do
+    if a.pseudo.isSome then continue
+    if let some (ded, _, term, rel, l) := congrOf a t.connective then
       t := { t with lemmas := t.lemmas.alter (term, rel, ded) fun ls => some ((ls.getD #[]).push l) }
-    else if let some (ded, conn, rel) := reflOf a then
-      if ded && t.connective.isNone then t := { t with connective := conn }
+    else if let some (ded, _, rel) := reflOf a then
       if !t.refl.contains (rel, ded) then t := { t with refl := t.refl.insert (rel, ded) a.id }
   return t
 
 /-- The lemma before `limit` for term `t`, relation `rel` and form `ded` that rewrites the
-arguments `diffs`, and the fewest others. -/
+arguments `diffs`, and the fewest others; one with hypotheses before one stated as an
+implication, which needs modus ponens. -/
 def pick (tb : CongrTable) (limit t rel : Nat) (ded : Bool) (diffs : Array Nat) : Option CongrLemma :=
-  let fits (l : CongrLemma) : Bool := l.id < limit && diffs.all fun i => (l.positions[i]?.getD none).isSome
+  let fits (l : CongrLemma) : Bool := l.id < limit && diffs.all fun i => (l.positions[i]?.getD none).isSome &&
+    (!l.impl || tb.mp.any (·.1 < limit))
+  let better (l b : CongrLemma) : Bool :=
+    (!l.impl && b.impl) || (l.impl == b.impl && l.hypPos.size < b.hypPos.size)
   (tb.lemmas.getD (t, rel, ded) #[]).foldl (init := none) fun best l =>
     if !fits l then best
     else match best with
       | none => some l
-      | some b => if l.hypPos.size < b.hypPos.size then some l else some b
+      | some b => if better l b then some l else some b
+
+/-- The lemma applied to the proofs of its hypotheses: a step; for one stated as an
+implication, modus ponens on each antecedent in turn. -/
+def applyLemma (tb : CongrTable) (lem : CongrLemma) (children : Array Skeleton) : Skeleton :=
+  if !lem.impl then .step lem.id children
+  else match tb.mp with
+    | none => .hyp 0
+    | some (mp, premiseFirst) =>
+      children.foldl (init := Skeleton.step lem.id #[]) fun acc c =>
+        if premiseFirst then .step mp #[c, acc] else .step mp #[acc, c]
 
 /-- The reflexivity step for `rel` in form `ded`, from the lemmas before `limit`. -/
 def reflStep (tb : CongrTable) (limit rel : Nat) (ded : Bool) : Option Skeleton :=
@@ -166,7 +236,7 @@ partial def plan (tb : CongrTable) (limit : Nat) (ded : Bool) (rel : Nat) (l r :
       let ri := (lem.positions[i]?.getD none).getD 0
       if ls[i]! == rs[i]! then (tb.reflStep limit ri ded).getD (.hyp 0)
       else (plan tb limit ded ri ls[i]! rs[i]!).getD (.hyp 0)
-    some (.step lem.id children)
+    some (tb.applyLemma lem children)
 
 /-- The skeleton for goal `g` of a theorem numbered `limit`: in the inference form, or
 under the connective in the deduction form. -/

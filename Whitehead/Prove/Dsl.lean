@@ -259,7 +259,9 @@ def docs : Array Doc := #[
     "subproofs of earlier proofs that fit the goal: count of them; rank occurrences (in the most proofs before the theorem), size (the largest), small, reach (those leaving the fewest hypotheses that no premise fits first), specific (those whose conclusion has the most nodes that are not variables first) or recent (those in the latest proof before the theorem first); open: only those leaving at most N open; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two)"⟩,
   ⟨"proof", "guide", "proof", "the theorem's own proof, when it is one of the file: for tests"⟩,
   ⟨"congr", "guide", "congr",
-    "congruence: a goal L = R or L <-> R (or ph -> L = R) whose sides are applications of one term is rewritten by the file's congruence lemmas (mined by shape: oveq1d, fveq2d, eleq1d, ...) down to the arguments whose heads differ, which stay open; arguments that are the same are closed by reflexivity"⟩
+    "congruence: a goal L = R or L <-> R (or ph -> L = R) whose sides are applications of one term is rewritten by the file's congruence lemmas (mined by shape: oveq1d, fveq2d, eleq1d, ...) down to the arguments whose heads differ, which stay open; arguments that are the same are closed by reflexivity"⟩,
+  ⟨"ring", "guide", "ring",
+    "a goal L = R (or ph -> L = R) over an addition, a multiplication, a negation and a subtraction of the file (mined by shape: commutativity, associativity, distributivity, units, …) proved by normalizing both sides to one term; each step a congruence down to a position ending in one of the file's lemmas, whose closure hypotheses are closed by the file's closure lemmas down to the atoms, left open"⟩
 ]
 
 /-- The list of the components, by sort, and of the definitions. -/
@@ -494,6 +496,9 @@ partial def guide (c : Ctx) (a : Ast) : Except ParseError Guide := do
     | "congr" =>
       checkNames name args #[]
       return .congr
+    | "ring" =>
+      checkNames name args #[]
+      return .ring
     | _ =>
       match c.expand? name pos args with
       | some r =>

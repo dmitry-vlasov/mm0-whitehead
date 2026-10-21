@@ -21,6 +21,7 @@ import Tests.Prove.Filter
 import Tests.Prove.Hints
 import Tests.Prove.Rails
 import Tests.Prove.Congr
+import Tests.Prove.Ring
 import Tests.Prove.Tactics
 import Tests.Prove.Mm1
 import Tests.Prove.Dataset
@@ -52,6 +53,7 @@ def main : IO UInt32 := do
     Tests.Prove.hintTests
     Tests.Prove.railsTests
     Tests.Prove.congrTests
+    Tests.Prove.ringTests
     Tests.Prove.tacticsTests
     Tests.Prove.mm1Tests
     Tests.Prove.datasetTests
