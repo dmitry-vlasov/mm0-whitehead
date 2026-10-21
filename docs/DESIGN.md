@@ -2932,6 +2932,26 @@ the twenties at most without measuring; on mm0, the congruence family back.
     set algebra 53 (16%), numerals 37 (20%), tautologies 15 (14%); binders and the
     theorem's own matter are 86% of the failures. The order stands.
 
+**Built, 2026-10-21: `congr`** (`Prove/Congr.lean`, the guide `congr`, the tactic
+`congruent` = `learned` with `follow(congr, at=open, chain=true)` first):
+- **The table, by shape and not by name:** a congruence lemma has hypotheses `[ph ->] x R
+  y` over two distinct variables and a conclusion `[ph ->] (t … x …) R' (t … y …)`, the
+  same term on both sides over distinct variables, differing exactly where a hypothesis
+  says; a reflexivity lemma `[ph ->] x R x`. The deduction form is read under whatever
+  term the file uses for the implication. set.mm: 489 lemmas for 127 terms (277 in the
+  deduction form, 212 in the inference form: `oveq1d`, `fveq2i`, `eleq1d`, `anbi12d`,
+  `breq123d`, …) and 9 reflexivity lemmas (`eqid`, `eqidd`, `biid`, `biidd`, `ssid`,
+  `ssidd`, `id`, `idd`, `idn1`); mm0 783 for 287 terms; peano 405 for 155. Monotonicity
+  lemmas are read as congruences under `->` (`sseld`: `A ⊆ B` rewrites `C ∈ A` to
+  `C ∈ B`), which is sound, and may send a search where a human would not. The implication
+  forms (`oveq1`, `A = B -> …`) are not read yet.
+- **The plan** (`planGoal`): the lemma that rewrites the differing arguments with the
+  fewest others, then the same below, reflexivity where an argument is the same, an open
+  leaf where the heads differ. A `Skeleton`, replayed by `follow`: `Fragment` is now a
+  subproof of the index or a computed skeleton.
+- **Tests on peano:** the table, the plan `(oreqd h0 (biidd))` for `oreq1d`'s statement,
+  `follow(congr)` proving the one-sided lemmas from the two-sided ones.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

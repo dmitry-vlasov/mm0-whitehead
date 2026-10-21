@@ -315,6 +315,13 @@ def proveDb (path : String) : IO UInt32 := do
   let t3 ← IO.monoNanosNow
   IO.println s!"proofs: {proofs} as trees of {steps} steps, the largest {biggest}, {withConv} with a shared conversion left out; \
     more than 100 steps: {over[0]!}, 1,000: {over[1]!}, 10,000: {over[2]!}, 100,000: {over[3]!} ({ms t2 t3})"
+  -- the congruence procedure's table (`Prove/Congr.lean`)
+  let t4 ← IO.monoNanosNow
+  let tb := Prove.CongrTable.ofDb db
+  let n := tb.lemmas.fold (init := 0) fun acc _ ls => acc + ls.size
+  let terms := tb.lemmas.fold (init := ({} : Std.HashSet Nat)) fun acc k _ => acc.insert k.1
+  let ded := tb.lemmas.fold (init := 0) fun acc k ls => if k.2.2 then acc + ls.size else acc
+  IO.println s!"congruence lemmas: {n} for {terms.size} terms, {ded} in the deduction form; {tb.refl.size} reflexivity lemmas ({ms t4 (← IO.monoNanosNow)})"
   return 0
 
 /-- A line of a report, written at once also when the output is a file: a search can
