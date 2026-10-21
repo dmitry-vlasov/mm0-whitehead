@@ -213,6 +213,8 @@ def docs : Array Doc := #[
   ⟨"name", "filter", "name(G)",
     "the step's name matches G, in which * stands for any characters: the assertion's name, or the def's for an unfolding"⟩,
   ⟨"scope", "filter", "scope(a1, a2, ...)", "an assertion among these, by name"⟩,
+  ⟨"range", "filter", "range(A, B)",
+    "an assertion numbered A or more and less than B: a section of the file, such as set.mm's propositional calculus, range(0, 1533)"⟩,
   ⟨"kind", "filter", "kind(assertion | unfold | fold)", "the kind of step"⟩,
   ⟨"premises", "filter", "premises(N) | premises(min=N, max=N)",
     "the number of premises of the step: of its new goals, backward"⟩,
@@ -248,6 +250,8 @@ def docs : Array Doc := #[
   ⟨"first", "tactic", "first(t1, t2, ...)",
     "each round, the first tactic that has something to expand; the others wait: combined by order, where seq combines in time"⟩,
   ⟨"focus", "tactic", "focus(N, t)", "t, only in the subtree of goal node N"⟩,
+  ⟨"at", "tactic", "at($ pattern $, t, depth=N, ground=false)",
+    "t, only in the subtrees of the goals that match the pattern, down to N assertion nodes below such a goal (0: all the way); ground: only at goals without metavariables. A sub-search at every goal of a shape, each where it stands"⟩,
   ⟨"loop", "tactic", "loop(t, N)", "t again from its start each time it is done, while the tree grows, up to N times"⟩,
   ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent|model, width=W, value=K, absolute=0|1)",
     "the number of assertion nodes above a leaf's goal; those labelled L1, L2, ... (follow, choose or search: who expanded them) cost nothing, the other variants at a goal where such a node hangs cost the goal's full depth, and a goal that such a node left open costs N more; with by and width, a step costs 1 and its place among the variants of its goal (from 0), by the proofs before the theorem that use its assertion (used: how many; recent: the latest) or by the learned model's score (model, with --model FILE), divided by W; with value (and by), a step costs also K times the sum of −ln V over its new goals, V the learned probability that a goal is proved (with --value FILE), rounded, less that of the best of its goal's first W variants (absolute=1: not less)"⟩,
@@ -405,6 +409,12 @@ partial def filter (c : Ctx) (a : Ast) : Except ParseError Filter := do
     | "name" =>
       checkNames name args #["glob"]
       return .name (← word name "glob" pos (arg? args "glob" 0))
+    | "range" =>
+      checkNames name args #["from", "to"]
+      let lo ← numOr name "from" 0 (arg? args "from" 0)
+      let hi ← numOr name "to" c.db.asserts.size (arg? args "to" 1)
+      if hi < lo then fail pos "`range(A, B)` needs A ≤ B"
+      return .scope ((Array.range (hi - lo)).map (· + lo))
     | "scope" =>
       checkNames name args #[]
       let mut ids := #[]
@@ -590,6 +600,16 @@ partial def tactic (c : Ctx) (a : Ast) : Except ParseError AnyStrategy := do
       let size ← up (numOr name "size" 0 (arg? args "size" 1))
       let depth ← up (numOr name "depth" 0 (arg? args "depth" 2))
       return (← tactic c t).limited size.down depth.down
+    | "at" =>
+      let _ ← up (checkNames name args #["pattern", "tactic", "depth", "ground"])
+      let pat ← up (pattern c name pos (arg? args "pattern" 0))
+      let some t := arg? args "tactic" 1 | fail pos "`at` needs a tactic"
+      let depth ← up (numOr name "depth" 0 (arg? args "depth" 2))
+      let ground ← up (boolOr name "ground" false (arg? args "ground" 3))
+      let pat := pat.down
+      let ground := ground.down
+      return (← tactic c t).atGoals
+        (fun env h => let e := env.hyps[h]!.expr; e.matchesPattern pat && (!ground || !e.hasVars)) depth.down
     | "focus" =>
       let _ ← up (checkNames name args #["node", "tactic"])
       let node ← up (num name "node" pos (arg? args "node" 0))

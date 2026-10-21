@@ -144,6 +144,24 @@ def first (a b : AnyStrategy) : AnyStrategy := ⟨a.strategy.first b.strategy⟩
 /-- `a`, only in the subtree of goal node `h` (Russell's `focus`, with one seed). -/
 def focus (a : AnyStrategy) (h : Nat) : AnyStrategy := ⟨a.strategy.restrict fun env p => env.isUnder p h⟩
 
+/-- `at(p, t, depth=D)`: `t` in the subtrees of the goal nodes that `keep` admits, down to
+`depth` assertion nodes below such a goal (0: all the way): a sub-search at every goal of
+a shape, each where it stands, where `focus` takes one goal by number. The dispatcher of
+the tactics system (`docs/DESIGN.md`, "The tactics system"). -/
+def atGoals (a : AnyStrategy) (keep : Env → Nat → Bool) (depth : Nat) : AnyStrategy :=
+  ⟨a.strategy.restrict fun env p => Id.run do
+    let mut g := env.props[p]!.parent
+    let mut d := 1
+    for _ in [0:env.hyps.size] do
+      if keep env g then return true
+      if depth > 0 && d ≥ depth then return false
+      match env.hyps[g]!.parent with
+      | some q =>
+        g := env.props[q]!.parent
+        d := d + 1
+      | none => return false
+    return false⟩
+
 end AnyStrategy
 
 end Whitehead.Prove

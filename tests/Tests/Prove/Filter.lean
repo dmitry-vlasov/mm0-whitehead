@@ -76,6 +76,10 @@ def filterTests : TestM Unit := do
   checkEq "filter: a new goal by a pattern" (count "and(name(ax_mp), goal($ _ -> ph -> ch $))") 1
   checkEq "filter: a new goal that is not there" (count "and(name(ax_mp), goal($ ch -> _ $))") 0
   checkEq "filter: scope" (count "scope(ax_mp, a1i)") (count "or(name(ax_mp), name(a1i))")
+  -- a section of the file by number: ax_mp is assertion 3 of the fixture
+  checkEq "filter: range, a section by number" (count "range(3, 4)") (count "name(ax_mp)")
+  checkEq "filter: range, the whole file" (count "range(0, 1000000)") all
+  checkEq "filter: an empty range" (count "range(3, 3)") 0
   checkEq "filter: a new goal that is a bare variable" (count "and(name(ax_mp), bare)") 1
   -- ax_mp's minor premise ?ph fits every premise, but a bare variable does not count
   checkEq "filter: a bare new goal is not one that a premise proves" (count "and(name(ax_mp), hyp)") 0
@@ -122,6 +126,23 @@ def filterTests : TestM Unit := do
     check "tactic: a scope that admits no variant ends at once, nothing expanded"
       (ending == .exhausted && s.env.counters.expanded == 0)
   | .error msg => check "tactic: a scope that admits no variant ends at once" false msg
+  -- `at`: a sub-search at the goals of a shape. a1i's goal is an implication
+  match ← runOn "a1i" "bfs", ← runOn "a1i" "at($ _ -> _ $, bfs)" with
+  | .ok (s, ending), .ok (s', ending') =>
+    check "tactic: at a goal of the pattern's shape, bfs as itself"
+      (ending == .proved && ending' == ending && foundText s' == foundText s) (foundText s')
+  | _, _ => check "tactic: at a goal of the pattern's shape, bfs as itself" false
+  match ← runOn "a1i" "at($ ph -> ph $, bfs)" with
+  | .ok (s, ending) =>
+    check "tactic: at a shape no goal has, nothing is expanded" (ending == .exhausted && s.env.counters.expanded == 0)
+  | .error msg => check "tactic: at a shape no goal has, nothing is expanded" false msg
+  -- the root alone has a1i's statement, so one step below it is the first round
+  match ← runOn "a1i" "at($ ps -> ph $, bfs, depth=1)", ← runOn "a1i" "limited(bfs, depth=1)" with
+  | .ok (s, ending), .ok (s', ending') =>
+    check "tactic: at the root to depth 1 is limited to depth 1"
+      (ending == ending' && s.env.counters.expanded == s'.env.counters.expanded && s.env.counters.expanded > 0)
+      s!"{s.env.counters.expanded} against {s'.env.counters.expanded}"
+  | _, _ => check "tactic: at the root to depth 1 is limited to depth 1" false
   match ← runOn "con1" "limited(bfs, size=50)" with
   | .ok (s, ending) =>
     check "tactic: limited by size stops after its nodes"
@@ -292,6 +313,7 @@ def dslTests : TestM Unit := do
   checkEq "dsl: an unexpected character" (tacticError "bfs;") "3: unexpected character `;`"
   checkEq "dsl: a kind that is not one" (filterError "kind(other)") "0: `kind` is assertion, unfold or fold, not `other`"
   checkEq "dsl: an assertion that is not there" (filterError "scope(ax_mp, nosuch)") "13: no assertion is named `nosuch`"
+  checkEq "dsl: a range backwards" (filterError "range(5, 3)") "0: `range(A, B)` needs A ≤ B"
   checkEq "dsl: a pattern without a specification" (filterError "goal($ _ $)")
     "5: a pattern needs the specification (.mm0) for its notation"
   checkEq "dsl: an unclosed formula" (filterError "goal($ _ ") "5: this formula has no closing `$`"

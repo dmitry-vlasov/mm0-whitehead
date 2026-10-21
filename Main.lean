@@ -50,7 +50,7 @@ def usage : String :=
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
   prove export <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--ms T]
-               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--value FILE]
+               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--value FILE] [--mm0 F]
                [--search-ms T] [--goals [--max-goals N]]]
                                  the data of the learned ranking layer: for each theorem, along
                                  its known proof, a row for each variant of each goal node, with
@@ -61,6 +61,13 @@ def usage : String :=
                                  --goals: the data of the value of goals instead, a row for each
                                  goal node of the tree the search grew (at most N, 200, drawn),
                                  with its features and whether the search proved it
+  prove subgoals <file.mmb> --tactic T [--ms T] [--from A] [--to B] [--every K] [--tactics DIR]
+               [--model FILE] [--value FILE] [--mm0 F] [--max-nodes N]
+                                 the subgoal bench of the tactics system: each goal node on a
+                                 known proof's path (not the root, nor one a premise proves) is a
+                                 task of its own under the theorem's premises, which tactic T gets
+                                 --ms (100) ms for; the share closed, by depth and by the head of
+                                 the statement
   prove score <data.tsv> --model FILE
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
@@ -73,7 +80,7 @@ def usage : String :=
                                  default seq(bfs(size=20000, depth=2), guided), 5 s
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
                [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--model FILE] [--value FILE]
-               [--max-facts N]
+               [--mm0 file.mm0] [--max-facts N]
                [--join-cap N|all] [--max-tuples N] [--max-work N]
                [--meta I,J,...] [--verbose]
                                  prove the theorems of a file from scratch: backward breadth first,
@@ -86,7 +93,9 @@ def usage : String :=
                                  --tactic: a tactic of the language for every theorem (`dsl`),
                                  such as `rails(10, rank=reach, open=0, upto=1)`; --tactics: the
                                  directory of the definitions, as for `dsl`; --model, --value: the
-                                 learned rank of variants and value of goals that tactics use
+                                 learned rank of variants and value of goals that tactics use;
+                                 --mm0: the names from the specification, for a file without
+                                 an index (set.mm), so that name(...) and scope(...) work
                                  replay and search: [--jobs N] theorems at once (default: one per
                                  processor), [--max-mem GB] memory limit (default 32; above 80%
                                  the largest running theorem gives up, above 90% all running ones,
@@ -342,6 +351,24 @@ def jobOptions (args : List String) : IO (Nat × Bool × Nat) := do
   let jobs ← if jobs == 0 then processors else pure jobs
   return (max 1 jobs, !args.contains "--quiet", numOption args "--max-mem" 32 * 1000000000)
 
+/-- `--mm0 FILE`: the assertions named from the specification. The set.mm translation has
+no index, so its `.mmb` names them `T` and a number; `name(...)` and `scope(...)` in a
+tactic, and the reports, want the real names. -/
+def withSpecNames (db : Prove.Db) (file : Mmb.MmbFile) (args : List String) : IO (Option Prove.Db) := do
+  let some mm0 := strOption args "--mm0" | return some db
+  match ← Mm0.load mm0 with
+  | .error e =>
+    IO.eprintln e.format
+    return none
+  | .ok spec =>
+    match Mm0.elaborate spec with
+    | .error e =>
+      IO.eprintln e.format
+      return none
+    | .ok env =>
+      return some <| (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
+        if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
+
 /-- `prove variants`: how many variants the goal nodes on the paths of the known proofs
 have (`Prove/Measure.lean`). -/
 def proveVariants (path : String) (args : List String) : IO UInt32 := do
@@ -420,6 +447,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
+  let some db ← withSpecNames db file args | return 1
   let (jobs, progress, memLimit) ← jobOptions args
   let first := numOption args "--from" 0
   let last := numOption args "--to" 1000000000
@@ -514,6 +542,150 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   else
     IO.println s!"{path}: {todo.size} theorems, {(results.filter (·.isNone)).size} left out (a shared conversion); \
       {rows} rows, {positives} of them the known proof's, written to {out}, in {(← IO.monoMsNow) - start} ms"
+  return 0
+
+/-- The subgoals of a proof tree, each with its depth: for each step, the hypotheses of its
+assertion under its arguments; `none` for one that a premise of the theorem proves. A
+conversion's own statement is that of the hypothesis it proves, and its steps below are
+walked too. -/
+partial def subgoalStatements (db : Prove.Db) (depth : Nat) : Prove.ProofTree → Array (Nat × Option Prove.Exp)
+  | .hyp _ => #[]
+  | .conv _ _ _ _ _ child => subgoalStatements db depth child
+  | .step a args children =>
+    let asn := db.asserts[a]!
+    let map := (Array.range (min asn.vars.size args.size)).foldl (init := ({} : Std.HashMap Nat Prove.SubExp))
+      fun m k => m.insert (Prove.Node.varId asn.vars[k]!) (Prove.SubExp.mk' asn.vars[k]! args[k]!)
+    let s : Prove.Subst := { map }
+    (Array.range children.size).foldl (init := #[]) fun acc i =>
+      let acc := match children[i]! with
+        | .hyp _ => acc.push (depth + 1, none)
+        | _ => acc.push (depth + 1, some (s.apply asn.hyps[i]!))
+      acc ++ subgoalStatements db (depth + 1) children[i]!
+
+/-- `prove subgoals`: what a tactic closes of the goals that occur in known proofs, within a
+small budget: the subgoal bench of the tactics system (`docs/DESIGN.md`, "The tactics
+system"). For each theorem of the range, the known proof is replayed over the full
+expansion (`oracleAll`), and each subgoal of the proof found — the statement of each step
+below the root, as the whole proof fixes it, not one that a premise proves, nor one that a
+dummy is left in — is a task of its own under the theorem's premises, which the tactic gets
+`--ms` for. The share closed is reported by the depth of the goal and by the head term of
+its statement, its implications stripped (`->`, `=`, `e.`, `<->` and the class relations
+named through anchor assertions, since set.mm's terms have no names of their own).
+
+A subgoal is measured as the proof fixes it: in a search, the step above it may leave
+metavariables in it that only a sibling's proof decides, so this is what a tactic closes
+of determined goals, the regime of a decision procedure. -/
+def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
+  let file ← match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e => IO.eprintln (e.format path); return 1
+  let db ← match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg => IO.eprintln s!"{path}: {msg}"; return 1
+  let some db ← withSpecNames db file args | return 1
+  let some text := strOption args "--tactic" | IO.eprintln "prove subgoals: --tactic T is needed"; return 2
+  let (jobs, progress, memLimit) ← jobOptions args
+  let first := numOption args "--from" 0
+  let last := numOption args "--to" 1000000000
+  let every := max 1 (numOption args "--every" 1)
+  let ms := numOption args "--ms" 100
+  let replayLimits : Prove.Limits := { maxProps := 500000, maxMs := 20000, maxTuples := 300000, maxWork := 20000000 }
+  let searchLimits : Prove.Limits := { maxProps := numOption args "--max-nodes" 20000000, maxMs := ms,
+                                       maxTuples := 300000, maxWork := 20000000 }
+  let defs ← match ← Prove.Dsl.loadTactics (strOption args "--tactics") with
+    | .ok defs => pure defs
+    | .error msg => IO.eprintln msg; return 1
+  let model ← match strOption args "--model" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
+  let value ← match strOption args "--value" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
+  let rails : Thunk Prove.Rails := Thunk.mk fun _ => Prove.Rails.ofDb db
+  let index := db.index
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let hypIndexes := db.hypIndexes
+  -- the terms by which the statements are grouped, through assertions whose conclusions
+  -- are known to have them: `->` from ax-1, `=` from eqid, `e.` from vex, `<->` from biid,
+  -- and a class relation from breq1
+  let conclOf (names : List String) : Option Prove.Exp :=
+    names.findSome? fun n => (db.asserts.find? (·.name == n)).map (·.concl)
+  let head (e : Prove.Exp) : Nat := Prove.Node.appId e.nodes[0]!
+  let wi := (conclOf ["ax-1", "ax_1"]).map head
+  let strip (e : Prove.Exp) : Prove.Exp := Id.run do
+    let some wi := wi | return e
+    let mut e := e
+    for _ in [0:16] do
+      if !Prove.Node.isVar e.nodes[0]! && head e == wi && e.nodes.size > 1 then e := e.sub (e.argStarts 0)[1]! else break
+    return e
+  let mut termNames : Std.HashMap Nat String := {}
+  for (names, shown) in [(["ax-1", "ax_1"], "->"), (["eqid"], "="), (["vex"], "e."), (["biid"], "<->")] do
+    if let some c := conclOf names then termNames := termNames.insert (head (strip c)) shown
+  if let some c := conclOf ["breq1"] then
+    let inner := strip c
+    if inner.nodes.size > 1 then
+      let arg := inner.sub (inner.argStarts 0)[0]!
+      if !Prove.Node.isVar arg.nodes[0]! then termNames := termNames.insert (head arg) "class relation"
+  let headName (e : Prove.Exp) : String :=
+    let s := strip e
+    let n := s.nodes[0]!
+    if Prove.Node.isVar n then "a variable" else if Prove.Node.isConst n then "a variable of the theorem"
+    else termNames.getD (head s) (db.terms[head s]?.map (·.name) |>.getD "?")
+  let todo := (Array.range file.stmts.size).filter fun i =>
+    let s := file.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+  let skipped ← IO.mkRef (0, 0)
+  let start ← IO.monoMsNow
+  -- a subgoal: its depth, the head of its statement, whether it was closed, and the ms
+  let results ← Prove.runJobs jobs todo.size (fun k => do
+      let s := file.stmts[todo[k]!]!
+      let thm := s.index
+      let .ok (some skel) := db.skeleton s | return (#[] : Array (Nat × String × Bool × Nat))
+      let env := { Prove.Env.init db index (db.task thm) with uses }
+      let r ← Prove.searchWith Prove.acceptAny env (Prove.oracleAll skel (some 0)) replayLimits
+      let some tree := r.proof | return #[]
+      -- the proof with its leftover variables fixed, as the emitted proof has them
+      let tree := (Prove.closings r.env tree)[0]?.getD tree
+      let ctx : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model, value }
+      let .ok t := Prove.Dsl.parseTactic ctx text | return #[]
+      let mut out := #[]
+      for (depth, e) in subgoalStatements db 0 tree do
+        let some e := e | skipped.modify fun (m, p) => (m, p + 1); continue
+        if e.hasVars then
+          skipped.modify fun (m, p) => (m + 1, p)
+          continue
+        let task := { db.task thm with goal := e }
+        let env' := { Prove.Env.init db index task hypIndexes with uses }
+        let t0 ← IO.monoMsNow
+        -- a subgoal is not a statement of the file, so the verifier cannot check it: as
+        -- `prove goal`, any proof of the tree counts
+        let r' ← Prove.searchWith Prove.acceptAny env' t.strategy searchLimits
+        out := out.push (depth, headName e, r'.proof.isSome, (← IO.monoMsNow) - t0)
+      return out)
+    progress memLimit logLine
+  let all : Array (Nat × String × Bool × Nat) := results.foldl (· ++ ·) #[]
+  let closed := all.filter (·.2.2.1)
+  let (metas, premises) ← skipped.get
+  let pct (a b : Nat) : String := s!"{a} of {b} ({if b == 0 then 0 else a * 100 / b}%)"
+  let times := (closed.map (·.2.2.2)).qsort (· < ·)
+  IO.println s!"{path}: {todo.size} theorems, {all.size} subgoals ({metas} with a dummy left and {premises} \
+    premises left out); closed by `{text}` within {ms} ms: {pct closed.size all.size}, median \
+    {times[times.size / 2]?.getD 0} ms; in {(← IO.monoMsNow) - start} ms"
+  let bucket (d : Nat) : String := if d ≤ 1 then "1" else if d ≤ 3 then "2-3" else if d ≤ 7 then "4-7" else "8+"
+  let line := #["1", "2-3", "4-7", "8+"].map fun b =>
+    let xs := all.filter fun r => bucket r.1 == b
+    s!"{b}: {pct (xs.filter (·.2.2.1)).size xs.size}"
+  IO.println s!"  by depth: {"; ".intercalate line.toList}"
+  let heads := all.foldl (init := (#[] : Array String)) fun acc r => if acc.contains r.2.1 then acc else acc.push r.2.1
+  let counted := (heads.map fun hd => (hd, (all.filter (·.2.1 == hd)).size)).qsort fun a b => a.2 > b.2
+  let line := (counted.extract 0 10).map fun (hd, _) =>
+    let xs := all.filter (·.2.1 == hd)
+    s!"{hd}: {pct (xs.filter (·.2.2.1)).size xs.size}"
+  IO.println s!"  by the head of the statement: {"; ".intercalate line.toList}"
   return 0
 
 /-- `prove featbench`: where the time of a learned rank goes. For each theorem of the range,
@@ -801,6 +973,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
+  let some db ← withSpecNames db file args | return 1
   let (jobs, progress, memLimit) ← jobOptions args
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
@@ -887,23 +1060,7 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
-  -- the set.mm translation has no index: its names are in the specification
-  let db ←
-    match strOption args "--mm0" with
-    | none => pure db
-    | some mm0 =>
-      match ← Mm0.load mm0 with
-      | .error e =>
-        IO.eprintln e.format
-        return 1
-      | .ok spec =>
-        match Mm0.elaborate spec with
-        | .error e =>
-          IO.eprintln e.format
-          return 1
-        | .ok env =>
-          pure <| (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
-            if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
+  let some db ← withSpecNames db file args | return 1
   let opts : Prove.ChainOptions :=
     { maxLen := max 2 (numOption args "--max-len" 6), min := max 1 (numOption args "--min" 2),
       top := numOption args "--top" 10 }
@@ -1048,6 +1205,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "export" :: path :: rest => proveExport path rest
   | "prove" :: "score" :: path :: rest => proveScore path rest
   | "prove" :: "featbench" :: path :: rest => proveFeatbench path rest
+  | "prove" :: "subgoals" :: path :: rest => proveSubgoals path rest
   | _ =>
     IO.eprintln usage
     return 2
