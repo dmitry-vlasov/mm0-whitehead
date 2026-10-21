@@ -124,12 +124,13 @@ partial def toFormula (n : Notation) (vars : Nat → Exp) (hole fresh : Nat) (ty
 /-- Reads the statement `text`, the inside of `$ ... $`, for theorem `thm` of the proof
 file, as `pattern` does; but a hole `_` is a new variable, a metavariable, numbered from
 `fresh` on. Returns the statement and the number of holes. A statement of a provable
-sort is asked for, as for a theorem. -/
-def formula (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos fresh : Nat) :
-    Except ParseError (Exp × Nat) := do
+sort is asked for, as for a theorem. `extra` are variables besides the theorem's, numbered
+after them (`prove goal`: the names of an agent's own variables in a hole). -/
+def formula (n : Notation) (thm : Nat) (vars : Nat → Exp) (text : String) (pos fresh : Nat)
+    (extra : Array VarDecl := #[]) : Except ParseError (Exp × Nat) := do
   if thm ≥ n.file.thms.size && (n.specThm thm).isNone then
     throw ⟨pos, s!"assertion {thm} of the proof file is not in the specification"⟩
-  let args := n.binders thm
+  let args := n.binders thm ++ extra
   let c := { Elab.mathCtx n.st args with hole := some args.size }
   let m : MathString := { text, span := ⟨pos, pos + text.utf8ByteSize + 2⟩ }
   let e ← parseMath c m .provable

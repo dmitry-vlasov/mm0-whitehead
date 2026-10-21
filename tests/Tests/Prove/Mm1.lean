@@ -41,5 +41,18 @@ def mm1Tests : TestM Unit := do
   checkEq "mm1: the metavariables of a goal made holes, by name"
     (mm1Holes "G /\\ ~?a -> a = ?b /\\ ?a") ("G /\\ ~_ -> a = _ /\\ _", #["a", "b", "a"])
   checkEq "mm1: a goal without metavariables" (mm1Holes "a -> b") ("a -> b", #[])
+  -- a statement with a name the theorem does not have: it does not read; as an extra
+  -- variable of the fixture's one sort it reads, a constant of the task after the binders
+  let vars0 (i : Nat) : Exp := db.binderImage thm #[] (db.asserts[thm]!.vars[i]?.getD 0)
+  match spec.formula thm vars0 "q -> q" 0 freshBase with
+  | .ok _ => check "mm1: an unknown name does not read" false
+  | .error e => check "mm1: an unknown name does not read" (contains e.msg "unknown variable or term `q`") e.msg
+  let nb := db.asserts[thm]!.vars.size
+  let varsE (i : Nat) : Exp := if i < nb then vars0 i else ⟨#[Node.const i (Ty.mk 0 false)]⟩
+  match spec.formula thm varsE "q -> q" 0 freshBase #[{ name := some "q", sort := 0, bound := false, deps := #[] }] with
+  | .ok (e, _) =>
+    let ok := !e.hasVars && e.nodes.any fun n => Node.isConst n && Node.appId n == Node.constBase + nb
+    check "mm1: as an extra variable, the name reads as a constant after the binders" ok (db.showExp e)
+  | .error e => check "mm1: as an extra variable, the name reads" false e.msg
 
 end Tests.Prove

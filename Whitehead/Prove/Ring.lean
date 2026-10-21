@@ -111,6 +111,8 @@ inductive RingShape where
   | negMulR
   /-- `⊝0 = 0` -/
   | negZero
+  /-- `s x = x ⊕ 1`: a successor, read as adding the one (peano's `suc`, `add12`). -/
+  | succDef
   deriving BEq, Hashable, Inhabited, Repr
 
 /-- A rule: a lemma `[ph ->] L = R` in the inference form (`ded` false) or the deduction
@@ -135,6 +137,8 @@ structure Ring where
   one : Exp := default
   neg : Option RingOp := none
   sub : Option RingOp := none
+  /-- A successor, `s x = x ⊕ 1`. -/
+  succ : Option RingOp := none
   /-- The relation and the carrier of the closure hypotheses (`wcel`, `cc`), if the rules
   have them. -/
   carrier : Option (Nat × Exp) := none
@@ -259,6 +263,21 @@ def shapesOf (l r : Exp) : Array ShapeMatch := Id.run do
     if let some (n, x') := un nx then
       if (var? x).isSome && x' == x && !r.hasVars then
         out := out.push { shape := .inv, add := some a, neg := some n, const := some r, vars := vs #[x] }
+  -- s x = x ⊕ c: a successor, if c turns out to be the one. The right side is an
+  -- application of the addition (its fixed arguments and all) to x and the constant,
+  -- the constant after x
+  if let some (s, x) := un l then
+    if (var? x).isSome then
+      if let some (t, args) := app r then
+        let xs := (Array.range args.size).filter fun i => args[i]! == x
+        if xs.size == 1 && args.all fun e => e == x || !e.hasVars then
+          let xi := xs[0]!
+          for ci in [xi + 1:args.size] do
+            let c := args[ci]!
+            let fixed := (Array.range args.size).filterMap fun i => if i == xi || i == ci then none else some (i, args[i]!)
+            let a : RingOp := { term := t, arity := args.size, fixed }
+            if s != a then
+              out := out.push { shape := .succDef, add := some a, neg := some s, const := some c, vars := vs #[x] }
   -- ⊝⊝x = x
   if let some (n, nx) := un l then
     if let some (n', x) := un nx then
@@ -414,6 +433,11 @@ def ofDb (db : Db) : RingTable := Id.run do
           if m.mul == some mul && isNeg then rg := put rg m.shape g.rule
         | .negneg | .negZero =>
           if isNeg then rg := put rg m.shape g.rule
+        | .succDef =>
+          -- `s x = x ⊕ 1` names the successor by `neg`, the one by `const`
+          if isAdd && m.const == some rg.one && rg.one.nodes.size > 0 then
+            if rg.succ.isNone then rg := { rg with succ := m.neg }
+            if rg.succ == m.neg then rg := put rg m.shape g.rule
         | _ => pure ()
         if g.carrier.isSome && rg.carrier.isNone && (isAdd || isMul) then rg := { rg with carrier := g.carrier }
     let first (xs : Array (Nat × Bool × Nat)) : Std.HashMap Bool Nat :=
@@ -448,13 +472,14 @@ end RingTable
 /-! ### Normalization -/
 
 /-- A term over a ring: an atom (any other subexpression), a sum, a product, a negation, a
-subtraction, the zero and the one. -/
+subtraction, a successor, the zero and the one. -/
 inductive RTerm where
   | atom (e : Exp)
   | add (a b : RTerm)
   | mul (a b : RTerm)
   | neg (a : RTerm)
   | sub (a b : RTerm)
+  | succ (a : RTerm)
   | zero
   | one
   deriving BEq, Inhabited
@@ -472,10 +497,11 @@ partial def ofExp (rg : Ring) (e : Exp) : RTerm :=
       match rg.mul.operands e with
       | some xs => if xs.size == 2 then .mul (ofExp rg xs[0]!) (ofExp rg xs[1]!) else .atom e
       | none =>
-        match rg.neg.bind (·.operands e), rg.sub.bind (·.operands e) with
-        | some xs, _ => if xs.size == 1 then .neg (ofExp rg xs[0]!) else .atom e
-        | _, some xs => if xs.size == 2 then .sub (ofExp rg xs[0]!) (ofExp rg xs[1]!) else .atom e
-        | _, _ => .atom e
+        match rg.neg.bind (·.operands e), rg.sub.bind (·.operands e), rg.succ.bind (·.operands e) with
+        | some xs, _, _ => if xs.size == 1 then .neg (ofExp rg xs[0]!) else .atom e
+        | _, some xs, _ => if xs.size == 2 then .sub (ofExp rg xs[0]!) (ofExp rg xs[1]!) else .atom e
+        | _, _, some xs => if xs.size == 1 then .succ (ofExp rg xs[0]!) else .atom e
+        | _, _, _ => .atom e
 
 /-- The term as an expression of the file, with the ring's operations; `ty` the type of
 its applications. -/
@@ -487,6 +513,7 @@ partial def toExp (rg : Ring) (ty : Nat) : RTerm → Exp
   | .mul a b => rg.mul.apply #[toExp rg ty a, toExp rg ty b] ty
   | .neg a => (rg.neg.getD rg.add).apply #[toExp rg ty a] ty
   | .sub a b => (rg.sub.getD rg.add).apply #[toExp rg ty a, toExp rg ty b] ty
+  | .succ a => (rg.succ.getD rg.add).apply #[toExp rg ty a] ty
 
 /-- The order of atoms and monomials: by the expression of an atom, the structure
 otherwise; a monomial and its negation side by side, the positive first. -/
@@ -498,6 +525,7 @@ partial def key : RTerm → Array Nat
   | .neg x => key x ++ #[5]
   | .add x y => #[6] ++ key x ++ #[7] ++ key y
   | .sub x y => #[8] ++ key x ++ #[9] ++ key y
+  | .succ x => #[10] ++ key x
 
 def lt (a b : RTerm) : Bool := key a < key b
 
@@ -505,7 +533,7 @@ def lt (a b : RTerm) : Bool := key a < key b
 partial def at_ (t : RTerm) (path : List Nat) : Option RTerm :=
   match path, t with
   | [], _ => some t
-  | 0 :: p, .add a _ | 0 :: p, .mul a _ | 0 :: p, .sub a _ | 0 :: p, .neg a => at_ a p
+  | 0 :: p, .add a _ | 0 :: p, .mul a _ | 0 :: p, .sub a _ | 0 :: p, .neg a | 0 :: p, .succ a => at_ a p
   | 1 :: p, .add _ b | 1 :: p, .mul _ b | 1 :: p, .sub _ b => at_ b p
   | _, _ => none
 
@@ -519,6 +547,7 @@ partial def replace (t : RTerm) (path : List Nat) (s : RTerm) : RTerm :=
   | 0 :: p, .sub a b => .sub (replace a p s) b
   | 1 :: p, .sub a b => .sub a (replace b p s)
   | 0 :: p, .neg a => .neg (replace a p s)
+  | 0 :: p, .succ a => .succ (replace a p s)
   | _, _ => t
 
 /-- Not a sum, a product, a negation or a subtraction. -/
@@ -594,6 +623,7 @@ def applyTop (shape : RingShape) (back : Bool) (t : RTerm) : Option (RTerm × Ar
   | .negMulL, false, .mul (.neg a) b => some (.neg (.mul a b), #[a, b])
   | .negMulR, false, .mul a (.neg b) => some (.neg (.mul a b), #[a, b])
   | .negZero, false, .neg .zero => some (.zero, #[])
+  | .succDef, false, .succ a => some (.add a .one, #[a])
   | _, _, _ => none
 
 /-- The step to take at the top of `t`, if the term is not yet in normal form there: the
@@ -604,6 +634,7 @@ def stepAt (avail : RingShape → Bool) (t : RTerm) : Option (RingShape × Bool)
   let want (s : RingShape) : Option (RingShape × Bool) := if avail s then some (s, false) else none
   match t with
   | .sub _ _ => want .subDef
+  | .succ _ => want .succDef
   | .neg .zero => want .negZero
   | .neg (.neg _) => want .negneg
   | .neg (.add _ _) => want .negAdd
@@ -653,7 +684,7 @@ where
   firstStep (t : RTerm) (path : List Nat) : Option (List Nat × RingShape × Bool) :=
     let below := match t with
       | .add a b | .mul a b | .sub a b => firstStep a (path ++ [0]) <|> firstStep b (path ++ [1])
-      | .neg a => firstStep a (path ++ [0])
+      | .neg a | .succ a => firstStep a (path ++ [0])
       | _ => none
     below <|> (stepAt avail t).map fun (s, b) => (path, s, b)
 
@@ -667,7 +698,7 @@ namespace RingTable
 partial def coverage (rg : Ring) : RTerm → Nat
   | .atom _ | .zero | .one => 0
   | .add a b | .mul a b | .sub a b => 1 + coverage rg a + coverage rg b
-  | .neg a => 1 + coverage rg a
+  | .neg a | .succ a => 1 + coverage rg a
 
 /-- The rings of the file whose equality `rel` is and that read something of the sides,
 the one reading most first, then the one with most rules: the file has rings besides
@@ -738,6 +769,7 @@ partial def stepSkeleton (t : RingTable) (tb : CongrTable) (rg : Ring) (limit : 
         | .mul a b => some (rg.mul, #[a, b])
         | .sub a b => do let s ← rg.sub; some (s, #[a, b])
         | .neg a => do let n ← rg.neg; some (n, #[a])
+        | .succ a => do let n ← rg.succ; some (n, #[a])
         | _ => none
       let pos := op.position i
       let lem ← tb.pick limit op.term rg.eq ded #[pos]

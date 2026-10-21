@@ -72,6 +72,7 @@ def usage : String :=
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
   prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
+               [--model FILE] [--value FILE]
              [--max-nodes N] [--tactics DIR]
                                  a proof of TEXT, in the notation of the specification, under the
                                  hypotheses of theorem NAME, from the assertions before it,
@@ -1145,10 +1146,61 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
     | .error e => return ← say #[("error", Json.str e)]
   let db := c.db
   let (holed, names) := Prove.mm1Holes text
-  let vars (i : Nat) : Prove.Exp := db.binderImage thm #[] (db.asserts[thm]!.vars[i]?.getD 0)
-  let (goal, _) ← match c.spec.formula thm vars holed 0 Prove.freshBase with
+  -- a name the statement has that the theorem does not is the agent's own variable (one
+  -- of an induction it started, say): it becomes a variable of the task, of the first
+  -- sort, regular then bound, with which the statement reads further
+  let nb := db.asserts[thm]!.vars.size
+  let varsWith (extra : Array Mm0.VarDecl) (i : Nat) : Prove.Exp :=
+    if i < nb then db.binderImage thm #[] (db.asserts[thm]!.vars[i]?.getD 0)
+    else match extra[i - nb]? with
+      | some vd => ⟨#[Prove.Node.const i (Prove.Ty.mk vd.sort vd.bound)]⟩
+      | none => default
+  let unknown (msg : String) : Option String :=
+    if msg.startsWith "unknown variable or term" then (msg.splitOn "`")[1]? else none
+  -- an unknown name becomes a variable with a provisional sort, and the sorts of all of
+  -- them are then tried in order, regular before bound, the last name's moving fastest,
+  -- until the statement reads: the parser meets a name before it checks the sorts around
+  -- it, so a name's sort cannot be told from one error, and a wrong sort hides the names
+  -- after it
+  let options := c.spec.st.env.sorts.size * 2
+  let mut extra : Array Mm0.VarDecl := #[]
+  let mut assignment : Array Nat := #[]
+  let mut read : Except String (Prove.Exp × Nat) := .error "the statement does not read"
+  let mut tries := 0
+  while tries < 4096 do
+    tries := tries + 1
+    let extra' := (Array.range extra.size).map fun k =>
+      { extra[k]! with sort := assignment[k]! / 2, bound := assignment[k]! % 2 == 1 }
+    match c.spec.formula thm (varsWith extra') holed 0 Prove.freshBase extra' with
+    | .ok r =>
+      read := .ok r
+      extra := extra'
+      break
+    | .error e =>
+      read := .error s!"the statement does not read: {e.msg}"
+      match unknown e.msg with
+      | some x =>
+        if extra.any (·.name == some x) then break
+        extra := extra.push { name := some x, sort := 0, bound := false, deps := #[] }
+        assignment := assignment.push 0
+      | none =>
+        if extra.isEmpty then break
+        -- the next assignment
+        let mut k := extra.size
+        let mut carried := true
+        while carried && k > 0 do
+          k := k - 1
+          if assignment[k]! + 1 < options then
+            assignment := assignment.set! k (assignment[k]! + 1)
+            carried := false
+          else assignment := assignment.set! k 0
+        if carried then break
+  let (goal, _) ← match read with
     | .ok r => pure r
-    | .error e => return ← say #[("error", Json.str s!"the statement does not read: {e.msg}")]
+    | .error msg => return ← say #[("error", Json.str msg)]
+  let vars := varsWith extra
+  let extraConsts : Array Prove.ConstInfo := (Array.range extra.size).map fun k =>
+    { ty := Prove.Ty.mk extra[k]!.sort extra[k]!.bound, names := if extra[k]!.bound then #[nb + k] else #[] }
   -- the holes of one name are one metavariable, numbered from freshBase in order
   let distinct := names.foldl (init := #[]) fun acc n => if acc.contains n then acc else acc.push n
   let holeNodes := goal.nodes.filter fun n => Prove.Node.isVar n && Prove.Node.varId n ≥ Prove.freshBase
@@ -1163,15 +1215,27 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
   let metas := (Array.range distinct.size).filterMap fun k =>
     (names.findIdx? (· == distinct[k]!)).bind fun j =>
       byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
-  let task := { db.task thm with goal, metas }
+  let task := { db.task thm with goal, metas, consts := (db.task thm).consts ++ extraConsts }
   let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses }
   -- by default the proofs of one or two steps first, which guided may miss for a longer
   -- one that a rail gives: a gap is short, and its term is read
   let tacticText := (strOption args "--tactic").getD "seq(bfs(size=20000, depth=2), guided)"
-  let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs }
+  let model ← match strOption args "--model" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
+  let value ← match strOption args "--value" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
+  let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs, model, value }
   let limits : Prove.Limits := { maxMs := numOption args "--ms" 5000, maxProps := numOption args "--max-nodes" 2000000 }
-  let pr := c.spec.printer db (c.spec.binderNames thm)
+  let pr := c.spec.printer db (c.spec.binderNames thm ++ extra.map fun vd => vd.name.getD "_")
   let hyps := db.file.thmHypNames thm
+  let extraJson : Array (String × Json) :=
+    if extra.isEmpty then #[] else #[("extra", .arr (extra.map fun vd => Json.str (vd.name.getD "_")))]
   -- a strategy is one universe up: it is used where it is read
   match Prove.Dsl.parseTactic dsl tacticText with
   | .error e => say #[("error", Json.str (Prove.Dsl.ParseError.show tacticText e))]
@@ -1181,12 +1245,12 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
     let ms := (← IO.monoMsNow) - start
     match r.proof with
     | none =>
-      say #[("proved", .bool false), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size)]
+      say (#[("proved", .bool false), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size)] ++ extraJson)
     | some t =>
-      say #[("proved", .bool true), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size),
+      say (#[("proved", .bool true), ("ms", Json.ofNat ms), ("nodes", Json.ofNat r.env.props.size),
         ("steps", Json.ofNat t.size), ("term", Json.str (t.mm1 db pr hyps .short)),
         ("bound", Json.str (t.mm1 db pr hyps .bound)), ("explicit", Json.str (t.mm1 db pr hyps .explicit)),
-        ("values", .arr (r.values.map fun e => Json.str (pr.render e Prove.mm1Dummy)))]
+        ("values", .arr (r.values.map fun e => Json.str (pr.render e Prove.mm1Dummy)))] ++ extraJson)
 
 /-- `mcp`: the MCP server for an agent, on stdin and stdout (`Mcp/Server.lean`). -/
 def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
