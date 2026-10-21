@@ -685,3 +685,8 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    about in a huge tree; whether a session is recorded as a file; whether an
    intermediate goal should be usable before it is proved; whether a choice at one
    sibling should narrow the variants shown at the others.
+5. The tactics system (`DESIGN.md`, "The tactics system: decision procedures as guides",
+   the plan of 2026-10-21): decision procedures as guides whose skeletons the engine
+   replays; in order, scoped searches (no code), `congr`, `ctx`, `arith`, `taut`,
+   `order`; the combinators `at`, `within`, `then`, `alt`, run-time calls; labels as
+   tags; `auto` at the top.

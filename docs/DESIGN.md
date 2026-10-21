@@ -2751,6 +2751,89 @@ from the search's own trees, as GPT-f learns its value.
 - **Next, perhaps:** a value trained on the trees that the value itself grows (the trees
   here are `learned`'s); or a value that knows the step's other goals, for metavariables.
 
+### The tactics system: decision procedures as guides (the plan of 2026-10-21)
+
+**What the experiments left** ("The agent bench", "Whitehead as a gap filler", "The
+learned ranking layer"): the search fails on rewriting chains (mm0's congruence family),
+on deduction-form bookkeeping (set.mm's `syl` and `adant*` steps), on arithmetic and order
+(38 of the gap filler's 58 holes), and on the creative step — the key lemma, the chain of
+lemmas while the goal still carries metavariables — which no procedure will supply.
+
+**The author's design:** decision procedures as isolated tactics, composed; a top-level
+dispatcher that calls them; the learned methods wrapped as tactics below the top;
+metadata on the nodes of the tree, so that tactics and their parts can tell where a node
+came from and what for. What the composable tactics (2026-10-17) have of it: the four
+sorts, definitions that call definitions, `seq`/`first`/`focus`/`loop`/`limited` as a
+fixed scheduler, the learned rank and value as parameters of the cost `depth`. What they
+lack: a way for a procedure to put a proof into the tree, dispatch by the shape of a goal,
+budgets per sub-tactic, calls at run time, and labels that say more than
+search/follow/choose.
+
+**Decided: a procedure's proof is replayed, not certified.** A decision procedure finds
+its proof by its own means, in a format of its own, and hands the engine the *skeleton*,
+the assertions applied and how they nest; the engine makes the substitutions by
+unification and emits the MM0 proof, as the replay test does for every set.mm proof and
+as `follow` does for a rail. So a procedure is a **guide**, replayed by `follow`, and
+`oracleAll skel` at a goal node is the engine side. Against an external MM0 certificate
+checked by the verifier (`close h proof`, considered and set aside): the procedure need
+not build substitutions, dummies, bound-variable conditions or conversions; a goal with
+metavariables is handled, since unification binds them and the joins check the bindings
+against the siblings; a skeleton that is partly wrong leaves its fitting steps in the tree
+as ordinary nodes; and the replay costs about 20 µs a step (the replay test). A
+certificate stays the way for a proof made by an external tool (`mm0-rs` on an MM1 term,
+a SAT solver's output translated by a converter) or one of 10⁴ steps and more. The
+translation of a procedure's internal proof into the file's lemmas is the procedure's
+job either way; the procedures are chosen so that it is natural (a normalizer applying
+rewrite lemmas).
+
+**Witnesses are not a separate problem** (the author's point, 2026-10-21): the replay
+test rebuilt all 47,611 proofs from their skeletons, so every witness their authors chose
+is determined by the lemma chain and computed by the joins. A procedure that solves
+`?x · 2 = a` does not emit `a / 2`: it emits the chain, and `eqid` at its end binds `?x`.
+
+**The order, most gain for least cost:**
+
+| | tactic | closes | internal proof → skeleton | need shown by |
+|---|---|---|---|---|
+| 0 | scoped searches, no code: `bfs(filter=or(name(adant*), …), depth=D)` | bookkeeping and propositional leaves | it is search | 55% of propositional calculus at 1 s unguided; tells whether procedures are needed |
+| 1 | `congr`: rewriting under term positions, plain and deduction form | equality and biconditional goals whose sides differ in subterms; rewriting with a hypothesis | the path to the differing subterms, one congruence lemma per constructor and position, mined from the library by shape (an index like the rails'), joined by `eqtr`/`syl` | mm0's lost family (`elabFmlaeq1d`); set.mm's `*eq1d`, `fveq2d`, `oveq1d` |
+| 2 | `ctx`: a lemma applied under the deduction context | the step wanted, under the wrong antecedent | a weakening chain (`adantr`, `simpl`, `3ad2ant1`), by subset matching of antecedents | set.mm is written in deduction form |
+| 3 | `arith` (peano first): normal forms of `+`, `*`, `suc` | `b * suc q + 0 = b * q + b` | normalize both sides; each rewrite a `congr` step | the gap filler's holes |
+| 4 | `taut`: propositional tautologies in context | tautologies over wff atoms | a sequent prover whose rules are each a library lemma, the table mined by shape | speed on leaves; search proves many already |
+| 5 | `order`: linear order and arithmetic | `0 < c → a < b → a·c < b·c` | Fourier–Motzkin, translation harder | the other holes |
+
+**Measured before each goes in:** at the goal nodes of known proofs (the oracle data),
+the share closed within 100 ms, and the share of the known proofs' steps the tactic would
+have taken; then the gap-filler bench on peano, and `learned` with the tactic as a leaf
+closer on set.mm's test part.
+
+**Combinators to add:** `at(goal-filter, t)`, `t` only at goals that pass a filter on the
+goal (the dispatcher; the filter language applied to goals); `within(ms, t)` and
+`nodes(N, t)`, budgets per sub-tactic; `then(t1, t2)`, `t2` at the goals `t1` left open;
+`alt(t1, t2)`, fair alternation by rounds where `first` is strict priority; a `.tac` call
+that is a call at run time, not a macro, for recursion (`arith` calling `congr` calling
+`arith` on a subterm).
+
+**Labels as a blackboard:** a label becomes a tag with a name and the tactic that wrote
+it (`congr/rewrite-lhs`, `arith/normalized`); filters and costs read tags; a tactic's
+parts find their own nodes; `at(labelled(…), t)` dispatches on them. The rule learned in
+Russell's port of Mizar's `by`: tags are data about who made a node and why, never
+control flow another tactic depends on; every tactic works when another's tags are
+absent. Easier here than there: MM0 has no soft typing; set.mm's side conditions
+(`A ∈ V`) are explicit goals that premise-free lemmas close; and no reference
+implementation is copied.
+
+**`auto`, the top:** `seq(the premise-free closes, at(equation, congr), at(arithmetic,
+arith), ctx, taut, learned(value=4))`, each stage leaving to the next what it cannot
+close, all steps costed so that `search` stays complete. It is Mizar's `by`, not a
+theorem prover: it closes the obvious (rewriting chains, bookkeeping, normal forms,
+tautologies, side conditions); it does not do induction, invent intermediate statements,
+or choose the lemma chain while the goal carries metavariables. Expected: as a gap filler,
+the holes the bench left are `congr`/`arith`/`order` material, so a hybrid agent's tokens
+should fall below the MM1 agent's — the hypothesis in a form that can still win; from
+scratch on set.mm, gains on proofs of 5–20 mechanical steps, a step from 18% at 5 s into
+the twenties at most without measuring; on mm0, the congruence family back.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above
