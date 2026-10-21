@@ -16,6 +16,7 @@ session can be replayed.
 import Whitehead.Json
 import Whitehead.Prove.Show
 import Whitehead.Prove.Session
+import Whitehead.Prove.Prior
 import Whitehead.Mm0.Load
 import Whitehead.Mmb.Write
 
@@ -32,6 +33,8 @@ structure Ctx where
   spec : Notation
   /-- How often each assertion is used in the proofs of the file (`Uses.lean`). -/
   uses : Uses
+  /-- The prior of the file, for the rank of variants (`Prior.lean`); a theorem's is asked of it. -/
+  prior : Prior := {}
   /-- The names of the assertions, by which `start` finds a theorem. With `anonymous`,
   every other tool knows an assertion only as `A` and its number. -/
   realNames : Array String := #[]
@@ -81,8 +84,9 @@ def Ctx.load (mm0 mmb : System.FilePath) (anonymous : Bool := false) : IO (Excep
     if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
   let realNames := db.asserts.map (·.name)
   let db := if anonymous then { db with asserts := db.asserts.map fun a => { a with name := s!"A{a.id}" } } else db
+  let uses := Uses.ofFile file db.asserts.size
   return .ok { db, index := db.index, hypIndexes := db.hypIndexes, vc := Verify.Ctx.ofFile file, spec := nt,
-               uses := Uses.ofFile file db.asserts.size, realNames, rails := Thunk.mk fun _ => Rails.ofDb db }
+               uses, prior := Prior.ofDb db (SymbolStats.ofDb db) uses, realNames, rails := Thunk.mk fun _ => Rails.ofDb db }
 
 /-! ### Arguments -/
 
@@ -212,7 +216,7 @@ def start (c : Ctx) (args : Json) : ToolM Json := do
   let thm ← liftE (c.theorem (← liftE (argStr args "theorem")))
   let forward ← liftE (argBoolD args "forward" false)
   let maxFacts ← liftE (argNatD args "max_facts" 512)
-  let env := { Env.init c.db c.index (c.db.task thm) c.hypIndexes with uses := c.uses }
+  let env := { Env.init c.db c.index (c.db.task thm) c.hypIndexes with uses := c.uses, prior := c.prior.query thm }
   let session ← Session.startFor c.vc env forward { maxFacts }
   let o : Open := { session, thm, printer := c.spec.printer c.db (c.spec.binderNames thm) }
   let k := (← get).sessions.size

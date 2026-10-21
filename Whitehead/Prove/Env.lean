@@ -123,6 +123,10 @@ structure Env where
   /-- How often the assertions are used in the proofs of the file, for the rank of
   variants (`Uses.lean`); empty unless a front-end gives it. Shared, and only read. -/
   uses : Uses := {}
+  /-- The prior of the theorem for the rank of variants (`Prior.lean`): for an assertion,
+  how much the proofs of the earlier theorems like this one use it; empty unless a
+  front-end gives it. -/
+  prior : Std.HashMap Nat Float := {}
   /-- The goal nodes of the intermediate goals, in the order they were offered: nodes
   without a parent, expanded backward like the root (`offerHint`). -/
   hints : Array Nat := #[]

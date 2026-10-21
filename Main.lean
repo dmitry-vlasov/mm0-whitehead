@@ -299,25 +299,30 @@ def jobOptions (args : List String) : IO (Nat × Bool × Nat) := do
   let jobs ← if jobs == 0 then processors else pure jobs
   return (max 1 jobs, !args.contains "--quiet", numOption args "--max-mem" 32 * 1000000000)
 
-/-- `--mm0 FILE`: the assertions named from the specification. The set.mm translation has
+/-- `--mm0 FILE`: the assertions and terms named from the specification, and its notation
+for the patterns of a tactic (`at($ _ < _ $)`, `goal($ … $)`). The set.mm translation has
 no index, so its `.mmb` names them `T` and a number; `name(...)` and `scope(...)` in a
-tactic, and the reports, want the real names. -/
-def withSpecNames (db : Prove.Db) (file : Mmb.MmbFile) (args : List String) : IO (Option Prove.Db) := do
-  let some mm0 := strOption args "--mm0" | return some db
+tactic, and the reports, want the real names. Without `--mm0`, the file's own names and no
+notation. -/
+def withSpecNames (db : Prove.Db) (file : Mmb.MmbFile) (args : List String) :
+    IO (Option (Prove.Db × Option Prove.Notation)) := do
+  let some mm0 := strOption args "--mm0" | return some (db, none)
   match ← Mm0.load mm0 with
   | .error e =>
     IO.eprintln e.format
     return none
   | .ok spec =>
-    match Mm0.elaborate spec with
+    match Mm0.elaborateState spec with
     | .error e =>
       IO.eprintln e.format
       return none
-    | .ok env =>
+    | .ok st =>
+      let env := st.env
       let db := (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
         if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
-      return some <| (Verify.specTermNames env file).foldl (init := db) fun db (i, name) =>
+      let db := (Verify.specTermNames env file).foldl (init := db) fun db (i, name) =>
         if i < db.terms.size then { db with terms := db.terms.modify i fun t => { t with name } } else db
+      return some (db, some (Prove.Notation.ofSpec st file))
 
 /-- `prove db`: what the prover reads from a proof file, with timings. -/
 def proveDb (path : String) (args : List String) : IO UInt32 := do
@@ -335,7 +340,7 @@ def proveDb (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
-  let some db ← withSpecNames db file args | return 1
+  let some (db, _) ← withSpecNames db file args | return 1
   let t1 ← IO.monoNanosNow
   let ms (a b : Nat) : String := s!"{(b - a) / 1000000} ms"
   let nodes := db.asserts.foldl (init := 0) fun n a => a.hyps.foldl (init := n + a.concl.size) (· + ·.size)
@@ -474,7 +479,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
-  let some db ← withSpecNames db file args | return 1
+  let some (db, nt) ← withSpecNames db file args | return 1
   let (jobs, progress, memLimit) ← jobOptions args
   let first := numOption args "--from" 0
   let last := numOption args "--to" 1000000000
@@ -489,6 +494,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   let index := db.index
   let uses := Prove.Uses.ofFile file db.asserts.size
   let stats := Prove.SymbolStats.ofDb db
+  let prior := Prove.Prior.ofDb db stats uses
   let start ← IO.monoMsNow
   -- --search T: along the proofs that tactic T finds (expert iteration), those that are not
   -- the known one's shape; otherwise along the known proofs
@@ -521,15 +527,18 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   let found ← IO.mkRef (0, 0, 0)
   let rowsFor (k : Nat) : IO (Option (Array String)) := do
     let i := todo[k]!
+    let thmPrior := prior.query file.stmts[i]!.index
     match searchTactic with
-    | none => Prove.datasetRows db index limits uses stats negatives i
+    | none => Prove.datasetRows db index limits uses stats negatives i thmPrior
     | some text =>
       let thm := file.stmts[i]!.index
-      let ctx : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model, value }
+      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
       match Prove.Dsl.parseTactic ctx text with
-      | .error _ => return none
+      | .error e =>
+        if k == 0 then IO.eprintln (Prove.Dsl.ParseError.show text e)
+        return none
       | .ok t =>
-        let env := { Prove.Env.init db index (db.task thm) hypIndexes with uses }
+        let env := { Prove.Env.init db index (db.task thm) hypIndexes with uses, prior := thmPrior }
         let r ← Prove.searchWith (Prove.accept vc) env t.strategy searchLimits
         if goals then
           if r.proof.isSome then found.modify fun (a, b, c) => (a + 1, b, c)
@@ -545,7 +554,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
         | some sk =>
           found.modify fun (a, b, c) => (a + 1, b + (if known then 1 else 0), c)
           if known then return none
-          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk)
+          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk thmPrior)
   let results ← Prove.runJobs jobs todo.size rowsFor progress memLimit logLine
   let h ← IO.FS.Handle.mk out .write
   h.putStrLn (if goals then Prove.goalHeader else Prove.datasetHeader)
@@ -609,7 +618,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
   let db ← match Prove.Db.ofFile file with
     | .ok db => pure db
     | .error msg => IO.eprintln s!"{path}: {msg}"; return 1
-  let some db ← withSpecNames db file args | return 1
+  let some (db, nt) ← withSpecNames db file args | return 1
   let some text := strOption args "--tactic" | IO.eprintln "prove subgoals: --tactic T is needed"; return 2
   let (jobs, progress, memLimit) ← jobOptions args
   let first := numOption args "--from" 0
@@ -636,6 +645,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
   let index := db.index
   let uses := Prove.Uses.ofFile file db.asserts.size
   let hypIndexes := db.hypIndexes
+  let prior := Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) uses
   -- the terms by which the statements are grouped, through assertions whose conclusions
   -- are known to have them: `->` from ax-1, `=` from eqid, `e.` from vex, `<->` from biid,
   -- and a class relation from breq1
@@ -665,6 +675,12 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
   let todo := (Array.range file.stmts.size).filter fun i =>
     let s := file.stmts[i]!
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+  -- a tactic that does not read is reported once, with the first theorem's context
+  if let some i := todo[0]? then
+    let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm := file.stmts[i]!.index, rails := some rails, defs, model, value }
+    if let .error e := Prove.Dsl.parseTactic ctx text then
+      IO.eprintln (Prove.Dsl.ParseError.show text e)
+      return 1
   let skipped ← IO.mkRef (0, 0)
   let start ← IO.monoMsNow
   -- --dump FILE: a line a subgoal, the theorem, the depth, the head, closed, the ms, the statement
@@ -679,8 +695,9 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
       let some tree := r.proof | return #[]
       -- the proof with its leftover variables fixed, as the emitted proof has them
       let tree := (Prove.closings r.env tree)[0]?.getD tree
-      let ctx : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model, value }
+      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
       let .ok t := Prove.Dsl.parseTactic ctx text | return #[]
+      let thmPrior := prior.query thm
       let mut out := #[]
       for (depth, e) in subgoalStatements db 0 tree do
         let some e := e | skipped.modify fun (m, p) => (m, p + 1); continue
@@ -688,7 +705,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
           skipped.modify fun (m, p) => (m + 1, p)
           continue
         let task := { db.task thm with goal := e }
-        let env' := { Prove.Env.init db index task hypIndexes with uses }
+        let env' := { Prove.Env.init db index task hypIndexes with uses, prior := thmPrior }
         let t0 ← IO.monoMsNow
         -- a subgoal is not a statement of the file, so the verifier cannot check it: as
         -- `prove goal`, any proof of the tree counts
@@ -1010,7 +1027,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
-  let some db ← withSpecNames db file args | return 1
+  let some (db, nt) ← withSpecNames db file args | return 1
   let (jobs, progress, memLimit) ← jobOptions args
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
@@ -1022,7 +1039,8 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
                   joinCap := if strOption args "--join-cap" == some "all" then 0xFFFFFFFFFFFF
                     else numOption args "--join-cap" 4 },
       metas := numsOption args "--meta",
-      verbose := args.contains "--verbose", jobs, progress, memLimit }
+      verbose := args.contains "--verbose", jobs, progress, memLimit,
+      prior := some (Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) (Prove.Uses.ofFile file db.asserts.size)) }
   -- the marks must fit every theorem of the range
   for a in db.asserts do
     if a.id ≥ opts.first && a.id < opts.last && a.id % opts.every == 0 then
@@ -1052,7 +1070,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       | .error e =>
         IO.eprintln e
         return 1
-  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, thm, rails := some rails, defs, model, value }
+  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
   if let some text := tactic then
     if let .error e := Prove.Dsl.parseTactic (ctx 0) text then
       IO.eprintln (Prove.Dsl.ParseError.show text e)
@@ -1097,7 +1115,7 @@ def proveChains (path : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln s!"{path}: {msg}"
       return 1
-  let some db ← withSpecNames db file args | return 1
+  let some (db, _) ← withSpecNames db file args | return 1
   let opts : Prove.ChainOptions :=
     { maxLen := max 2 (numOption args "--max-len" 6), min := max 1 (numOption args "--min" 2),
       top := numOption args "--top" 10 }
@@ -1216,7 +1234,7 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
     (names.findIdx? (· == distinct[k]!)).bind fun j =>
       byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
   let task := { db.task thm with goal, metas, consts := (db.task thm).consts ++ extraConsts }
-  let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses }
+  let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses, prior := c.prior.query thm }
   -- by default the procedures at the root first (ring, congruence: a hole that is an
   -- identity closes in milliseconds), then the proofs of one or two steps, which guided
   -- may miss for a longer one that a rail gives: a gap is short, and its term is read

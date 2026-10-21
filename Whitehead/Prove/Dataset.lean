@@ -17,6 +17,7 @@ value from its own searches.
 -/
 import Whitehead.Prove.Features
 import Whitehead.Prove.Measure
+import Whitehead.Prove.Prior
 
 namespace Whitehead.Prove
 
@@ -40,11 +41,12 @@ partial def ProofTree.skeleton? : ProofTree → Option Skeleton
   | .step a _ cs => do return .step a (← cs.mapM ProofTree.skeleton?)
   | .conv .. => none
 
-/-- The rows of statement `i` of the file, a theorem, along the proof `skel`. -/
+/-- The rows of statement `i` of the file, a theorem, along the proof `skel`; `prior` is
+the theorem's (`Prior.query`). -/
 def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
-    (negatives : Nat) (i : Nat) (skel : Skeleton) : IO (Array String) := do
+    (negatives : Nat) (i : Nat) (skel : Skeleton) (prior : Std.HashMap Nat Float := {}) : IO (Array String) := do
     let s := db.file.stmts[i]!
-    let env := { Env.init db index (db.task s.index) with uses }
+    let env := { Env.init db index (db.task s.index) with uses, prior }
     let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
     let env := r.env
     let mut seen : Std.HashSet Nat := {}
@@ -72,10 +74,10 @@ def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) 
 proof the skeleton reader leaves out (a shared conversion). With `negatives` 0, every
 variant of a node. -/
 def datasetRows (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
-    (negatives : Nat) (i : Nat) : IO (Option (Array String)) := do
+    (negatives : Nat) (i : Nat) (prior : Std.HashMap Nat Float := {}) : IO (Option (Array String)) := do
   match db.skeleton db.file.stmts[i]! with
   | .error _ | .ok none => return none
-  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel)
+  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel prior)
 
 /-- The header of the goal rows: the theorem by number and name, the goal node, the label
 (1 if the search proved it), the assertion whose premise the goal is (-1 for the root or

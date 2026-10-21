@@ -132,7 +132,11 @@ def featureNames : Array String := #[
   "shared_vars",    -- variables in two or more of the new goals
   "goal_vars",      -- the distinct variables of the goal
   "closable_meta",  -- new goals, not bare, with a variable, that a premise unifies with
-  "max_goal_vars"   -- the most distinct variables in one new goal
+  "max_goal_vars",  -- the most distinct variables in one new goal
+  -- the theorem's prior (`Prior.lean`): the earlier theorems like this one, by their
+  -- statements, and what their proofs use
+  "prior_knn",      -- the sum of the similarities of the near theorems whose proofs use the assertion
+  "prior_hit"       -- 1 if one does
 ]
 
 /-- `f` to four significant digits: what the data keeps, and so what a model is given in
@@ -168,6 +172,9 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
   let uses := v.uses
   let latest := match prop.step with
     | .assertion a => env.uses.latest a thm
+    | _ => 0
+  let prior := match prop.step with
+    | .assertion a => env.prior.getD a 0
     | _ => 0
   let goals := v.goals.get
   let isVar (e : Exp) : Bool := e.nodes.any Node.isVar
@@ -225,7 +232,9 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
     n sharedVars,
     n gi.vars.size,
     n closableMeta.size,
-    n (goalVars.foldl (init := 0) fun m vs => max m vs.size)
+    n (goalVars.foldl (init := 0) fun m vs => max m vs.size),
+    prior,
+    b (prior > 0)
   ]
 
 /-- The features of variant `p`, in the order of `featureNames`. -/

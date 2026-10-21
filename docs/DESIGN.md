@@ -2807,7 +2807,19 @@ variables in two or more new goals, the goal's distinct variables, the new goals
 variables that a premise unifies with (`closable_meta`), the most variables in one new
 goal; to the value (`goalFeatureNames`, 23 now): the step's other goals, those without a
 variable, the goal's variables a sibling has too, the siblings a premise fits. Both data
-sets exported again, the models trained again; measured below.
+sets exported again, the models trained again (`m1`, `v3`).
+- **Measured:** the value improves offline — AUC on set.mm's test goals 0.834 → 0.859, mm0
+  0.910 → 0.917, hol 0.759 → 0.873; `closable_meta` 27% and `shared_sibling_vars` 11% of
+  its gain — the ranker not: first 81.7% → 81.8% on set.mm, 65.5% → 66.4% on mm0, and
+  **the breakdown by metavariables is the same to 0.1%** (66.2% first where the step brings
+  three or more). In search nothing moves: set.mm 80 and 85 at 1 s (`learned`, with the
+  value), 102 and 101 at 5 s; mm0 250; peano 110; the compiler 505.
+- **What this says:** how a step's new goals constrain each other is not what decides
+  among the thousands of variants at a goal with metavariables; the features there are
+  local, and the choice is of the lemma — what the proof is about. The next lever is a
+  prior per theorem, as the plan had it and as premise selection does (MaSh): the
+  assertions used by the proofs of the earlier theorems whose statements resemble this
+  one. Not built so far.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
