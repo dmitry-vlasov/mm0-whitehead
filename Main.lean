@@ -67,7 +67,7 @@ def usage : String :=
                                  known proof's path (not the root, nor one a premise proves) is a
                                  task of its own under the theorem's premises, which tactic T gets
                                  --ms (100) ms for; the share closed, by depth and by the head of
-                                 the statement
+                                 the statement; --dump FILE: a line a subgoal, with its statement
   prove score <data.tsv> --model FILE
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
@@ -366,8 +366,10 @@ def withSpecNames (db : Prove.Db) (file : Mmb.MmbFile) (args : List String) : IO
       IO.eprintln e.format
       return none
     | .ok env =>
-      return some <| (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
+      let db := (Verify.specNames env file).foldl (init := db) fun db (i, name) =>
         if i < db.asserts.size then { db with asserts := db.asserts.modify i fun a => { a with name } } else db
+      return some <| (Verify.specTermNames env file).foldl (init := db) fun db (i, name) =>
+        if i < db.terms.size then { db with terms := db.terms.modify i fun t => { t with name } } else db
 
 /-- `prove variants`: how many variants the goal nodes on the paths of the known proofs
 have (`Prove/Measure.lean`). -/
@@ -640,6 +642,8 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
   let skipped ← IO.mkRef (0, 0)
   let start ← IO.monoMsNow
+  -- --dump FILE: a line a subgoal, the theorem, the depth, the head, closed, the ms, the statement
+  let dump ← IO.mkRef (#[] : Array String)
   -- a subgoal: its depth, the head of its statement, whether it was closed, and the ms
   let results ← Prove.runJobs jobs todo.size (fun k => do
       let s := file.stmts[todo[k]!]!
@@ -664,7 +668,13 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
         -- a subgoal is not a statement of the file, so the verifier cannot check it: as
         -- `prove goal`, any proof of the tree counts
         let r' ← Prove.searchWith Prove.acceptAny env' t.strategy searchLimits
-        out := out.push (depth, headName e, r'.proof.isSome, (← IO.monoMsNow) - t0)
+        let took := (← IO.monoMsNow) - t0
+        out := out.push (depth, headName e, r'.proof.isSome, took)
+        if (strOption args "--dump").isSome then
+          dump.modify (·.push ("\t".intercalate [db.asserts[thm]!.name, toString depth, headName e,
+            if r'.proof.isSome then "1" else "0", toString took,
+            -- the theorem's variables as $k, apart from set.mm's numerals c1, c2, ...
+            db.showExp e ((Array.range 128).map fun k => s!"${k}")]))
       return out)
     progress memLimit logLine
   let all : Array (Nat × String × Bool × Nat) := results.foldl (· ++ ·) #[]
@@ -686,6 +696,8 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
     let xs := all.filter (·.2.1 == hd)
     s!"{hd}: {pct (xs.filter (·.2.2.1)).size xs.size}"
   IO.println s!"  by the head of the statement: {"; ".intercalate line.toList}"
+  if let some f := strOption args "--dump" then
+    IO.FS.writeFile f ("thm\tdepth\thead\tclosed\tms\tstatement\n" ++ "\n".intercalate (← dump.get).toList ++ "\n")
   return 0
 
 /-- `prove featbench`: where the time of a learned rank goes. For each theorem of the range,

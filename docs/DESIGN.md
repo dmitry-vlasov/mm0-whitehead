@@ -2834,6 +2834,103 @@ should fall below the MM1 agent's — the hypothesis in a form that can still wi
 scratch on set.mm, gains on proofs of 5–20 mechanical steps, a step from 18% at 5 s into
 the twenties at most without measuring; on mm0, the congruence family back.
 
+**Tier 0, 2026-10-21: what the known proofs are made of, and scoped searches.**
+- **A census of set.mm's steps by lemma family** (names from the specification): of the
+  3.5M steps, 32% are deduction-form bookkeeping (`syl*`, `adant*`, `simp*`, `mp*`, …),
+  13% congruence (`*eq1d`, `fveq*`, `oveq*`, `*bid`, …), 6% chaining (`eqtr*`, `bitr*`,
+  `syl5eq*`), 8% existence and closure (`*ex`, `*cl*`), 3% propositional and predicate
+  calculus by section, 37% other. 10% of the proofs have every step in a family.
+- **The test theorems `learned` fails on** (514 of 618 at 5 s): their proofs have a median
+  of 17 steps, the 90th percentile 172; the proved ones a median of 3. The shares by family
+  are the same as the file's. The lemmas most used in them: `a1i` 6,315, `pire` 3,253,
+  `adantr`, `syl`, `_2re`, `adantl`, `mpbid`, `simpld`, `eqeltri`, `remulcli`, `elioore`,
+  `rexrd`, `readdcld`: deduction glue and the closure of real numbers (`recnd`, `rpred`,
+  `readdcld`: the "typing" side conditions, which my globs filed as other). So the test
+  part, the last tenth of set.mm, is real analysis; the problem there is depth, not one
+  missing family; and a `closure` procedure (membership in ℝ, ℂ, ℕ by structural
+  recursion with the closure lemma of each operation) belongs near the top of the order,
+  with `ctx`, which it needs.
+- **Scoped searches at the root, `seq(bfs(filter=F, size=200000, depth=3), learned)`,**
+  with F the propositional calculus (`range(0, 1533)`), the calculus, bookkeeping names
+  or congruence names: 6, 9, 1 and 19 proved against 80 for `learned`. Not a measurement
+  of the scopes: the prefix of 200,000 nodes leaves `learned` a tree of hundreds of
+  expanded goals, and its scoring of every variant at each of them takes the rest of the
+  second. A sub-search belongs at the leaves, under a budget, which is `at`.
+
+**Built, 2026-10-21:**
+- **`at($ pattern $, t, depth=N, ground=false)`** (`AnyStrategy.atGoals`): `t` in the
+  subtrees of the goals that match the pattern, down to N assertion nodes below such a
+  goal; a sub-search at every goal of a shape, where `focus` takes one goal by number.
+- **`range(A, B)`**, the assertions numbered in [A, B); **`--mm0 FILE`** for `prove
+  search` and `prove export`, the specification's names for set.mm.
+- **The subgoal bench, `prove subgoals --tactic T --ms N`:** each theorem's known proof is
+  replayed and closed, and each statement of a step below the root, as the whole proof
+  fixes it (`subgoalStatements`), is a task under the theorem's premises that the tactic
+  gets N ms for. A subgoal is measured as the proof fixes it: in a search the step above
+  may leave metavariables in it that a sibling decides, so this is what a tactic closes
+  of *determined* goals, the regime of a decision procedure. Proofs are accepted as `prove
+  goal` accepts them, since a subgoal is no statement of the file. On peano, every 10th
+  theorem, 100 ms: `bfs` closes 68% of 1,567 subgoals and `guided` 74%; by depth 55–61%
+  at depth 1 and 71–82% deeper (a subgoal deep in a proof is small); by shape, every
+  `≡wff`/`≡nat` goal (the definitional ones), 66–70% of equalities, 60–67% of
+  biconditionals, 26–35% of conjunctions.
+- **The bench on set.mm's test part** (618 theorems, 6,436 subgoals determined; 2,659
+  with a dummy left and 2,211 premises left out), 100 ms a subgoal:
+
+  | tactic | closed | depth 1 | 2–3 | 4–7 | 8+ | `e.` | `=` | `<->` | class relation | `->` |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | `bfs` | 16% | 18% | 14% | 16% | 16% | 10% | 10% | 34% | 3% | 14% |
+  | `guided` | 51% | 28% | 46% | 56% | 66% | 59% | 50% | 48% | 31% | 28% |
+  | `learned` | **67%** | 45% | 62% | 72% | 80% | 76% | 63% | 63% | 47% | 48% |
+  | `learned(value=4)` | 67% | 45% | 62% | 72% | 80% | 76% | 62% | 62% | 47% | 47% |
+
+  On every 50th theorem of the rest of the file, `learned` closes 66%; on mm0's test part,
+  `guided` 77% and `learned` 79% (`=` 87%, `<->` 51%, `an` 38%). The median time of a
+  closed subgoal is 1 ms: the budget goes to the failures. **The budget curve:** `learned`
+  closes 51% at 20 ms, 67% at 100 ms, 72% at 500 ms. Five times the budget buys five
+  points: the search saturates near three quarters, and the rest needs something else.
+- **What this says:** the search already closes two thirds of the determined subgoals,
+  and three quarters of the memberships, so the closure side conditions are mostly not
+  the gap; the direct premises of the root step (depth 1) are the hardest (45%), and a
+  subgoal deep in a proof is small and closed (80%). A procedure earns its place on the
+  third left: a third of the equalities and biconditionals, half of the order relations
+  and implications. Which those are, the dump of the failed subgoals shows (below).
+- **The failed third, by the kind of statement** (`prove subgoals --dump`, the statements
+  sorted by their terms; the theorem's variables apart from set.mm's numerals): of the
+  2,106 failed subgoals,
+
+  | kind | failed | of | share of the kind that fails |
+  |---|---|---|---|
+  | with quantifiers or binders (`wral`, `wrex`, `cab`, `crab`, `cmpt`, `cv`, …) | 821 | 2,121 | 38% |
+  | the theorem's own matter: specific lemmas, structures, functions | 801 | 2,384 | 33% |
+  | closure in ℝ, ℂ, ℕ, … under the context | 135 | 929 | 14% |
+  | an arithmetic identity under closure hypotheses (`ring`) | 120 | 195 | **61%** |
+  | set algebra (∪, ∩, ⊆, ∅, images) | 88 | 311 | 28% |
+  | numeral arithmetic (`17 · 17 = 289`, `2 · 16 = 32`) | 43 | 167 | 25% |
+  | a propositional tautology | 41 | 191 | 21% |
+  | an iff or a conjunction of arithmetic facts | 37 | 86 | 43% |
+  | order, linear arithmetic under the context | 20 | 52 | 38% |
+
+  A failed statement has 9 applications at the median, a closed one 5. The 2,659 subgoals
+  left out for a dummy are quantifier goals too, so binders weigh more than the table says.
+- **What this says for the order of the procedures:**
+  - **The procedures of the plan reach at most 484 of the 6,436 determined subgoals, 7.5
+    points** (67% → 75% if every one of them were perfect), about what five times the
+    search budget buys (72%). Three quarters of the failures are binders and the theorem's
+    own matter: the choice of lemmas and witnesses, which is the learned layer's and the
+    agent's part, not a procedure's.
+  - **`closure` is not needed:** the search closes 86% of the closure goals already.
+  - **`ring`**, the normalization of arithmetic identities under closure hypotheses, is the
+    one kind the search is bad at (61% fail) and the largest: first. It needs `congr`
+    (rewriting under positions) as its engine, so `congr` stays, as a component. Numeral
+    arithmetic is its decimal half (set.mm's `dec*` lemmas).
+  - `taut`, set algebra and `order` each stand for about 1% of the subgoals; after `ring`,
+    in that order, if the gap-filler bench on peano asks for them (its holes were
+    arithmetic and order).
+  - This is the analysis part of set.mm (the last tenth). The same bench on the first 90%
+    (every 50th theorem, 66% closed) should be sorted the same way before the order is
+    final.
+
 ### Mining and ranking (the design of 2026-10-13)
 
 What follows is the first design, kept as it was written. The author's answers above

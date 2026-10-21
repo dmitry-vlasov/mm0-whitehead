@@ -31,6 +31,7 @@ head of each.
 | Cheaper features | 2026-10-18 | 22% faster; expansion, not scoring, now limits |
 | Expert iteration, one round | 2026-10-19 | no gain |
 | Value of goals | 2026-10-19 | +5% at 1 s and +3% at 5 s, losing nothing; +10% at 5 s if mm0 may lose a fifth |
+| The subgoal bench: what search closes of the subgoals of known proofs | 2026-10-21 | `learned` 67% in 100 ms, 72% in 500 ms; the failures are binders and the theorem's own matter; procedures can add 7.5 points at most |
 
 ## 1. The engine without guidance
 
@@ -381,7 +382,43 @@ on one build.
 - **Open:** a value trained on the trees that the value itself grows; a value that sees
   the step's other goals, for goals with metavariables.
 
-## 7. What the experiments say, together
+## 7. The tactics system: what the known proofs need (`DESIGN.md`, "The tactics system")
+
+**Census of set.mm's 3.5M proof steps** by lemma family: 32% deduction-form bookkeeping
+(`syl*`, `adant*`, `simp*`), 13% congruence, 6% chaining, 8% closure, 37% other. By the
+shape of the step's conclusion: 34% a bare variable (the glue), 28% membership, 16%
+equality, 8% biconditional, 3% a relation. The test theorems `learned` fails on have
+proofs of 17 steps at the median (the proved ones 3); their most used lemmas are `a1i`
+(6,315), `pire`, `adantr`, `syl`, `_2re`, `recnd`, `readdcld`: glue and the closure of ℝ.
+
+**Scoped searches at the root** (`seq(bfs(filter=F, size=200000, depth=3), learned)`): 6
+to 19 proved against 80. Not a measure of the scopes: the breadth-first prefix leaves
+`learned` a tree of hundreds of expanded goals, and scoring each one's variants takes the
+second. A sub-search belongs at the leaves, under a budget: `at($ pattern $, t, depth=N)`
+was built for it.
+
+**The subgoal bench** (`prove subgoals`): each statement of a step below the root of a
+known proof, as the proof fixes it, is a task under the theorem's premises; the tactic gets
+100 ms. set.mm's test part, 618 theorems, 6,436 determined subgoals:
+
+| tactic | closed | depth 1 | depth 8+ | membership | equality | biconditional |
+|---|---|---|---|---|---|---|
+| `bfs` | 16% | 18% | 16% | 10% | 10% | 34% |
+| `guided` | 51% | 28% | 66% | 59% | 50% | 48% |
+| `learned` | **67%** | 45% | 80% | 76% | 63% | 63% |
+
+`learned` closes 51% at 20 ms and 72% at 500 ms: five times the budget buys five points.
+On peano `bfs` closes 68% and `guided` 74%; on mm0 `learned` 79%.
+
+**The failed third,** by the kind of statement: 821 with quantifiers or binders (38% of
+that kind fail), 801 the theorem's own matter (33%), 135 closure in ℝ/ℂ/ℕ (14%), 120
+arithmetic identities under closure hypotheses (61%), 88 set algebra (28%), 43 numeral
+arithmetic (25%), 41 propositional tautologies (21%), 37 iffs of arithmetic facts, 20
+order facts. The decision procedures of the plan reach at most 484 subgoals, 7.5 points;
+three quarters of the failures are the choice of lemmas and witnesses. The one kind the
+search is bad at is arithmetic identities: `ring` first, `closure` not needed.
+
+## 8. What the experiments say, together
 
 - **Search is the engine's strength, and its reach is short:** unguided, 4 steps in a
   second. Everything that gained pushes it further along good paths: rails that close the
@@ -398,3 +435,7 @@ on one build.
 - **What remains hard:** long proofs whose steps all look ordinary (mm0's congruences),
   goals that are mostly metavariables, and arithmetic, which asks for decision procedures
   rather than search.
+- **Search closes two thirds of the determined subgoals of real proofs in 100 ms,** and
+  three quarters of the closure side conditions; decision procedures can add 7.5 points at
+  most on set.mm's analysis part, `ring` being the one kind search is bad at. The failures
+  that remain are binders and the theorem's own lemmas: the creative step.

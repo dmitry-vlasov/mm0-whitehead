@@ -186,4 +186,21 @@ def specNames (env : Env) (f : MmbFile) : Array (Nat × String) := Id.run do
     | _, _ => pure ()
   return names
 
+/-- The names the specification gives to the terms of the proof file, as `specNames` gives
+those of the assertions: pairs of the number in its term table and the name. -/
+def specTermNames (env : Env) (f : MmbFile) : Array (Nat × String) := Id.run do
+  let mut names : Array (Nat × String) := #[]
+  let mut next := 0
+  for s in f.stmts do
+    let isLocal := match s.kind with
+      | .termDef l | .thm l => l
+      | _ => false
+    if isLocal then continue
+    let some decl := env.order[next]? | break
+    next := next + 1
+    match s.kind, decl with
+    | .termDef _, .term i => names := names.push (s.index, env.terms[i]!.name)
+    | _, _ => pure ()
+  return names
+
 end Whitehead.Verify
