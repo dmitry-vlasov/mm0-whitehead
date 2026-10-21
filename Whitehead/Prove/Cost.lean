@@ -154,8 +154,10 @@ def Values.get (vs : Values) (env : Env) (stats : SymbolStats) (m : Model) (scal
   else
     let ti := vs.task.getD (env.taskInfo stats)
     let depth := env.goalDepth env.props[q]!.parent + 1
-    let s := (env.propView q).goals.get.foldl (init := 0) fun acc g =>
-      acc - Float.log (max 0.001 (m.value (env.goalFeatures stats ti g depth)))
+    let goals := (env.propView q).goals.get
+    let s := (Array.range goals.size).foldl (init := 0) fun acc i =>
+      let siblings := (Array.range goals.size).filterMap fun j => if j == i then none else some goals[j]!
+      acc - Float.log (max 0.001 (m.value (env.goalFeatures stats ti goals[i]! depth siblings)))
     let v := (scale.toFloat * s).round.toUInt64.toNat
     (v, { vs with of := vs.of.insert q v, task := some ti })
 

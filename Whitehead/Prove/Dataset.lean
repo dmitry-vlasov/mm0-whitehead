@@ -105,8 +105,11 @@ def goalRows (env : Env) (stats : SymbolStats) (thm : Nat) (proved : Bool) (cap 
       | none => -1
     let label := if h == 0 then proved
       else !g.proofs.isEmpty && (!g.expr.hasVars || g.parent.any fun q => !env.props[q]!.proofs.isEmpty)
+    let siblings := match g.parent with
+      | some q => env.props[q]!.children.filterMap fun c => if c == h then none else some env.hyps[c]!.expr
+      | none => #[]
     "\t".intercalate ([toString thm, env.db.asserts[thm]!.name, toString h, if label then "1" else "0",
       toString a, toString g.children.size] ++
-      ((env.goalFeatures stats ti g.expr (env.goalDepth h)).map featureText).toList)
+      ((env.goalFeatures stats ti g.expr (env.goalDepth h) siblings).map featureText).toList)
 
 end Whitehead.Prove

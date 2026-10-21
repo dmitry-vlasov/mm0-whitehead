@@ -125,7 +125,14 @@ def featureNames : Array String := #[
   "shared_terms",   -- of them, those the goal has
   "shared_idf",     -- the share of the rule's weight that the goal has
   "extra_idf",      -- the weight of the terms the rule brings that the goal lacks
-  "siblings_log"    -- log(1 + the variants of the goal)
+  "siblings_log",   -- log(1 + the variants of the goal)
+  -- the metavariables, where the rank is weakest (2026-10-21): a step whose new goals
+  -- share variables is constrained by them; one whose new variables each stand alone is not
+  "meta_goals",     -- new goals with a variable
+  "shared_vars",    -- variables in two or more of the new goals
+  "goal_vars",      -- the distinct variables of the goal
+  "closable_meta",  -- new goals, not bare, with a variable, that a premise unifies with
+  "max_goal_vars"   -- the most distinct variables in one new goal
 ]
 
 /-- `f` to four significant digits: what the data keeps, and so what a model is given in
@@ -170,6 +177,15 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
       else
         let x := Node.varId n
         if gi.vars.contains x || acc.contains x then acc else acc.push x
+  -- the variables of each new goal, distinct
+  let goalVars : Array (Array Nat) := goals.map fun g =>
+    g.nodes.foldl (init := (#[] : Array Nat)) fun acc n =>
+      if Node.isVar n && !acc.contains (Node.varId n) then acc.push (Node.varId n) else acc
+  let allVars := goalVars.foldl (init := (#[] : Array Nat)) fun acc vs => vs.foldl (init := acc) fun acc v => if acc.contains v then acc else acc.push v
+  let sharedVars := (allVars.filter fun v => (goalVars.filter (·.contains v)).size ≥ 2).size
+  let closableMeta := (Array.range goals.size).filter fun i =>
+    let g := goals[i]!
+    !g.isVar && !goalVars[i]!.isEmpty && !(env.premises.unify g).isEmpty
   -- the rule's own part: from the file's table, or for an unfolding's rule, found here
   let ri := match prop.step with
     | .assertion a => stats.rules[a]?.getD (stats.ruleInfo prop.rule)
@@ -204,7 +220,12 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
     n shared.size,
     if ruleW == 0 then 0 else w shared / ruleW,
     ruleW - w shared,
-    Float.log (1 + n gi.variants)
+    Float.log (1 + n gi.variants),
+    n (goalVars.filter (!·.isEmpty)).size,
+    n sharedVars,
+    n gi.vars.size,
+    n closableMeta.size,
+    n (goalVars.foldl (init := 0) fun m vs => max m vs.size)
   ]
 
 /-- The features of variant `p`, in the order of `featureNames`. -/
@@ -254,12 +275,19 @@ def goalFeatureNames : Array String := #[
   "size_ratio",     -- size / the size of the theorem's goal
   "depth",          -- the assertion nodes from the root to it
   "task_premises",  -- the premises of the theorem
-  "task_size"       -- the nodes of the theorem's goal
+  "task_size",      -- the nodes of the theorem's goal
+  -- the step's other goals (2026-10-21): a goal with metavariables is proved only as its
+  -- siblings allow, by binding them
+  "siblings",       -- the step's other goals
+  "siblings_ground",-- of them, without a variable
+  "shared_sibling_vars", -- the goal's variables that a sibling has too
+  "sibling_closable"     -- siblings, not bare, that a premise of the theorem unifies with
 ]
 
-/-- The features of goal `e`, at `depth` assertion nodes from the root, in the order of
-`goalFeatureNames`. -/
-def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp) (depth : Nat) : Array Float := Id.run do
+/-- The features of goal `e`, at `depth` assertion nodes from the root, among the step's
+other goals `siblings`, in the order of `goalFeatureNames`. -/
+def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp) (depth : Nat)
+    (siblings : Array Exp := #[]) : Array Float := Id.run do
   -- the nesting: the ends of the applications the walk is inside
   let mut ends : Array Nat := #[]
   let mut height := 0
@@ -280,6 +308,7 @@ def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp)
   let shared := terms.foldl (init := 0) fun acc t => if ti.terms.contains t then acc + stats.idf t else acc
   let head := e.nodes[0]!
   let headTerm := !Node.isVar head && !Node.isConst head
+  let sharedSibling := (vars.toArray.filter fun v => siblings.any (·.hasVar v)).size
   let b (x : Bool) : Float := if x then 1 else 0
   let n (x : Nat) : Float := x.toFloat
   return Array.map round4 #[
@@ -301,7 +330,11 @@ def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp)
     n e.size / n (max 1 ti.size),
     n depth,
     n ti.premises,
-    n ti.size
+    n ti.size,
+    n siblings.size,
+    n (siblings.filter (!·.hasVars)).size,
+    n sharedSibling,
+    n (siblings.filter fun s => !s.isVar && !(env.premises.unify s).isEmpty).size
   ]
 
 /-- The assertion nodes from the root to goal node `h`. -/

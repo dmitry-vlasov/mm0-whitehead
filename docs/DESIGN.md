@@ -2475,8 +2475,10 @@ at 5 s, no agent and no tokens:
     are order and divisibility (`0 < c -> a < b -> a·c < b·c`, `n ∥ a -> n ∥ b -> n ∥ a + b`),
     existentials, pairs, and the substance of the theorems (`a + x = b -> b + y = a -> a =
     b`): `order` territory, or none.
-  - **The learned rank hurts on peano** (7 against 11): the model is set.mm's. For a file it
-    was not trained on, `guided` or `procedural`.
+  - **The learned rank fills fewer holes than breadth first on peano** (7 against 11),
+    though on peano's test theorems it proves more (112 of 297 at 1 s, against 103 for
+    `guided` and 101 for `bfs`): a hole is a short, determined statement, where a rank
+    buys little and its cost shows; so the filler keeps breadth first and the rails.
   - **A breadth-first prefix of 20,000 nodes before the procedures** loses the ring hole
     (`seq(bfs(size=20000, depth=2), procedural)`: not in 5 s; with 2,000 nodes, 37 ms;
     the procedures first, 22 ms): the procedures belong before the search.
@@ -2783,6 +2785,29 @@ from the search's own trees, as GPT-f learns its value.
     with the steps above relative and the leaf absolute, mm0 still loses (177).
 - **Next, perhaps:** a value trained on the trees that the value itself grows (the trees
   here are `learned`'s); or a value that knows the step's other goals, for metavariables.
+
+**Step 5, the step's other goals (2026-10-21).** Where the rank is weak, on set.mm's test
+part (the known variant's place among 50 others, the w-sqrt model):
+
+| nodes | share | first | in 5 |
+|---|---|---|---|
+| the goal has no metavariable | 7% | 86.2% | 97.2% |
+| the goal has metavariables | 93% | 78.0% | 93.8% |
+| the known step brings no new variable | 50% | 83.7% | 96.1% |
+| it brings 1–2 | 38% | 75.6% | 93.5% |
+| it brings 3 or more (a median of 3,552 variants) | 12% | 66.3% | 86.9% |
+| it has a bare new goal (`ax-mp`'s minor premise) | 2% | 69.1% | 86.4% |
+| depth 1 | 3% | 93.7% | 99.6% |
+| depth 2–3 | 17% | 73.8% | 92.2% |
+
+So nearly every node has metavariables, and the steps that bring several are where the
+rank fails most. What the features could not see: how the new goals constrain each other.
+Added, to the ranker (`featureNames`, 28 now): the new goals with a variable, the
+variables in two or more new goals, the goal's distinct variables, the new goals with
+variables that a premise unifies with (`closable_meta`), the most variables in one new
+goal; to the value (`goalFeatureNames`, 23 now): the step's other goals, those without a
+variable, the goal's variables a sibling has too, the siblings a premise fits. Both data
+sets exported again, the models trained again; measured below.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

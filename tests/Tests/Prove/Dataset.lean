@@ -82,9 +82,12 @@ def datasetTests : TestM Unit := do
   let mut same := true
   for p in leaves do
     let depth := env.goalDepth env.props[p]!.parent + 1
-    let before := (env.propView p).goals.get.map fun g => env.goalFeatures stats ti g depth
+    let goals := (env.propView p).goals.get
+    let others (xs : Array Exp) (i : Nat) : Array Exp := (Array.range xs.size).filterMap fun j => if j == i then none else some xs[j]!
+    let before := (Array.range goals.size).map fun i => env.goalFeatures stats ti goals[i]! depth (others goals i)
     let ((), after) ← (proveProp p).run env
-    let made := after.props[p]!.children.map fun h => after.goalFeatures stats ti after.hyps[h]!.expr (after.goalDepth h)
+    let kids := after.props[p]!.children.map fun h => after.hyps[h]!.expr
+    let made := (Array.range kids.size).map fun i => after.goalFeatures stats ti kids[i]! (after.goalDepth after.props[p]!.children[i]!) (others kids i)
     if made != before then same := false
   check s!"goal rows: the features of the new goals of {leaves.size} variants, before and after their expansion"
     (leaves.size > 5 && same)
