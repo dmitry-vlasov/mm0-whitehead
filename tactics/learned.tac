@@ -6,11 +6,12 @@
 -- the model's score, divided by width (DESIGN.md, "The learned ranking layer"). With
 -- value K, a step also costs K times -ln V of each of its new goals, V the learned
 -- probability that a goal is proved (--value FILE), less that of its goal's best first
--- variant; with absolute=1, not less (stronger on set.mm, weaker on mm0's long chains).
-learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0) =
+-- variant; with absolute=1, not less (stronger on set.mm, weaker on mm0's long chains);
+-- with cap=C, a step's value term is at most C.
+learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0, cap=0) =
   seq(
     bfs(filter=premises(0), depth=1),
     first(
       follow(subproofs(@close, rank=reach, open=0), at=open, upto=@upto, ground=true),
       follow(subproofs(@open, rank=recent), at=root),
-      search(depth(follow, penalty=@penalty, by=model, width=@width, value=@value, absolute=@absolute))))
+      search(depth(follow, penalty=@penalty, by=model, width=@width, value=@value, absolute=@absolute, cap=@cap))))

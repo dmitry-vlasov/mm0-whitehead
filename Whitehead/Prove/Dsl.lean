@@ -253,7 +253,7 @@ def docs : Array Doc := #[
   ⟨"at", "tactic", "at($ pattern $, t, depth=N, ground=false)",
     "t, only in the subtrees of the goals that match the pattern, down to N assertion nodes below such a goal (0: all the way); ground: only at goals without metavariables. A sub-search at every goal of a shape, each where it stands"⟩,
   ⟨"loop", "tactic", "loop(t, N)", "t again from its start each time it is done, while the tree grows, up to N times"⟩,
-  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent|model, width=W, value=K, absolute=0|1)",
+  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent|model, width=W, value=K, absolute=0|1, cap=C)",
     "the number of assertion nodes above a leaf's goal; those labelled L1, L2, ... (follow, choose or search: who expanded them) cost nothing, the other variants at a goal where such a node hangs cost the goal's full depth, and a goal that such a node left open costs N more; with by and width, a step costs 1 and its place among the variants of its goal (from 0), by the proofs before the theorem that use its assertion (used: how many; recent: the latest) or by the learned model's score (model, with --model FILE), divided by W; with value (and by), a step costs also K times the sum of −ln V over its new goals, V the learned probability that a goal is proved (with --value FILE), rounded, less that of the best of its goal's first W variants (absolute=1: not less)"⟩,
   ⟨"subproofs", "guide", "subproofs(count=3, rank=occurrences, min=2, source=earlier, open=N)",
     "subproofs of earlier proofs that fit the goal: count of them; rank occurrences (in the most proofs before the theorem), size (the largest), small, reach (those leaving the fewest hypotheses that no premise fits first), specific (those whose conclusion has the most nodes that are not variables first) or recent (those in the latest proof before the theorem first); open: only those leaving at most N open; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two)"⟩,
@@ -514,7 +514,7 @@ partial def cost (c : Ctx) (a : Ast) : Except ParseError Cost := do
   | .call name pos args =>
     match name with
     | "depth" =>
-      checkNames name args #["penalty", "by", "width", "value", "absolute"]
+      checkNames name args #["penalty", "by", "width", "value", "absolute", "cap"]
       let free ← (args.filter (·.1.isNone)).mapM fun (_, v) => labelOf name v
       let named (k : String) : Option Ast := (args.find? (·.1 == some k)).map (·.2)
       let penalty ← numOr name "penalty" 0 (named "penalty")
@@ -537,7 +537,8 @@ partial def cost (c : Ctx) (a : Ast) : Except ParseError Cost := do
           | none, _ => fail pos "`value` needs a value of goals (--value FILE)"
           | _, none => fail pos "`depth` with `value` needs a `by` and a `width`"
       let absolute ← numOr name "absolute" 0 (named "absolute")
-      return .depth free penalty rank width value (absolute != 0)
+      let cap ← numOr name "cap" 0 (named "cap")
+      return .depth free penalty rank width value (absolute != 0) cap
     | _ =>
       match c.expand? name pos args with
       | some r =>

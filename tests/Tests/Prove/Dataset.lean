@@ -169,5 +169,12 @@ def modelTests : TestM Unit := do
           | .ok t =>
             let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
             check "model: a search with an absolute value of goals proves syl" (r.ending == .proved)
+          match Dsl.parseTactic { ctx with value := some v } "search(depth(by=model, width=1, value=2, cap=1))" with
+          | .error e => check "model: a capped value in a search" false e.msg
+          | .ok t =>
+            let r ← search vc { Env.init db db.index (db.task (thmId db "syl")) with uses } t.strategy { maxProps := 100000 }
+            check "model: a search with a capped value of goals proves syl" (r.ending == .proved)
+          checkEq "model: cap is a parameter of depth"
+            ((Dsl.parseTactic { ctx with value := some v } "search(depth(by=model, width=1, value=2, cap=x))").toOption.isNone) true
 
 end Tests.Prove

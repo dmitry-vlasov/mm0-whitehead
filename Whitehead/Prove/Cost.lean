@@ -44,9 +44,13 @@ inductive Cost where
   it. With `absolute`, the term itself, not its excess over the goal's best: then a leaf
   pays for how hard all the goals on its way look, which compares the leaves across the
   tree, but makes a long proof costly however good each of its steps is (mm0's
-  congruences, `docs/DESIGN.md`, step 4). Still fair: the term is not negative. -/
+  congruences, `docs/DESIGN.md`, step 4). Still fair: the term is not negative. With a
+  `cap` above 0, a step's value term is at most `cap`: the value reorders the steps within
+  that many levels of cost and never puts one out of reach — a model trained on short
+  searches calls unlikely what a longer one proves (`DESIGN.md`, "The value at 5 s"). -/
   | depth (free : Array Label := #[]) (penalty : Nat := 0) (rank : Option VariantRank := none)
       (width : Nat := 0) (value : Option (Model × Nat) := none) (absolute : Bool := false)
+      (cap : Nat := 0)
   deriving Inhabited, Repr
 
 /-- The nodes with one of a set of labels, kept up to date as the tree grows: the
@@ -169,9 +173,10 @@ rank has not found them.
 A step without premises has no new goals, and costs what that best variant costs: with
 `absolute`, nothing would put it after the steps that leave goals, as the rank alone does
 (`placeOf`). -/
-def valueOf (env : Env) (value : Option (Model × Nat)) (absolute : Bool) (rank : VariantRank) (width : Nat)
+def valueOf (env : Env) (value : Option (Model × Nat)) (absolute : Bool) (cap : Nat) (rank : VariantRank) (width : Nat)
     (pl : Places) (vs : Values) (q : Nat) : Nat × Places × Values := Id.run do
   let some (m, scale) := value | return (0, pl, vs)
+  let capped (t : Nat) : Nat := if cap > 0 then min t cap else t
   let stats := pl.stats.getD (SymbolStats.ofDb env.db)
   let mut pl := { pl with stats := some stats }
   let mut vs := vs
@@ -196,23 +201,23 @@ def valueOf (env : Env) (value : Option (Model × Nat)) (absolute : Bool) (rank 
         best := some (best.elim v (min v))
       vs := { vs with first := vs.first.insert h (best.getD 0) }
       pure (best.getD 0)
-  if env.props[q]!.rule.hyps.isEmpty then return (if absolute then first else 0, pl, vs)
+  if env.props[q]!.rule.hyps.isEmpty then return (capped (if absolute then first else 0), pl, vs)
   let (v, vs') := vs.get env stats m scale q
-  return (if absolute then v else v - min v first, pl, vs')
+  return (capped (if absolute then v else v - min v first), pl, vs')
 
 /-- `goalCost` with the steps ranked: a step that is not free costs one and its place by
 `rank`, divided by `width`, and its value term. -/
 partial def rankedCost (env : Env) (m : Marks) (penalty : Nat) (rank : VariantRank) (width : Nat)
-    (value : Option (Model × Nat)) (absolute : Bool) (st : Std.HashMap Nat Nat × Places × Values) (h : Nat) :
+    (value : Option (Model × Nat)) (absolute : Bool) (cap : Nat) (st : Std.HashMap Nat Nat × Places × Values) (h : Nat) :
     Nat × (Std.HashMap Nat Nat × Places × Values) :=
   if let some c := st.1[h]? then (c, st)
   else match env.hyps[h]!.parent with
     | none => (0, (st.1.insert h 0, st.2))
     | some q =>
-      let (c, (memo, pl, vs)) := rankedCost env m penalty rank width value absolute st env.props[q]!.parent
+      let (c, (memo, pl, vs)) := rankedCost env m penalty rank width value absolute cap st env.props[q]!.parent
       let (r, pl) := placeOf env pl rank width q
       if !m.props.contains q then
-        let (v, pl, vs) := valueOf env value absolute rank width pl vs q
+        let (v, pl, vs) := valueOf env value absolute cap rank width pl vs q
         let c := c + 1 + r / width + v
         (c, (memo.insert h c, pl, vs))
       else
@@ -236,7 +241,7 @@ def Strategy.search (c : Cost) : Strategy SearchState where
   root := none
   init := {}
   step env st := Id.run do
-    let .depth free penalty rank width value absolute := c
+    let .depth free penalty rank width value absolute cap := c
     match rank.filter fun _ => width > 0 with
     | some rank =>
       let marks := st.marks.update env free
@@ -249,7 +254,7 @@ def Strategy.search (c : Cost) : Strategy SearchState where
       for p in env.leafs do
         if env.props[p]!.expanded then continue
         let h := env.props[p]!.parent
-        let (k, (cost, pl, vs)) := rankedCost env marks penalty rank width value absolute memo h
+        let (k, (cost, pl, vs)) := rankedCost env marks penalty rank width value absolute cap memo h
         let (r, pl) := placeOf env pl rank width p
         memo := (cost, pl, vs)
         let k := k + r / width
@@ -269,7 +274,7 @@ def Strategy.search (c : Cost) : Strategy SearchState where
         if best.any (· < k) then break
         for p in byBase[k]! do
           let (cost, pl, vs) := memo
-          let (v, pl, vs) := valueOf env value absolute rank width pl vs p
+          let (v, pl, vs) := valueOf env value absolute cap rank width pl vs p
           memo := (cost, pl, vs)
           let t := k + v
           match best with

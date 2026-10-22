@@ -2890,6 +2890,23 @@ now +4 at 1 s and −7 at 5 s (119 → 112): the guidance of a goal's value comp
 rank of the step once the search has time to go deep. The features stay (they cost
 nothing); a 5 s search runs `learned` alone.
 
+**The value at 5 s (2026-10-22).** Why the value loses at 5 s what it gains at 1 s, from
+the two 5 s logs (m3; `learned` 119, `learned(value=4)` 112, 19 lost and 12 gained):
+- **It expands more and smaller.** Over the 618 theorems the value's search expands 101,430
+  goals against 61,991, and makes 310 million assertion nodes against 528 million: it
+  chooses goals with few variants. Several of its runs go well past the limit (9–14 s),
+  because a round's value terms are found before the time is checked.
+- **It dives.** On one lost theorem it expanded 3,098 goals without a single join: a chain
+  of steps each with one new goal that looks provable, while the alternatives at the top
+  were put out of reach. A step whose new goals the model doubts costs K·Σ −ln V on top of
+  its place — with V = 0.05 on two goals, 24 levels of cost: the value prunes rather than
+  reorders. The model is trained on the trees of 1 s searches, labelled by what 1 s proved,
+  so it doubts exactly the goals that a 5 s search proves (three- and four-step proofs,
+  where m3's gain at 5 s is).
+- **Two remedies, measured** (`EXPERIMENTS.md`, "The value at 5 s"): a `cap` on the value
+  term per step (`depth(..., cap=C)`: the value reorders within C levels of cost and never
+  prunes), and a value trained on goal rows of 5 s searches (`v5`).
+
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
 **What the experiments left** ("The agent bench", "Whitehead as a gap filler", "The
