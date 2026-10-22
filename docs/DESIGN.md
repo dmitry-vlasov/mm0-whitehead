@@ -2881,7 +2881,13 @@ the theorem's prior: of its votes, the share on assertions whose conclusion has 
 head term (`prior_head`), the weighted mean over the goal's terms of the share on
 assertions concluding with the term (`prior_terms`), and the least such share
 (`prior_min`) — does what the theorems like this one used conclude about what the goal is
-made of. They are found once per search, in `Env.taskInfo` (26 goal features).
+made of. They are found once per search, in `Env.taskInfo` (26 goal features). Measured
+(`EXPERIMENTS.md`, "The value's prior"): the value `v4` on m3's trees has AUC 0.860 on
+set.mm's test goals against 0.856 without them on the same rows, `prior_head` 5% of the
+gain, and the search is the same (91 at 1 s). With the sharper ranker the value itself is
+now +4 at 1 s and −7 at 5 s (119 → 112): the guidance of a goal's value competes with the
+rank of the step once the search has time to go deep. The features stay (they cost
+nothing); a 5 s search runs `learned` alone.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

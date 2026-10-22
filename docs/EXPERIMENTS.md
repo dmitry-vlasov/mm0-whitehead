@@ -39,6 +39,7 @@ head of each.
 | A prior per theorem (k-NN premise selection) | 2026-10-22 | the strongest feature (37% of the gain); first 81.8% → 83.6%; where the step brings 3+ variables 66% → 71%; set.mm **89** at 1 s and **105** at 5 s with the value, the best so far |
 | `order`, the cheap version: a scoped sub-search at order goals | 2026-10-22 | nothing, on set.mm and on peano |
 | The prior tuned by itself (`prove prior`: term pairs, a self vote, 1,000 neighbours by the 4th power of similarity) | 2026-10-22 | used assertions in the prior's first 100: 47% → 55%; the ranker m3: first 83.6% → 84.6%, with 3+ new variables 70.5% → 74.9%; set.mm **87** at 1 s (83), **119** at 5 s (104) with `learned` alone; naive Bayes loses |
+| The value's prior (three goal features of the theorem's prior) | 2026-10-22 | AUC 0.856 → 0.860, search the same; with m3 the value is +4 at 1 s and −7 at 5 s |
 
 ## 1. The engine without guidance
 
@@ -491,10 +492,28 @@ hello_mmc 74.1% (73.4%). In search, against m2 (both with the value v3):
 | `learned(value=4)`, 5 s | 105 | 108 |
 | mm0 `congruent`, peano, hello_mmc, 1 s | 249, 113, 505 | 249, 107, 505 |
 
-The gain at 5 s is of three- and four-step proofs that m2 did not reach in time. The
-value v3, trained on the trees of an older ranker, now costs at 5 s what it gives at 1 s;
-it is trained again on m3's trees, with the prior's goal features (below). Peano loses 6
-of 113: it is not among the training files, and the prior's scale changed under it.
+The gain at 5 s is of three- and four-step proofs that m2 did not reach in time. Peano
+loses 6 of 113: its 8 lost are four-step congruences m2 proved at 0.7–0.96 s, at the edge
+of the limit, and it is not among the training files.
+
+**The value's prior** (`DESIGN.md`, "The value's prior"): three goal features of the
+theorem's prior — the share of its votes on assertions concluding with the goal's head
+term, the weighted mean of that share over the goal's terms, and the least such share. The
+value `v4`, trained on the goal rows of m3's trees (1 s searches of every second set.mm
+theorem and the other files), against one trained on the same rows with the three zeroed:
+
+| | without | with the prior's features |
+|---|---|---|
+| set.mm test goals, AUC | 0.856 | 0.860 |
+| mm0, hol | 0.918, 0.841 | 0.921, 0.857 |
+| set.mm search, m3, `learned(value=4)`, 1 s | 91 (v3) | 91 |
+| 5 s | 108 (v3) | 112 |
+
+`prior_head` carries 5% of the trees' gain, the other two nothing; the AUC moves by 0.004
+and the search by nothing at 1 s. With the sharper ranker the value is now worth +4 at 1 s
+(87 → 91) and −7 at 5 s (119 → 112), where with m2 it was +6 and +1: the value's guidance
+competes with the rank at longer budgets. Kept as features (they cost nothing); the
+default for a 5 s search is `learned` alone.
 
 **`order`, the cheap version:** a breadth-first sub-search at every order goal among the
 order lemmas (`at`), before `learned`'s search: on peano's subgoals 1,178 against 1,179,

@@ -702,8 +702,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    prior`, a second a run: term pairs, a self vote, 1,000 neighbours by the 4th power of
    their similarity; used assertions in its first 100: 47% → 55%): the ranker `m3`, set.mm
    **87 at 1 s and 119 at 5 s** with `learned` alone (83, 104), the best so far; peano
-   107 (113; not a training file). The value with the prior's goal features (`v4`) is
-   being trained on m3's trees. `order` as a scoped
+   107 (113; not a training file). The value with the prior's goal features (`v4`, on
+   m3's trees): AUC 0.856 → 0.860, the search the same; with m3 the value is +4 at 1 s
+   (91) and −7 at 5 s (112), so a 5 s search runs `learned` alone. `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the
