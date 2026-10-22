@@ -43,7 +43,8 @@ head of each.
 | The value at 5 s: its term capped (`cap=2`) | 2026-10-22 | the value prunes rather than reorders (it dives: 3,098 single-goal expansions on one theorem); capped at two levels of cost, **91 at 1 s and 120 at 5 s** (87, 119 without the value; 91, 112 uncapped) |
 | Where the time goes: the search profiled, three exact speedups | 2026-10-22 | nine tenths of the search is ranking every variant of each expanded goal (`learned` runs at a third of `bfs`'s node rate); frontier goals not ranked, a tighter tree walk, one unify a goal: set.mm **97 at 1 s** (91), 122 at 5 s (120) |
 | The rank against all the variants; a two-stage rank | 2026-10-22 | over all variants of a goal (median 1,076) the known step is first at **23%**, not the 84% the sampled data showed; a cheap model's first 128 hold it at 93.7% against the full model's 95.0%; two stages 1.7× faster a node, the same theorems (95–97 at 1 s, 122–124 at 5 s): the rank's quality, not speed, now limits |
-| Hard negatives (`prove export --hard`), two rounds | 2026-10-22 | half the negatives the cheap model's highest-scored; round 1 stopped at 35 trees (tuned on the old rows); round 2, tuned on hard rows too: over all variants worse (in 10: 54% against 63.5%, the model unlearns the prior the sampler uses), in search a little better: m5 with cheap5 **98 at 1 s, 127 at 5 s** (m3: 97, 122) |
+| Hard negatives (`prove export --hard`), two rounds | 2026-10-22 | half the negatives the cheap model's highest-scored; round 1 stopped at 35 trees (tuned on the old rows); round 2, tuned on hard rows too: over all variants worse (in 10: 54% against 63.5%, the model unlearns the prior the sampler uses), in search a little better: m5 with cheap5 98 at 1 s, 127 at 5 s (m3: 97, 122) |
+| More negatives, drawn evenly (200 a node, every 3rd theorem, tuning rows alike) | 2026-10-22 | the honest measure moves half a point (first 23.8%); in search the day's largest gain: m6 with cheap6 in two stages **104 at 1 s, 128 at 5 s** (m3: 97, 122); the search is the judge, the offline measure a check |
 
 ## 1. The engine without guidance
 
@@ -643,6 +644,29 @@ so far, within the noise of two at 1 s and a little beyond it at 5 s. This line 
 here: a model trained against a sampler's choices unlearns the sampler's features, so the
 next step on the rank would be more negatives drawn evenly (200 a node on a third of the
 theorems) rather than harder ones.
+
+**More negatives, drawn evenly:** every 3rd training theorem and every 3rd tuning theorem
+of set.mm, hello_mmc and mm0 exported with 200 negatives a node (69 million rows for
+set.mm's training part, as many as the usual data), joined to the usual data as extras; the
+ranker `m6` (978 trees) and the cheap `cheap6`. Over all the variants of the test goals
+(`learn/recall.py`) the rank moves by half a point — first 23.8% (m3 23.3%), in 10 63.7%
+(63.5%), in 128 95.1% (95.0%) — and the prior keeps its 47% of the gain. In search it is
+the largest gain of the day:
+
+| set.mm test, `learned(value=4)`, v4 | 1 s | 5 s |
+|---|---|---|
+| m3 | 97 | 122 |
+| m5 (hard negatives), two stages | 98 | 127 |
+| m6 | 100 | 126 |
+| **m6, two stages (cheap6, 10 trees)** | **104** | **128** |
+
+Four times the negatives a node, drawn evenly, with the tuning rows of the same kind, give
++7 at 1 s and +6 at 5 s against m3, beyond the noise of two — while the measure over all
+variants barely moves. The two measures disagree in both directions now (the hard
+negatives lost offline and gained a little in search; these gain in search and not
+offline), so the search is the judge, and the offline measure a check against gross loss.
+The best setting: `--model models/m6/trees-100.json --cheap models/cheap6/trees-10.json
+--value models/v4/value-100.json --tactic 'learned(value=4)'`.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

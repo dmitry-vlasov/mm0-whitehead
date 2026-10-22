@@ -716,9 +716,10 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    faster a node and proves the same theorems: speed no longer limits; the rank against
    all the variants does (the known step first at 23%, not the 84% the sampled data
    showed). The ranker trained on hard negatives (`prove export --hard`, two rounds) is
-   worse over all variants and a little better in search: `m5` with the cheap `cheap5`
-   in two stages, **98 at 1 s and 127 at 5 s**, the best setting so far (`--model
-   models/m5/trees-100.json --cheap models/cheap5/trees-10.json --value
+   worse over all variants and a little better in search (98, 127); the ranker trained
+   with four times the negatives drawn evenly (`m6`, with the cheap `cheap6` in two
+   stages) gives **104 at 1 s and 128 at 5 s**, the best setting so far (`--model
+   models/m6/trees-100.json --cheap models/cheap6/trees-10.json --value
    models/v4/value-100.json --tactic 'learned(value=4)'`). `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;

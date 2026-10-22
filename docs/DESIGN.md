@@ -2968,8 +2968,14 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   against 97 and 122 — because the search never reaches the long tail where the model lost
   its order, and is sharper among the few hundred variants it does reach. The lesson: a
   model trained against a sampler's choices unlearns the sampler's features (the prior's
-  share of the gain fell from 44% to 29%); more negatives drawn evenly would be the next
-  step on the rank, not harder ones (`EXPERIMENTS.md`, "Hard negatives").
+  share of the gain fell from 44% to 29%); more negatives drawn evenly are the next step
+  on the rank, not harder ones (`EXPERIMENTS.md`, "Hard negatives").
+- **More negatives, drawn evenly** (`m6`, `cheap6`): every 3rd training and tuning theorem
+  of the three large files with 200 negatives a node, joined to the usual data. Over all
+  variants the rank moves half a point; in search **104 at 1 s and 128 at 5 s** with the
+  two stages (m3: 97 and 122), the day's largest gain. The two measures now disagree in
+  both directions, so the search is the judge and the measure over all variants a check
+  against gross loss (`EXPERIMENTS.md`, "More negatives, drawn evenly").
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
