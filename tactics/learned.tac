@@ -9,11 +9,13 @@
 -- variant; with absolute=1, not less (stronger on set.mm, weaker on mm0's long chains);
 -- with cap=C, a step's value term is at most C levels of cost: the value reorders the
 -- nearest steps and prunes none (DESIGN.md, "The value at 5 s"; 2 keeps the value's gain
--- at 1 s and its loss at 5 s goes).
-learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0, cap=2) =
+-- at 1 s and its loss at 5 s goes). With a cheap model (--cheap FILE), it ranks all the
+-- variants of a goal and the model the first `top` of them (DESIGN.md, "Where the time
+-- goes").
+learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0, cap=2, top=128) =
   seq(
     bfs(filter=premises(0), depth=1),
     first(
       follow(subproofs(@close, rank=reach, open=0), at=open, upto=@upto, ground=true),
       follow(subproofs(@open, rank=recent), at=root),
-      search(depth(follow, penalty=@penalty, by=model, width=@width, value=@value, absolute=@absolute, cap=@cap))))
+      search(depth(follow, penalty=@penalty, by=model, width=@width, value=@value, absolute=@absolute, cap=@cap, top=@top))))
