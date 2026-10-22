@@ -45,6 +45,7 @@ head of each.
 | The rank against all the variants; a two-stage rank | 2026-10-22 | over all variants of a goal (median 1,076) the known step is first at **23%**, not the 84% the sampled data showed; a cheap model's first 128 hold it at 93.7% against the full model's 95.0%; two stages 1.7× faster a node, the same theorems (95–97 at 1 s, 122–124 at 5 s): the rank's quality, not speed, now limits |
 | Hard negatives (`prove export --hard`), two rounds | 2026-10-22 | half the negatives the cheap model's highest-scored; round 1 stopped at 35 trees (tuned on the old rows); round 2, tuned on hard rows too: over all variants worse (in 10: 54% against 63.5%, the model unlearns the prior the sampler uses), in search a little better: m5 with cheap5 98 at 1 s, 127 at 5 s (m3: 97, 122) |
 | More negatives, drawn evenly (200 a node, every 3rd theorem, tuning rows alike) | 2026-10-22 | the honest measure moves half a point (first 23.8%); in search the day's largest gain: m6 with cheap6 in two stages **104 at 1 s, 128 at 5 s** (m3: 97, 122); the search is the judge, the offline measure a check |
+| Still more negatives (500 a node, every 7th theorem) | 2026-10-22 | saturated: m7a 98 and 127 alone, 96 and 130 with cheap6 — within the noise of m6; the training with both sets of extras was killed by the kernel at 58 GB of 61, the cheap model's did not fit under a 45 GB cap; m6 stays |
 
 ## 1. The engine without guidance
 
@@ -667,6 +668,28 @@ negatives lost offline and gained a little in search; these gain in search and n
 offline), so the search is the judge, and the offline measure a check against gross loss.
 The best setting: `--model models/m6/trees-100.json --cheap models/cheap6/trees-10.json
 --value models/v4/value-100.json --tactic 'learned(value=4)'`.
+
+**Still more negatives (500 a node, every 7th theorem):** the same again with 500
+negatives, on every 7th training and tuning theorem (coprime with the 3rd, so the groups
+of the two exports do not merge). The ranker `m7a` (the usual data plus these rows) trained
+once, uncapped, and that training reached what this machine has: the one with both sets of
+extras (230 million rows) was killed by the kernel at 58 GB of 61, taking the session with
+it, and the cheap model's training on the 500 rows alone died under a 45 GB cap, in the
+linear baseline first (`train.py --no-linear` skips it) and then in LightGBM's own
+allocation. So m7a is searched with `cheap6` as its first stage:
+
+| set.mm test, `learned(value=4)`, v4 | 1 s | 5 s |
+|---|---|---|
+| m6 | 100 | 126 |
+| m6, two stages (cheap6) | **104** | 128 |
+| m7a (500 negatives) | 98 | 127 |
+| m7a, two stages (cheap6) | 96 | **130** |
+
+Over all variants m7a is a hair above m6 (first 23.9%, in 10 64.7%, in 128 95.2%); in
+search it is 2 behind at 1 s and 2 ahead at 5 s with the two stages, 4–6 behind at 1 s
+alone: within the noise, and no clear gain. **The negatives have saturated between 50 and
+200**: four times more gave +7 and +6, ten times more gave nothing further, and the data at
+500 does not fit the machine. m6 with cheap6 stays the default (`models/`).
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

@@ -2980,7 +2980,11 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   variants the rank moves half a point; in search **104 at 1 s and 128 at 5 s** with the
   two stages (m3: 97 and 122), the day's largest gain. The two measures now disagree in
   both directions, so the search is the judge and the measure over all variants a check
-  against gross loss (`EXPERIMENTS.md`, "More negatives, drawn evenly").
+  against gross loss (`EXPERIMENTS.md`, "More negatives, drawn evenly"). Ten times the
+  negatives (500 a node, `m7a`) give nothing further — 98 and 127 alone, 96 and 130 with
+  `cheap6`, within the noise — and that data is the most this machine trains (61 GB; the
+  training with both sets of extras was killed by the kernel): the negatives have
+  saturated between 50 and 200, and `m6` with `cheap6` stays the default (`models/`).
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

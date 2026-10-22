@@ -723,7 +723,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    models/v4/value-100.json --tactic 'learned(value=4)'`). These three models are in
    the repository as `models/` (`ranker.json`, `cheap.json`, `value.json`; its README),
    read by default by the MCP server and `prove goal`, whose default tactic is now the
-   procedures at the root then `learned(value=4)`. `order` as a scoped
+   procedures at the root then `learned(value=4)`. Ten times the negatives (500 a node)
+   gave nothing further and that data is the most the machine (61 GB) trains: the
+   negatives have saturated. `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the
