@@ -2962,8 +2962,14 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   stopping, judged on the old tuning rows with drawn negatives, ended the training after
   35 trees, and over all variants the known step came in the first 10 at 55.8% against
   63.5%; in search the same theorems. A model trained on hard negatives must be tuned on
-  them too: `train.py` now puts an extra file's rows of tuning theorems in the tuning part
-  (`EXPERIMENTS.md`, "Hard negatives").
+  them too: `train.py` now puts an extra file's rows of tuning theorems in the tuning part.
+  The second round (`m5`, 720 trees) is worse still over all variants (in 10 at 54.3%) and
+  a little better in search — 98 at 1 s and 127 at 5 s with the two stages (`cheap5`),
+  against 97 and 122 — because the search never reaches the long tail where the model lost
+  its order, and is sharper among the few hundred variants it does reach. The lesson: a
+  model trained against a sampler's choices unlearns the sampler's features (the prior's
+  share of the gain fell from 44% to 29%); more negatives drawn evenly would be the next
+  step on the rank, not harder ones (`EXPERIMENTS.md`, "Hard negatives").
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
