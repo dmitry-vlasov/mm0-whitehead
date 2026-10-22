@@ -46,6 +46,12 @@ structure Ctx where
   /-- Where `proof` writes the proof file with each proof found put in, as
   `<theorem>.mmb`, for another verifier to check (`mcp --export`). -/
   exportDir : Option System.FilePath := none
+  /-- The learned models the tactics may use (`Dsl.Ctx`): the ranker of `by=model`, the
+  cheap first stage of its rank, and the value of goals of `value=K`; by default those of
+  `models/` (`loadModels` in `Main.lean`). -/
+  model : Option Model := none
+  cheap : Option Model := none
+  value : Option Model := none
 
 /-- A session, with how to print its statements. -/
 structure Open where
@@ -240,7 +246,8 @@ def Ctx.allDefs (c : Ctx) (st : State) : Dsl.Defs :=
 /-- The DSL context of a session: the subproofs of the file, made if a tactic follows
 them, and the definitions. -/
 def Ctx.dsl (c : Ctx) (o : Open) (st : State) : Dsl.Ctx :=
-  o.session.dslCtx (some c.spec) (rails := some c.rails) (defs := c.allDefs st)
+  { o.session.dslCtx (some c.spec) (rails := some c.rails) (defs := c.allDefs st) with
+    model := c.model, cheap := c.cheap, value := c.value }
 
 def readFilter (c : Ctx) (o : Open) (args : Json) : ToolM Filter := do
   let text ← liftE (argStrD args "filter" "all")

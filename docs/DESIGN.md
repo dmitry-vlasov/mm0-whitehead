@@ -2400,8 +2400,13 @@ writes the structure of a proof, and Whitehead fills its holes by search.
     MM1's unification to infer the variables. `bound` names the bound variables with
     `!!`. `explicit` gives every variable with `!`. A dummy is named `wd` and a number.
     A conversion is left to MM1, which unfolds definitions itself.
-  - The default search is a breadth-first search to depth 2 first, then `guided`: the
-    proof of one or two steps is found before a longer one that a rail would give.
+  - The default search (2026-10-22): the procedures at the root (`ring`, `congr`), then
+    `learned(value=4)` with the models of `models/` — the bench's best setting, read by
+    default by `prove goal` and the MCP server (`loadModels`: `--models DIR`,
+    `--no-models`, or `--model`, `--cheap`, `--value` for single files; `models/README.md`
+    says what each is). Without a ranker, a breadth-first search to depth 2 first, then
+    `guided`: the proof of one or two steps is found before a longer one that a rail would
+    give.
   - Loading peano takes 0.2 s.
 - `./fill [SECONDS]` (`bench.py`): `./check`, and more. It takes each hole whose goal,
   as `mm0-rs` prints it, has no metavariable, one at a time, since a filled hole can

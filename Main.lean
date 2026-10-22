@@ -28,11 +28,15 @@ def usage : String :=
                                  sessions, and the definitions of DIR (tactics/ by default:
                                  here, or in the repository the program was built in)
   mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous] [--tactics DIR] [--export DIR]
+               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--value FILE]
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
                                  message; --anonymous: assertions are shown as A and their
                                  number, but for the theorem a session starts on; --export: `proof`
-                                 writes DIR/<theorem>.mmb, the file with the proof found put in
+                                 writes DIR/<theorem>.mmb, the file with the proof found put in;
+                                 the learned models of `learned` are read from models/ (ranker.json,
+                                 cheap.json, value.json) unless --models names another directory,
+                                 --no-models reads none, or a file is named
   prove variants <file.mmb> [--from A] [--to B] [--every K] [--ms T] [--max-nodes N] [--shapes]
                                  how many variants the goal nodes on the paths of the known
                                  proofs have, each node expanded against the whole database:
@@ -78,7 +82,7 @@ def usage : String :=
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
   prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
-               [--model FILE] [--cheap FILE] [--value FILE]
+               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--value FILE]
              [--max-nodes N] [--tactics DIR]
                                  a proof of TEXT, in the notation of the specification, under the
                                  hypotheses of theorem NAME, from the assertions before it,
@@ -305,6 +309,40 @@ def floatOption (args : List String) (name : String) (default : Float) : Float :
   match args.dropWhile (· != name) with
   | _ :: value :: _ => (parseFloat value).getD default
   | _ => default
+
+/-- The learned models of a front-end: the ranker (`--model FILE`), the cheap first stage
+of its rank (`--cheap FILE`) and the value of goals (`--value FILE`). Where an option is
+not given and `defaults` holds, the file of `--models DIR` (`models`, beside the
+program's repository, or in the working directory) is read if it exists: `ranker.json`,
+`cheap.json`, `value.json` — the best setting of the bench (`docs/STATUS.md`); `--no-models`
+reads none. -/
+def loadModels (args : List String) (defaults : Bool) :
+    IO (Except String (Option Prove.Model × Option Prove.Model × Option Prove.Model)) := do
+  let dir ← match strOption args "--models" with
+    | some d =>
+      if !(← System.FilePath.isDir d) then return .error s!"--models {d}: not a directory"
+      pure (some (System.FilePath.mk d))
+    | none =>
+      if !defaults || args.contains "--no-models" then pure none
+      else
+        -- the repository of the program: `.lake/build/bin/mm0-whitehead` is four below it
+        let app ← IO.appPath
+        let repo := app.parent.bind (·.parent) |>.bind (·.parent) |>.bind (·.parent)
+        let candidates := (repo.map (· / "models")).toList ++ [System.FilePath.mk "models"]
+        candidates.findM? fun d => d.isDir
+  let load (option file : String) (names : Array String) : IO (Except String (Option Prove.Model)) := do
+    let path ← match strOption args option with
+      | some p => pure (some (System.FilePath.mk p))
+      | none => match dir with
+        | some d => do let p := d / file; pure (if ← p.pathExists then some p else none)
+        | none => pure none
+    match path with
+    | none => return .ok none
+    | some p => return (← Prove.Model.load p names).map some
+  let model ← load "--model" "ranker.json" Prove.featureNames
+  let cheap ← load "--cheap" "cheap.json" Prove.featureNames
+  let value ← load "--value" "value.json" Prove.goalFeatureNames
+  return do pure (← model, ← cheap, ← value)
 
 /-- The number of processors (`nproc`); 1 if it cannot be found. -/
 def processors : IO Nat := do
@@ -1371,26 +1409,20 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
       byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
   let task := { db.task thm with goal, metas, consts := (db.task thm).consts ++ extraConsts }
   let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses, prior := c.prior.query thm }
+  let (model, cheap, value) ← match ← loadModels args true with
+    | .ok ms => pure ms
+    | .error e => IO.eprintln e; return 1
   -- by default the procedures at the root first (ring, congruence: a hole that is an
-  -- identity closes in milliseconds), then the proofs of one or two steps, which guided
-  -- may miss for a longer one that a rail gives: a gap is short, and its term is read
-  let tacticText := (strOption args "--tactic").getD
-    "first(follow(ring, at=root), follow(congr, at=root), seq(bfs(size=20000, depth=2), guided))"
-  let model ← match strOption args "--model" with
-    | none => pure none
-    | some p => match ← Prove.Model.load p with
-      | .ok m => pure (some m)
-      | .error e => IO.eprintln e; return 1
-  let cheap ← match strOption args "--cheap" with
-    | none => pure none
-    | some p => match ← Prove.Model.load p with
-      | .ok m => pure (some m)
-      | .error e => IO.eprintln e; return 1
-  let value ← match strOption args "--value" with
-    | none => pure none
-    | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
-      | .ok m => pure (some m)
-      | .error e => IO.eprintln e; return 1
+  -- identity closes in milliseconds), then the learned search with the models found
+  -- (`learned(value=4)`, the bench's best setting), or without a ranker the proofs of one
+  -- or two steps, which guided may miss for a longer one that a rail gives: a gap is
+  -- short, and its term is read
+  let tacticText := (strOption args "--tactic").getD <|
+    "first(follow(ring, at=root), follow(congr, at=root), " ++
+      (match model, value with
+        | some _, some _ => "learned(value=4))"
+        | some _, none => "learned)"
+        | none, _ => "seq(bfs(size=20000, depth=2), guided))")
   let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs, model, cheap, value }
   let limits : Prove.Limits := { maxMs := numOption args "--ms" 5000, maxProps := numOption args "--max-nodes" 2000000 }
   let pr := c.spec.printer db (c.spec.binderNames thm ++ extra.map fun vd => vd.name.getD "_")
@@ -1420,12 +1452,15 @@ def mcpServe (mm0 mmb : String) (args : List String) : IO UInt32 := do
     | .error msg =>
       IO.eprintln msg
       return 1
+  let (model, cheap, value) ← match ← loadModels args true with
+    | .ok ms => pure ms
+    | .error e => IO.eprintln e; return 1
   match ← Mcp.Ctx.load mm0 mmb (anonymous := args.contains "--anonymous") with
   | .error msg =>
     IO.eprintln msg
     return 1
   | .ok c =>
-    let c := { c with defs, exportDir := (strOption args "--export").map System.FilePath.mk }
+    let c := { c with defs, exportDir := (strOption args "--export").map System.FilePath.mk, model, cheap, value }
     match strOption args "--log" with
     | some path =>
       IO.FS.withFile path .append fun h => Mcp.serve c (some h)

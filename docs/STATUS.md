@@ -720,7 +720,10 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    with four times the negatives drawn evenly (`m6`, with the cheap `cheap6` in two
    stages) gives **104 at 1 s and 128 at 5 s**, the best setting so far (`--model
    models/m6/trees-100.json --cheap models/cheap6/trees-10.json --value
-   models/v4/value-100.json --tactic 'learned(value=4)'`). `order` as a scoped
+   models/v4/value-100.json --tactic 'learned(value=4)'`). These three models are in
+   the repository as `models/` (`ranker.json`, `cheap.json`, `value.json`; its README),
+   read by default by the MCP server and `prove goal`, whose default tactic is now the
+   procedures at the root then `learned(value=4)`. `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the
