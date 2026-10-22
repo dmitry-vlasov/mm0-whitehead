@@ -533,11 +533,15 @@ search proves. Measured, set.mm's test theorems with m3 and v4:
 | `learned(value=4, absolute=1)` | | 104 |
 | `learned(value=4, cap=4)` | | 113 |
 | **`learned(value=4, cap=2)`** | **91** | **120** |
+| `learned(value=4, cap=1)` | 87 | 120 |
+| `learned(value=4, cap=2)` with `v5`, the value trained on 5 s searches (twice) | 92, 91 | 117, 117 |
 
 With the term capped at two levels of cost the value keeps its gain at 1 s and loses
-nothing at 5 s: it reorders the nearest steps and prunes none. `cap=2` is now the default
-of `learned` (it matters only with a value). Still to come: `cap=1`, and the value
-trained on the goal rows of 5 s searches (`v5`).
+nothing at 5 s: it reorders the nearest steps and prunes none; at one level it no longer
+gains at 1 s. `cap=2` is now the default of `learned` (it matters only with a value). The
+value trained on the goal rows of 5 s searches (every 8th set.mm theorem, mm0 every 4th)
+does not add to the cap: the labels were not what was missing. Two runs of the same
+setting differ by one theorem: that is the noise of these numbers.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

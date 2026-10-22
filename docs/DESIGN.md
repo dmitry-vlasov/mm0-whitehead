@@ -2907,8 +2907,10 @@ the two 5 s logs (m3; `learned` 119, `learned(value=4)` 112, 19 lost and 12 gain
   term per step (`depth(..., cap=C)`: the value reorders within C levels of cost and never
   prunes), and a value trained on goal rows of 5 s searches (`v5`). The cap does it:
   `learned(value=4, cap=2)` gives 91 at 1 s and 120 at 5 s (87 and 119 without the value,
-  91 and 112 uncapped; cap 4: 113; the absolute value: 104). `cap=2` is the default of
-  `learned`. The lesson is general: a learned value of goals is a tie-breaker among the
+  91 and 112 uncapped; cap 4: 113; cap 1: 87 and 120; the absolute value: 104). `cap=2` is
+  the default of `learned`. The value trained on 5 s searches (`v5`) adds nothing to the
+  cap (91–92 and 117): the labels were not what was missing. The lesson is general: a
+  learned value of goals is a tie-breaker among the
   nearest steps, not a cost that can put a step out of reach — the engine's fairness
   (`search`'s rounds by cost) must stay in charge of what is reached at all.
 
