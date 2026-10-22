@@ -43,6 +43,7 @@ head of each.
 | The value at 5 s: its term capped (`cap=2`) | 2026-10-22 | the value prunes rather than reorders (it dives: 3,098 single-goal expansions on one theorem); capped at two levels of cost, **91 at 1 s and 120 at 5 s** (87, 119 without the value; 91, 112 uncapped) |
 | Where the time goes: the search profiled, three exact speedups | 2026-10-22 | nine tenths of the search is ranking every variant of each expanded goal (`learned` runs at a third of `bfs`'s node rate); frontier goals not ranked, a tighter tree walk, one unify a goal: set.mm **97 at 1 s** (91), 122 at 5 s (120) |
 | The rank against all the variants; a two-stage rank | 2026-10-22 | over all variants of a goal (median 1,076) the known step is first at **23%**, not the 84% the sampled data showed; a cheap model's first 128 hold it at 93.7% against the full model's 95.0%; two stages 1.7× faster a node, the same theorems (95–97 at 1 s, 122–124 at 5 s): the rank's quality, not speed, now limits |
+| Hard negatives, round 1 (`prove export --hard`) | 2026-10-22 | half the negatives the cheap model's highest-scored: early stopping on the old tuning rows ends at 35 trees; over all variants worse (in 10: 55.8% against 63.5%), in search the same (97, 124); round 2 tunes on hard rows too |
 
 ## 1. The engine without guidance
 
@@ -609,6 +610,17 @@ So speed is no longer what limits the search at these budgets; the rank's qualit
 all the variants is — a known step first at 23%. The two stages stay as an option (less
 latency at equal results); the next lever is the ranker trained on the negatives it
 confuses the known step with (`prove export --hard`).
+
+**Hard negatives, round 1** (`prove export --hard`): rows for every training theorem of
+set.mm, hello_mmc, mm0, hol and set whose fifty negatives are half the variants the
+10-tree cheap model scores highest, half drawn; the ranker `m4` trained on m3's data plus
+these rows (`--extra`). Early stopping ended it after 35 trees: its tuning rows were the
+old ones, with drawn negatives, on which a model that learns the hard ones looks worse
+(first 77.9% there against 84.6%). Over all the variants of the test goals it is worse too
+— first 22.5% (23.3%), in 10 55.8% (63.5%), in 128 86.9% (95.0%) — and in search the same:
+97 at 1 s and 124 at 5 s (97, 122). Round 2 exports the tuning theorems with hard
+negatives as well (`train.py` puts an extra file's rows of tuning theorems in the tuning
+part), so that early stopping judges the model on what it is trained on.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

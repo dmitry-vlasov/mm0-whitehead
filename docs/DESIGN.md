@@ -2958,7 +2958,12 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   **Speed is no longer what limits the search at these budgets; the rank's quality against
   all the variants is.** Hence `prove export --hard`: rows whose negatives are half the
   variants the cheap model scores highest — the ones the ranker confuses the known step
-  with, which fifty drawn among a thousand rarely are.
+  with, which fifty drawn among a thousand rarely are. Its first round (`m4`) lost: early
+  stopping, judged on the old tuning rows with drawn negatives, ended the training after
+  35 trees, and over all variants the known step came in the first 10 at 55.8% against
+  63.5%; in search the same theorems. A model trained on hard negatives must be tuned on
+  them too: `train.py` now puts an extra file's rows of tuning theorems in the tuning part
+  (`EXPERIMENTS.md`, "Hard negatives").
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

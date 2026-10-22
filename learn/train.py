@@ -54,8 +54,9 @@ def load(paths, sample=1.0, extras=()):
         seen |= {thm_names[t] for t in new}
         keep_thm = np.array(sorted(new), dtype=np.int64)
         keep = np.isin(d['thm'], keep_thm)
-        # the theorems trained on, before the sample: the extra rows of all of them are used
-        trained[os.path.basename(p)] = (fi, np.unique(d['thm'][keep & (part == 0)]))
+        # the theorems trained on, before the sample: the extra rows of all of them are used;
+        # and the theorems tuned on, whose extra rows join the tuning part
+        trained[os.path.basename(p)] = (fi, np.unique(d['thm'][keep & (part == 0)]), np.unique(d['thm'][keep & (part == 1)]))
         if sample < 1 and fi == 0:
             h = (d['thm'] * 2654435761 + fi * 40503) % 1000
             keep &= (part != 0) | (h < sample * 1000)
@@ -68,17 +69,18 @@ def load(paths, sample=1.0, extras=()):
         del d
     for p in extras:
         base = os.path.basename(p).split('.')[0] + '.tsv'
-        fi, thms = trained[base]
+        fi, thms, tune_thms = trained[base]
         d = data.read(p)
-        keep = np.isin(d['thm'], thms)
+        keep = np.isin(d['thm'], thms) | np.isin(d['thm'], tune_thms)
         sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
         # the nodes of another tree of the theorem: numbers of their own
         sub['node'] = sub['node'] + 5_000_000
-        sub['part'] = np.zeros(int(keep.sum()), dtype=np.int64)
+        sub['part'] = np.where(np.isin(sub['thm'], tune_thms), 1, 0).astype(np.int64)
         sub['file'] = np.full(int(keep.sum()), fi)
         parts.append((os.path.basename(p), sub))
         print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, '
-              f'{len(np.unique(sub["thm"]))} theorems, added to {base}', flush=True)
+              f'{len(np.unique(sub["thm"]))} theorems ({int((sub["part"] == 1).sum())} rows tuning), added to {base}',
+              flush=True)
         del d
     feats = FEATS[0]
     cat = {k: np.concatenate([s[k] for _, s in parts]) for k in ['thm', 'node', 'label', 'variants', 'part', 'file', 'X']}
