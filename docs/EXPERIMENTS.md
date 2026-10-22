@@ -511,9 +511,16 @@ theorem and the other files), against one trained on the same rows with the thre
 
 `prior_head` carries 5% of the trees' gain, the other two nothing; the AUC moves by 0.004
 and the search by nothing at 1 s. With the sharper ranker the value is now worth +4 at 1 s
-(87 → 91) and −7 at 5 s (119 → 112), where with m2 it was +6 and +1: the value's guidance
-competes with the rank at longer budgets. Kept as features (they cost nothing); the
-default for a 5 s search is `learned` alone.
+(87 → 91) and −7 at 5 s (119 → 112), where with m2 it was +6 and +1; at half the scale
+(`value=2`) 90 and 112, so it is not the scale: the value's guidance competes with the
+rank at longer budgets. Kept as features (they cost nothing); the default for a 5 s search
+is `learned` alone.
+
+**The search's width and penalty with m3** (the ranker is sharper, so the search might
+trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5
+(the default) and 8 give 83, 85, 87 and 84; penalty 1, 2 (the default) and 3 give 89, 87
+and 86; penalty 1 at 5 s gives 119, as the default does. The defaults stay: the
+differences are within the noise of two theorems.
 
 **`order`, the cheap version:** a breadth-first sub-search at every order goal among the
 order lemmas (`at`), before `learned`'s search: on peano's subgoals 1,178 against 1,179,

@@ -2874,7 +2874,8 @@ part (83.6%), at 74.9% where it brings three or more new variables (70.5%); in s
 set.mm **87 at 1 s and 119 at 5 s** with `learned` alone (83, 104), 91 with the value at
 1 s (89); mm0 and hello_mmc unchanged, peano 107 (113; not a training file). The measure
 by itself predicted the search: a lever that can be turned in seconds, not hours
-(`EXPERIMENTS.md`, "The prior tuned").
+(`EXPERIMENTS.md`, "The prior tuned"). The search's width and penalty, checked again with
+the sharper ranker, stay at 5 and 2: the other settings are within two theorems.
 
 **The value's prior (2026-10-22; `TaskInfo.priorTerms`).** The goal features get three of
 the theorem's prior: of its votes, the share on assertions whose conclusion has the goal's
