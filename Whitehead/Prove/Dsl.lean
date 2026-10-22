@@ -198,6 +198,9 @@ structure Ctx where
   expansions : Nat := 0
   /-- The learned model that `by=model` ranks by (`Model.lean`), if one is loaded. -/
   model : Option Model := none
+  /-- A cheap model for the first stage of the rank (`VariantRank.learned`), if one is
+  loaded: it orders all the variants of a goal, `model` the first `top` of them. -/
+  cheap : Option Model := none
   /-- The learned value of goals that `value=K` costs by, if one is loaded. -/
   value : Option Model := none
 
@@ -253,7 +256,7 @@ def docs : Array Doc := #[
   ⟨"at", "tactic", "at($ pattern $, t, depth=N, ground=false)",
     "t, only in the subtrees of the goals that match the pattern, down to N assertion nodes below such a goal (0: all the way); ground: only at goals without metavariables. A sub-search at every goal of a shape, each where it stands"⟩,
   ⟨"loop", "tactic", "loop(t, N)", "t again from its start each time it is done, while the tree grows, up to N times"⟩,
-  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent|model, width=W, value=K, absolute=0|1, cap=C)",
+  ⟨"depth", "cost", "depth(L1, L2, ..., penalty=N, by=used|recent|model, width=W, value=K, absolute=0|1, cap=C, top=T)",
     "the number of assertion nodes above a leaf's goal; those labelled L1, L2, ... (follow, choose or search: who expanded them) cost nothing, the other variants at a goal where such a node hangs cost the goal's full depth, and a goal that such a node left open costs N more; with by and width, a step costs 1 and its place among the variants of its goal (from 0), by the proofs before the theorem that use its assertion (used: how many; recent: the latest) or by the learned model's score (model, with --model FILE), divided by W; with value (and by), a step costs also K times the sum of −ln V over its new goals, V the learned probability that a goal is proved (with --value FILE), rounded, less that of the best of its goal's first W variants (absolute=1: not less)"⟩,
   ⟨"subproofs", "guide", "subproofs(count=3, rank=occurrences, min=2, source=earlier, open=N)",
     "subproofs of earlier proofs that fit the goal: count of them; rank occurrences (in the most proofs before the theorem), size (the largest), small, reach (those leaving the fewest hypotheses that no premise fits first), specific (those whose conclusion has the most nodes that are not variables first) or recent (those in the latest proof before the theorem first); open: only those leaving at most N open; min: the fewest steps; source earlier (in a proof before the theorem) or recurring (in two)"⟩,
@@ -514,10 +517,11 @@ partial def cost (c : Ctx) (a : Ast) : Except ParseError Cost := do
   | .call name pos args =>
     match name with
     | "depth" =>
-      checkNames name args #["penalty", "by", "width", "value", "absolute", "cap"]
+      checkNames name args #["penalty", "by", "width", "value", "absolute", "cap", "top"]
       let free ← (args.filter (·.1.isNone)).mapM fun (_, v) => labelOf name v
       let named (k : String) : Option Ast := (args.find? (·.1 == some k)).map (·.2)
       let penalty ← numOr name "penalty" 0 (named "penalty")
+      let top ← numOr name "top" 128 (named "top")
       let rank ← match named "by" with
         | none => pure none
         | some a => match ← word name "by" a.pos (some a) with
@@ -525,7 +529,7 @@ partial def cost (c : Ctx) (a : Ast) : Except ParseError Cost := do
           | "recent" => pure (some .recent)
           | "model" =>
             match c.model with
-            | some m => pure (some (.learned m))
+            | some m => pure (some (.learned m c.cheap top))
             | none => fail a.pos "`by=model` needs a model (--model FILE)"
           | w => fail a.pos s!"`by` is used, recent or model, not `{w}`"
       let width ← numOr name "width" 0 (named "width")

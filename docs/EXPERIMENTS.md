@@ -566,8 +566,29 @@ limit; on the test theorems with `learned(value=4)`, m3 and v4:
 | 5 s | 120 | **122** |
 
 The budget at 1 s is where speed pays. The rank of a goal's variants is still what the
-search spends its time on: the two-stage rank (a cheap model over all variants, the full
-model over its first N) follows below.
+search spends its time on: hence the two-stage rank — a cheap model, of the twenty
+features that need no instantiation of the variant's new goals, over all the variants, and
+the full model over its first N only. Whether the known step stays within the cheap
+model's first N was measured on set.mm's test goals with all their variants
+(`setmm-test-all.tsv`, 16,631 nodes; a median of 1,076 variants a node, a mean of 4,579,
+a 90th percentile of 12,138):
+
+| the known variant in the first | 1 | 10 | 64 | 128 | 256 |
+|---|---|---|---|---|---|
+| m3, the full model | 23.3% | 63.5% | 90.4% | 95.0% | 97.5% |
+| the cheap features, 100 trees | 21.8% | 62.3% | 89.9% | 94.6% | 97.3% |
+| 30 trees | 19.1% | 60.5% | 89.2% | 94.1% | 97.0% |
+| 10 trees | 17.2% | 58.7% | 87.9% | 93.7% | 96.8% |
+| the linear model | 16.8% | 55.1% | 84.0% | 90.6% | 94.7% |
+
+Two things here. **Against all the variants the rank is far from its numbers on the
+exported data**, where fifty negatives a node are drawn: the known step is first at 23%,
+not 84%, and in the first 10 at 64%, not 99% — the search's reality, and why the search
+runs deep rather than straight. And **the features that need the new goals instantiated
+are worth a point or two at the top and half a point at 64**: the cheap model's first 128
+hold the known step at 94.6% against the full model's 95.0%. A two-stage rank with a
+10-tree cheap model and `top=128` keeps 93.7% of the known steps in the full model's
+hands and scores a median goal's thousand variants at a tenth of the cost.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

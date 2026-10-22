@@ -2942,12 +2942,16 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   variants are ranked anyway. In theorems: set.mm's test part with `learned(value=4)` goes
   from 91 to **97 at 1 s** and from 120 to 122 at 5 s — the tight budget is where speed
   pays.
-- **The way to a multiple is a two-stage rank:** a cheap model, of the twenty features
-  that need no instantiation (the rule, its uses and recency, the goal, the prior), over
-  all the variants of a goal, and the full model over its first N only; the rest keep the
-  cheap order. Whether the known step stays within the cheap model's first N is measured
-  on set.mm's test goals with all their variants (`EXPERIMENTS.md`, "Where the time
-  goes").
+- **The way to a multiple is a two-stage rank** (`VariantRank.learned m cheap top`;
+  `--cheap FILE`, `depth(..., top=T)`, 128 by default): a cheap model, of the twenty
+  features that need no instantiation (the rule, its uses and recency, the goal, the
+  prior; `Env.variantFeatures` with `cheap`, the other ten features 0, as `train.py
+  --zero` trains it), over all the variants of a goal, and the full model over its first
+  `top` only; the rest keep the cheap order. Measured on set.mm's test goals with all
+  their variants (`EXPERIMENTS.md`, "Where the time goes"): the full model has the known
+  step in its first 128 at 95.0%, the cheap model of 10 trees at 93.7%, so the two stages
+  lose little; and against all the variants (a median of 1,076 a goal) the known step is
+  first at 23%, not the 84% the exported data with fifty negatives a node showed.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

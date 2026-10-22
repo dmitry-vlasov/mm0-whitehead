@@ -50,7 +50,7 @@ def usage : String :=
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
   prove export <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--ms T]
-               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--value FILE] [--mm0 F]
+               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--cheap FILE] [--value FILE] [--mm0 F]
                [--search-ms T] [--goals [--max-goals N]]]
                                  the data of the learned ranking layer: for each theorem, along
                                  its known proof, a row for each variant of each goal node, with
@@ -62,7 +62,7 @@ def usage : String :=
                                  goal node of the tree the search grew (at most N, 200, drawn),
                                  with its features and whether the search proved it
   prove subgoals <file.mmb> --tactic T [--ms T] [--from A] [--to B] [--every K] [--tactics DIR]
-               [--model FILE] [--value FILE] [--mm0 F] [--max-nodes N]
+               [--model FILE] [--cheap FILE] [--value FILE] [--mm0 F] [--max-nodes N]
                                  the subgoal bench of the tactics system: each goal node on a
                                  known proof's path (not the root, nor one a premise proves) is a
                                  task of its own under the theorem's premises, which tactic T gets
@@ -77,7 +77,7 @@ def usage : String :=
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
   prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
-               [--model FILE] [--value FILE]
+               [--model FILE] [--cheap FILE] [--value FILE]
              [--max-nodes N] [--tactics DIR]
                                  a proof of TEXT, in the notation of the specification, under the
                                  hypotheses of theorem NAME, from the assertions before it,
@@ -85,7 +85,7 @@ def usage : String :=
                                  bench. A metavariable ?a of MM1 is one of the search's. By
                                  default seq(bfs(size=20000, depth=2), guided), 5 s
   prove search <file.mmb> [-o out.mmb] [--from A] [--to B] [--every K] [--ms T] [--max-nodes N]
-               [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--model FILE] [--value FILE]
+               [--strategy bfs|forward|both] [--tactic T] [--tactics DIR] [--model FILE] [--cheap FILE] [--value FILE]
                [--mm0 file.mm0] [--max-facts N]
                [--join-cap N|all] [--max-tuples N] [--max-work N]
                [--meta I,J,...] [--verbose]
@@ -621,6 +621,11 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
     | some p => match ← Prove.Model.load p with
       | .ok m => pure (some m)
       | .error e => IO.eprintln e; return 1
+  let cheap ← match strOption args "--cheap" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
   let value ← match strOption args "--value" with
     | none => pure none
     | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
@@ -646,7 +651,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
     | none => Prove.datasetRows db index limits uses stats negatives i thmPrior
     | some text =>
       let thm := file.stmts[i]!.index
-      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
+      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, cheap, value }
       match Prove.Dsl.parseTactic ctx text with
       | .error e =>
         if k == 0 then IO.eprintln (Prove.Dsl.ParseError.show text e)
@@ -750,6 +755,11 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
     | some p => match ← Prove.Model.load p with
       | .ok m => pure (some m)
       | .error e => IO.eprintln e; return 1
+  let cheap ← match strOption args "--cheap" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
   let value ← match strOption args "--value" with
     | none => pure none
     | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
@@ -791,7 +801,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
     (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
   -- a tactic that does not read is reported once, with the first theorem's context
   if let some i := todo[0]? then
-    let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm := file.stmts[i]!.index, rails := some rails, defs, model, value }
+    let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm := file.stmts[i]!.index, rails := some rails, defs, model, cheap, value }
     if let .error e := Prove.Dsl.parseTactic ctx text then
       IO.eprintln (Prove.Dsl.ParseError.show text e)
       return 1
@@ -809,7 +819,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
       let some tree := r.proof | return #[]
       -- the proof with its leftover variables fixed, as the emitted proof has them
       let tree := (Prove.closings r.env tree)[0]?.getD tree
-      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
+      let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, cheap, value }
       let .ok t := Prove.Dsl.parseTactic ctx text | return #[]
       let thmPrior := prior.query thm
       let mut out := #[]
@@ -1177,6 +1187,11 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       | .error e =>
         IO.eprintln e
         return 1
+  let cheap ← match strOption args "--cheap" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
   let value ← match strOption args "--value" with
     | none => pure none
     | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
@@ -1184,7 +1199,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       | .error e =>
         IO.eprintln e
         return 1
-  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, value }
+  let ctx (thm : Nat) : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, cheap, value }
   if let some text := tactic then
     if let .error e := Prove.Dsl.parseTactic (ctx 0) text then
       IO.eprintln (Prove.Dsl.ParseError.show text e)
@@ -1359,12 +1374,17 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
     | some p => match ← Prove.Model.load p with
       | .ok m => pure (some m)
       | .error e => IO.eprintln e; return 1
+  let cheap ← match strOption args "--cheap" with
+    | none => pure none
+    | some p => match ← Prove.Model.load p with
+      | .ok m => pure (some m)
+      | .error e => IO.eprintln e; return 1
   let value ← match strOption args "--value" with
     | none => pure none
     | some p => match ← Prove.Model.load p Prove.goalFeatureNames with
       | .ok m => pure (some m)
       | .error e => IO.eprintln e; return 1
-  let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs, model, value }
+  let dsl : Prove.Dsl.Ctx := { db, spec := some c.spec, thm, vars, rails := some c.rails, defs, model, cheap, value }
   let limits : Prove.Limits := { maxMs := numOption args "--ms" 5000, maxProps := numOption args "--max-nodes" 2000000 }
   let pr := c.spec.printer db (c.spec.binderNames thm ++ extra.map fun vd => vd.name.getD "_")
   let hyps := db.file.thmHypNames thm

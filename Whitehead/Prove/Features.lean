@@ -161,8 +161,12 @@ def featureText (f : Float) : String :=
       String.ofList (if t.getLast? == some '.' then t.dropLast else t)
 
 /-- The features of variant `p`, in the order of `featureNames`; `gi` is its goal's
-(`Env.goalInfo`). -/
-def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : Nat) : Array Float := Id.run do
+(`Env.goalInfo`). With `cheap`, the features that need the variant's new goals
+instantiated (`goals_*`, `new_vars`, `meta_goals`, `shared_vars`, `closable_meta`,
+`max_goal_vars`) are 0, as a model trained with them zeroed expects (`train.py --zero`): the
+first stage of a two-stage rank (`docs/DESIGN.md`, "Where the time goes"). -/
+def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : Nat) (cheap : Bool := false) :
+    Array Float := Id.run do
   let prop := env.props[p]!
   let v := env.propView p
   let thm := env.task.limit
@@ -176,7 +180,8 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
   let prior := match prop.step with
     | .assertion a => env.prior.getD a 0
     | _ => 0
-  let goals := v.goals.get
+  -- the new goals: not instantiated for the cheap features, which are 0 where they would read them
+  let goals := if cheap then #[] else v.goals.get
   let isVar (e : Exp) : Bool := e.nodes.any Node.isVar
   let newVars := goals.foldl (init := (#[] : Array Nat)) fun acc g =>
     g.nodes.foldl (init := acc) fun acc n =>
@@ -214,7 +219,7 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
     Float.log (1 + n uses),
     b (isAssertion && uses == 0),
     if latest == 0 then 0 else Float.log (1 + n (thm + 1 - latest)),
-    n goals.size,
+    n prop.rule.hyps.size,
     n (goals.filter (·.isVar)).size,
     n (goals.filter (!isVar ·)).size,
     n closable.size,

@@ -21,8 +21,11 @@ inductive VariantRank where
   | used
   /-- By the latest proof that uses the assertion, the latest first; then by uses. -/
   | recent
-  /-- By a learned model's score, the highest first (`Model.lean`). -/
-  | learned (m : Model)
+  /-- By a learned model's score, the highest first (`Model.lean`). With a `cheap` model,
+  in two stages: the cheap one, of the features that need no instantiation of the variant's
+  new goals, scores all the variants, and `m` the first `top` of them only; the rest keep
+  the cheap order (`docs/DESIGN.md`, "Where the time goes"). -/
+  | learned (m : Model) (cheap : Option Model := none) (top : Nat := 64)
   deriving Inhabited, Repr
 
 /-- The order of the leaves for `search`. -/
@@ -107,12 +110,21 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
       | .conv .. => 0
     let mut stats := pl.stats
     let sorted := match rank with
-      | .learned m =>
+      | .learned m cheap top =>
         let st := stats.getD (SymbolStats.ofDb env.db)
         let gi := env.goalInfo env.props[p]!.parent
-        let scores := kids.foldl (init := ({} : Std.HashMap Nat Float)) fun (acc : Std.HashMap Nat Float) q =>
-          acc.insert q (m.score (env.variantFeatures st gi q))
-        kids.qsort fun a b => scores[a]! > scores[b]! || scores[a]! == scores[b]! && a < b
+        let order (qs : Array Nat) (model : Model) (cheaply : Bool) : Array Nat :=
+          let scores := qs.foldl (init := ({} : Std.HashMap Nat Float)) fun (acc : Std.HashMap Nat Float) q =>
+            acc.insert q (model.score (env.variantFeatures st gi q cheaply))
+          qs.qsort fun a b => scores[a]! > scores[b]! || scores[a]! == scores[b]! && a < b
+        match cheap with
+        | some c =>
+          if kids.size ≤ top then order kids m false
+          else
+            -- the cheap model orders all the variants, the full one the first `top`
+            let first := order kids c true
+            order (first.extract 0 top) m false ++ first.extract top first.size
+        | none => order kids m false
       | _ =>
         let key (q : Nat) : Nat × Nat := match rank with
           | .used => (uses q, 0)
@@ -123,7 +135,7 @@ def Places.get (pl : Places) (env : Env) (rank : VariantRank) (p : Nat) : Nat ×
           let (a1, a2) := keys[a]!
           let (b1, b2) := keys[b]!
           a1 > b1 || a1 == b1 && (a2 > b2 || a2 == b2 && a < b)
-    if let .learned _ := rank then
+    if let .learned .. := rank then
       if stats.isNone then stats := some (SymbolStats.ofDb env.db)
     let mut of := pl.of
     for i in [0:sorted.size] do of := of.insert sorted[i]! i
