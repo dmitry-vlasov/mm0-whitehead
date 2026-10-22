@@ -68,6 +68,11 @@ def usage : String :=
                                  task of its own under the theorem's premises, which tactic T gets
                                  --ms (100) ms for; the share closed, by depth and by the head of
                                  the statement; --dump FILE: a line a subgoal, with its statement
+  prove prior <file.mmb> [--from A] [--to B] [--every K] [--k N] [--vote sim|count|norm]
+               [--self X] [--power X] [--pairs] [--nb] [--absent X] [--present X]
+                                 how well the prior per theorem alone ranks the assertions the
+                                 known proofs use: the share with a prior, in the first 10, 100
+                                 and 1,000 of the assertions before the theorem, the median place
   prove score <data.tsv> --model FILE
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
@@ -282,6 +287,24 @@ def strOption (args : List String) (name : String) : Option String :=
   | _ :: value :: _ => some value
   | _ => none
 
+/-- A decimal number with an optional sign and fraction, as a `Float`. -/
+def parseFloat (s : String) : Option Float := do
+  let (neg, s) := if s.startsWith "-" then (true, (s.drop 1).toString) else (false, s)
+  let parts := s.splitOn "."
+  let whole : Nat ← parts[0]?.bind String.toNat?
+  let frac := parts[1]?.getD ""
+  let fracVal : Float ← if frac.isEmpty then pure 0.0 else do
+    let n : Nat ← frac.toNat?
+    pure (n.toFloat / (10 : Float) ^ frac.length.toFloat)
+  let v := whole.toFloat + fracVal
+  return if neg then -v else v
+
+/-- The value of the option `name` among `args`, as a `Float`. -/
+def floatOption (args : List String) (name : String) (default : Float) : Float :=
+  match args.dropWhile (· != name) with
+  | _ :: value :: _ => (parseFloat value).getD default
+  | _ => default
+
 /-- The number of processors (`nproc`); 1 if it cannot be found. -/
 def processors : IO Nat := do
   try
@@ -459,6 +482,97 @@ def proveVariants (path : String) (args : List String) : IO UInt32 := do
     for j in [0:depths.size] do
       IO.println s!"  ordered by recency, among those described to depth {depths[j]!}: \
         {Prove.rankSummary (nodes.map (·.recents[j]!))}"
+  return 0
+
+/-- The prior's options from the command line: `--k N`, `--vote sim|count|norm`,
+`--self X`, `--power X`, `--pairs`, `--nb`, `--absent X`, `--present X`. -/
+def priorOptions (args : List String) : Prove.PriorOptions :=
+  { k := numOption args "--k" 100,
+    vote := match strOption args "--vote" with
+      | some "count" => .count
+      | some "norm" => .norm
+      | _ => .sim,
+    self := floatOption args "--self" 0,
+    power := floatOption args "--power" 1,
+    pairs := args.contains "--pairs",
+    nb := args.contains "--nb",
+    nbAbsent := floatOption args "--absent" (-18),
+    nbPresent := floatOption args "--present" 5 }
+
+/-- `prove prior`: how well the prior alone ranks the assertions a proof uses
+(`Prove/Prior.lean`). For each theorem of the range, the assertions before it are ordered
+by the theorem's prior, and the places of the ones its known proof uses are read: how many
+have a prior at all, how many come in the first 10, 100 and 1,000, and their median place.
+Ties share their place (its mean); an assertion without a prior is tied with all the others
+without one. -/
+def provePrior (path : String) (args : List String) : IO UInt32 := do
+  let file ←
+    match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let (jobs, progress, memLimit) ← jobOptions args
+  let first := numOption args "--from" 0
+  let last := numOption args "--to" 1000000000
+  let every := max 1 (numOption args "--every" 1)
+  let opts := priorOptions args
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let t0 ← IO.monoMsNow
+  let prior := Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) uses opts
+  let todo := (Array.range file.stmts.size).filter fun i =>
+    let s := file.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+      && !(prior.used[s.index]?.getD #[]).isEmpty
+  -- a theorem: how many assertions its proof uses, how many of them have a prior, and their
+  -- places
+  let results ← Prove.runJobs jobs todo.size (fun k => do
+      let thm := file.stmts[todo[k]!]!.index
+      let pr := prior.query thm
+      -- the candidates with a prior, before the theorem, the highest first
+      let scored := (pr.toArray.filter fun (a, v) => a < thm && v > 0).qsort fun a b => a.2 > b.2
+      let zeros := thm - scored.size
+      -- the place of a value: those above it, and half of the others with it
+      let placeOf (v : Float) : Float := Id.run do
+        let mut above := 0
+        let mut same := 0
+        for (_, x) in scored do
+          if x > v then above := above + 1 else if x == v then same := same + 1 else break
+        return above.toFloat + (same.toFloat + 1) / 2
+      let mut out : Array Float := #[]
+      let mut covered := 0
+      for a in prior.used[thm]! do
+        let v := pr.getD a 0
+        if v > 0 then
+          covered := covered + 1
+          out := out.push (placeOf v)
+        else
+          out := out.push (scored.size.toFloat + (zeros.toFloat + 1) / 2)
+      return (out.size, covered, out))
+    progress memLimit logLine
+  let ms := (← IO.monoMsNow) - t0
+  let mut used := 0
+  let mut covered := 0
+  let mut places : Array Float := #[]
+  for (u, c, ps) in results do
+    used := used + u
+    covered := covered + c
+    places := places ++ ps
+  let within (n : Nat) : Nat := places.foldl (init := 0) fun acc p => if p ≤ n.toFloat then acc + 1 else acc
+  let pct (a : Nat) : String := s!"{a * 1000 / max 1 used / 10}.{a * 1000 / max 1 used % 10}%"
+  let sorted := places.qsort (· < ·)
+  let median := if sorted.isEmpty then 0 else sorted[sorted.size / 2]!
+  IO.println s!"prior {repr opts}"
+  IO.println s!"  {todo.size} theorems, {used} used assertions \
+    ({used * 10 / max 1 todo.size / 10}.{used * 10 / max 1 todo.size % 10} a theorem); built and asked in {ms} ms"
+  IO.println s!"  with a prior {pct covered}; in the first 10: {pct (within 10)}, 100: {pct (within 100)}, \
+    1000: {pct (within 1000)}; median place {median.toUInt64}"
   return 0
 
 /-- `prove export`: the data of the learned ranking layer (`Prove/Dataset.lean`): for each
@@ -1323,6 +1437,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "rails" :: path :: rest => proveRails path rest
   | "prove" :: "goal" :: mm0 :: mmb :: rest => proveGoal mm0 mmb rest
   | "prove" :: "export" :: path :: rest => proveExport path rest
+  | "prove" :: "prior" :: path :: rest => provePrior path rest
   | "prove" :: "score" :: path :: rest => proveScore path rest
   | "prove" :: "featbench" :: path :: rest => proveFeatbench path rest
   | "prove" :: "subgoals" :: path :: rest => proveSubgoals path rest

@@ -256,13 +256,32 @@ structure TaskInfo where
   weight : Float := 0
   size : Nat := 0
   premises : Nat := 0
+  /-- Of the theorem's prior (`Env.prior`), the share on the assertions whose conclusions
+  have each term, and the share on those whose conclusions have each term as the head: do
+  the lemmas the theorems like this one use conclude about what a goal is made of. -/
+  priorTerms : Std.HashMap Nat Float := {}
+  priorHeads : Std.HashMap Nat Float := {}
   deriving Inhabited
 
-def Env.taskInfo (env : Env) (stats : SymbolStats) : TaskInfo :=
+def Env.taskInfo (env : Env) (stats : SymbolStats) : TaskInfo := Id.run do
   let terms := (env.task.premises.push env.task.goal).foldl (init := ({} : Std.HashSet Nat)) fun acc e =>
     e.terms.foldl (·.insert ·) acc
-  { terms, weight := terms.fold (init := 0) fun acc t => acc + stats.idf t, size := env.task.goal.size,
-    premises := env.task.premises.size }
+  let mut total : Float := 0
+  let mut priorTerms : Std.HashMap Nat Float := {}
+  let mut priorHeads : Std.HashMap Nat Float := {}
+  for (a, v) in env.prior do
+    let some r := env.db.asserts[a]? | continue
+    total := total + v
+    for t in r.concl.terms do
+      priorTerms := priorTerms.alter t fun x => some (x.getD 0 + v)
+    let h := r.concl.nodes[0]!
+    if !Node.isVar h && !Node.isConst h then
+      priorHeads := priorHeads.alter (Node.appId h) fun x => some (x.getD 0 + v)
+  if total > 0 then
+    priorTerms := priorTerms.map fun _ x => x / total
+    priorHeads := priorHeads.map fun _ x => x / total
+  return { terms, weight := terms.fold (init := 0) fun acc t => acc + stats.idf t, size := env.task.goal.size,
+           premises := env.task.premises.size, priorTerms, priorHeads }
 
 /-- The names of the goal features, in the order of `Env.goalFeatures`. -/
 def goalFeatureNames : Array String := #[
@@ -290,7 +309,12 @@ def goalFeatureNames : Array String := #[
   "siblings",       -- the step's other goals
   "siblings_ground",-- of them, without a variable
   "shared_sibling_vars", -- the goal's variables that a sibling has too
-  "sibling_closable"     -- siblings, not bare, that a premise of the theorem unifies with
+  "sibling_closable",    -- siblings, not bare, that a premise of the theorem unifies with
+  -- the theorem's prior (2026-10-22): do the lemmas that the proofs of the theorems like
+  -- this one use conclude about what the goal is made of (`TaskInfo.priorTerms`)
+  "prior_head",     -- the share of the prior on assertions concluding with the goal's head term
+  "prior_terms",    -- the mean, by weight, over the goal's terms of the share on assertions concluding with the term
+  "prior_min"       -- the least of those shares: the goal's term the lemmas least conclude about
 ]
 
 /-- The features of goal `e`, at `depth` assertion nodes from the root, among the step's
@@ -318,6 +342,9 @@ def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp)
   let head := e.nodes[0]!
   let headTerm := !Node.isVar head && !Node.isConst head
   let sharedSibling := (vars.toArray.filter fun v => siblings.any (·.hasVar v)).size
+  let shareOf (t : Nat) : Float := ti.priorTerms.getD t 0
+  let priorTerms := if w == 0 then 0 else (terms.foldl (init := 0) fun acc t => acc + stats.idf t * shareOf t) / w
+  let priorMin := if terms.isEmpty then 0 else terms.foldl (init := (1 : Float)) fun acc t => min acc (shareOf t)
   let b (x : Bool) : Float := if x then 1 else 0
   let n (x : Nat) : Float := x.toFloat
   return Array.map round4 #[
@@ -343,7 +370,10 @@ def Env.goalFeatures (env : Env) (stats : SymbolStats) (ti : TaskInfo) (e : Exp)
     n siblings.size,
     n (siblings.filter (!·.hasVars)).size,
     n sharedSibling,
-    n (siblings.filter fun s => !s.isVar && !(env.premises.unify s).isEmpty).size
+    n (siblings.filter fun s => !s.isVar && !(env.premises.unify s).isEmpty).size,
+    if headTerm then ti.priorHeads.getD (Node.appId head) 0 else 0,
+    priorTerms,
+    priorMin
   ]
 
 /-- The assertion nodes from the root to goal node `h`. -/

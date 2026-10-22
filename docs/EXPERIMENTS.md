@@ -454,6 +454,29 @@ of the ranker (37% of its gain, recency down from 42% to 9%): first 81.8% → 83
 (with the value) at 1 s, 104 and 105 at 5 s, against 80–85 and 101–104 before; mm0 249,
 peano 113, the compiler 505.
 
+**The prior tuned** (`DESIGN.md`, step 6b; `prove prior`): the prior measured by itself,
+in a second a run — the assertions before each test theorem ordered by its prior, and the
+places of the ones the known proof uses. On set.mm's test theorems (618, 21.4 used
+assertions each):
+
+| prior | with a prior | in the first 10 | in 100 | in 1,000 | median place |
+|---|---|---|---|---|---|
+| 100 neighbours, their similarity, the terms (step 6) | 82.7% | 12.5% | 47.0% | 81.6% | 116 |
+| 20 / 50 / 200 / 1,000 neighbours | 66 / 77 / 87 / 93% | 12.0 / 12.4 / 12.2 / 11.6% | 47.4 / 47.7 / 46.3 / 43.1% | | 114 / 110 / 119 / 143 |
+| the vote counted, or shared among the proof's assertions (MaSh) | 82.7% | 11.9 / 10.4% | 44.7 / 41.6% | | 128 / 151 |
+| + the neighbour itself a candidate (`self 1`) | 86.0% | 12.6% | 47.5% | 84.7% | 113 |
+| + the parent–child term pairs as features | 84.2% | 13.0% | 49.2% | 83.2% | 104 |
+| pairs, self 1, 1,000 neighbours, the similarity cubed | 97.3% | 14.0% | 53.6% | 90.4% | 85 |
+| **pairs, self 3, 1,000 neighbours, the similarity to the 4th** | **97.3%** | **15.0%** | **54.9%** | **90.1%** | **80** |
+| naive Bayes (MaSh's, without its third term), the vector's weights | 95.9% | 8.7% | 41.6% | 82.5% | 149 |
+| naive Bayes, the idf weights, any constants | 95.9% | 4.0% | 26.3% | 79.2% | 288 |
+
+The pairs are the largest single gain; many neighbours voting by a power of their
+similarity add coverage without blurring the top; naive Bayes loses whatever its constants.
+The chosen prior gains as much on the other files (in the first 100: mm0 55 → 66%, peano
+60 → 68%, hello_mmc 58 → 71%). The ranker was trained again on data exported with it
+(`m3`); the search with it: see below.
+
 **`order`, the cheap version:** a breadth-first sub-search at every order goal among the
 order lemmas (`at`), before `learned`'s search: on peano's subgoals 1,178 against 1,179,
 in search 113 both; on set.mm 66% against 67%, in search 81 against 83. The search finds

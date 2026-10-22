@@ -2843,6 +2843,41 @@ count, so the test stays out of sample.
 - **Cost:** the prior of a theorem is one query, a few milliseconds, at the start of its
   search; the index of set.mm takes a second to build.
 
+**Step 6b, the prior tuned (2026-10-22; `PriorOptions`, `prove prior`).** The prior can be
+measured by itself, without an export, a training and a search: `prove prior` orders the
+assertions before each theorem of a range by the theorem's prior alone and reads the places
+of the ones its known proof uses — the share with a prior at all, the share in the first
+10, 100 and 1,000, the median place (ties share their place; the assertions without a prior
+are all tied). A run on set.mm's test theorems takes a second, so the variants were compared
+in a grid (`docs/EXPERIMENTS.md`, "The prior tuned"):
+- **Features of the statement:** its terms, or its terms and its parent–child term pairs
+  (`--pairs`): the shape of the statement, not only its vocabulary. Pairs are the largest
+  single gain (in the first 100: 47.0% → 49.2%).
+- **The vote:** by similarity, by 1, or by similarity shared among the proof's assertions
+  as MaSh does (`--vote norm`): the shared vote is worse, the count a little worse.
+- **The neighbour itself** as a candidate (`--self X`, its similarity times X): a little
+  better and more coverage.
+- **Many neighbours, voting by a power of their similarity** (`--k 1000 --power 4`): the
+  k-th neighbour's vote fades with its similarity, so a large k adds coverage (97% of the
+  used assertions have a prior, 83% before) without blurring the top.
+- **Naive Bayes** (`--nb`, `naive_bayes` of MaSh without its term for the features the
+  assertion's users have and the goal lacks; its two constants `--absent`, `--present`):
+  worse at the top than the neighbours on this data (in the first 100: 42%, 26% with the
+  idf weights MaSh uses), whatever the constants. Kept as a variant of `prove prior`, not
+  used.
+
+The defaults are now pairs, self 3, k 1,000, power 4: on set.mm's test theorems 54.9% of
+the used assertions in the first 100 (47.0%), 15.0% in the first 10 (12.5%), median place
+80 (116); mm0 65.9% (55.4%), peano 67.6% (59.9%), hello_mmc 70.9% (57.5%). The ranker's
+data were exported again with it (`m3`) — the outcome in search is in `EXPERIMENTS.md`.
+
+**The value's prior (2026-10-22; `TaskInfo.priorTerms`).** The goal features get three of
+the theorem's prior: of its votes, the share on assertions whose conclusion has the goal's
+head term (`prior_head`), the weighted mean over the goal's terms of the share on
+assertions concluding with the term (`prior_terms`), and the least such share
+(`prior_min`) — does what the theorems like this one used conclude about what the goal is
+made of. They are found once per search, in `Env.taskInfo` (26 goal features).
+
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
 **What the experiments left** ("The agent bench", "Whitehead as a gap filler", "The

@@ -4,8 +4,10 @@ of whether the search proves a goal, trained on the goal rows of `prove export -
 compared on their test parts. The files, the split and the theorems taken once are those
 of train.py.
 
-    python train_value.py OUTDIR [--weights none|sqrt|equal] [--trees N] FILE.tsv...
+    python train_value.py OUTDIR [--weights none|sqrt|equal] [--trees N] [--drop F,G] FILE.tsv...
         (the files in the order of data.FILES)
+
+With --drop, the named features are zeroed: a model without them, compared on the same data.
 
 With --weights, each file's rows weigh so that the file's total is its number of rows
 (none), its square root (sqrt, the default) or the same for every file (equal).
@@ -53,11 +55,19 @@ def main():
         i = args.index('--trees')
         ntrees = int(args[i + 1])
         del args[i:i + 2]
+    # --drop a,b: these features are zeroed, so a model without them is compared on the same data
+    drop = []
+    if '--drop' in args:
+        i = args.index('--drop')
+        drop = args[i + 1].split(',')
+        del args[i:i + 2]
     out, paths = args[0], args[1:]
     os.makedirs(out, exist_ok=True)
     d = load(paths)
     feats = d['features']
     fi = {n: i for i, n in enumerate(feats)}
+    for n in drop:
+        d['X'][:, fi[n]] = 0
     train, tune, test = (select(d, d['part'] == k) for k in range(3))
     print(f"rows: train {len(train['label'])}, tune {len(tune['label'])}, test {len(test['label'])}; "
           f"proved: {train['label'].mean():.3f} of the training rows")
