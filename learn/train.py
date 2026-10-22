@@ -13,7 +13,9 @@ trained on the files of `prove export` and compared on their test parts:
 With --sample-train, only that share of the training theorems of the first file (the
 large one) is trained on, drawn by the theorem's number, to train faster; the other
 files, the tuning and the test parts are whole. With --zero a,b, the named features are
-zeroed, so the model does without them. With --weights, each file's nodes weigh
+zeroed, so the model does without them. With --no-linear, the linear baseline is skipped
+(its pass over all the training rows needs a copy of them: 10 GB at 90 million rows, which
+a memory cap may not allow). With --weights, each file's nodes weigh
 so that the file's total weight is its number of nodes (none), its square root (sqrt), or
 the same for every file (equal). With --extra, the rows of `prove export --search` (the
 proofs a search found: expert iteration) of file `NAME.*.tsv` are added to the training
@@ -165,6 +167,9 @@ def main():
         i = args.index('--zero')
         zero = args[i + 1].split(',')
         del args[i:i + 2]
+    no_linear = '--no-linear' in args
+    if no_linear:
+        args.remove('--no-linear')
     out, paths = args[0], args[1:]
     os.makedirs(out, exist_ok=True)
     d = load(paths, sample, extras)
@@ -192,19 +197,21 @@ def main():
     report('by recency', lambda s: np.where(s['X'][:, fi['recency_log']] > 0, -s['X'][:, fi['recency_log']], -1e9)
            + 1e-3 * s['X'][:, fi['uses_log']])
 
-    # M1
-    mu, sd = train['X'].mean(0), train['X'].std(0) + 1e-6
-    t0 = time.time()
-    lin = train
-    if len(train['label']) > 5_000_000:
-        h = (train['thm'] * 2246822519 + train['file'] * 97) % 1000
-        lin = select(train, h < 5_000_000 / len(train['label']) * 1000)
-    w, loss = fit_linear((lin['X'] - mu) / sd, lin)
-    print(f'linear: trained in {time.time() - t0:.0f} s, loss {loss:.4f}')
-    print('  weights: ' + ', '.join(f'{n} {v:+.2f}' for n, v in sorted(zip(feats, w), key=lambda x: -abs(x[1]))))
-    report('linear', lambda s: ((s['X'] - mu) / sd) @ w)
-    with open(os.path.join(out, 'linear.json'), 'w') as f:
-        json.dump({'features': feats, 'mean': mu.tolist(), 'scale': sd.tolist(), 'weights': w.tolist()}, f)
+    # M1 — unless --no-linear: its mean and deviation over all the training rows need a
+    # copy of them (10 GB at 90 million rows), which a memory cap may not allow
+    if not no_linear:
+        mu, sd = train['X'].mean(0), train['X'].std(0) + 1e-6
+        t0 = time.time()
+        lin = train
+        if len(train['label']) > 5_000_000:
+            h = (train['thm'] * 2246822519 + train['file'] * 97) % 1000
+            lin = select(train, h < 5_000_000 / len(train['label']) * 1000)
+        w, loss = fit_linear((lin['X'] - mu) / sd, lin)
+        print(f'linear: trained in {time.time() - t0:.0f} s, loss {loss:.4f}')
+        print('  weights: ' + ', '.join(f'{n} {v:+.2f}' for n, v in sorted(zip(feats, w), key=lambda x: -abs(x[1]))))
+        report('linear', lambda s: ((s['X'] - mu) / sd) @ w)
+        with open(os.path.join(out, 'linear.json'), 'w') as f:
+            json.dump({'features': feats, 'mean': mu.tolist(), 'scale': sd.tolist(), 'weights': w.tolist()}, f)
 
     # M2
     import lightgbm as lgb
