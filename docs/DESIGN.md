@@ -2868,8 +2868,13 @@ in a grid (`docs/EXPERIMENTS.md`, "The prior tuned"):
 
 The defaults are now pairs, self 3, k 1,000, power 4: on set.mm's test theorems 54.9% of
 the used assertions in the first 100 (47.0%), 15.0% in the first 10 (12.5%), median place
-80 (116); mm0 65.9% (55.4%), peano 67.6% (59.9%), hello_mmc 70.9% (57.5%). The ranker's
-data were exported again with it (`m3`) — the outcome in search is in `EXPERIMENTS.md`.
+80 (116); mm0 65.9% (55.4%), peano 67.6% (59.9%), hello_mmc 70.9% (57.5%). The ranker
+trained on data exported with it (`m3`): the known step first at 84.6% on set.mm's test
+part (83.6%), at 74.9% where it brings three or more new variables (70.5%); in search
+set.mm **87 at 1 s and 119 at 5 s** with `learned` alone (83, 104), 91 with the value at
+1 s (89); mm0 and hello_mmc unchanged, peano 107 (113; not a training file). The measure
+by itself predicted the search: a lever that can be turned in seconds, not hours
+(`EXPERIMENTS.md`, "The prior tuned").
 
 **The value's prior (2026-10-22; `TaskInfo.priorTerms`).** The goal features get three of
 the theorem's prior: of its votes, the share on assertions whose conclusion has the goal's

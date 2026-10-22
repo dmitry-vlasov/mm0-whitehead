@@ -698,7 +698,12 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    substance. The learned layer again (steps 5–6): features of the step's other goals
    (the value's AUC 0.834 → 0.859, nothing in search) and a prior per theorem, k-NN
    premise selection by the statements (the strongest feature; set.mm's test part 89 at
-   1 s and 105 at 5 s with `learned(value=4)`, the best so far). `order` as a scoped
+   1 s and 105 at 5 s with `learned(value=4)`). The prior then tuned by itself (`prove
+   prior`, a second a run: term pairs, a self vote, 1,000 neighbours by the 4th power of
+   their similarity; used assertions in its first 100: 47% → 55%): the ranker `m3`, set.mm
+   **87 at 1 s and 119 at 5 s** with `learned` alone (83, 104), the best so far; peano
+   107 (113; not a training file). The value with the prior's goal features (`v4`) is
+   being trained on m3's trees. `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the

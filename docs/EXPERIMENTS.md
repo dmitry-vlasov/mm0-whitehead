@@ -38,6 +38,7 @@ head of each.
 | Features of the step's other goals (ranker and value) | 2026-10-21 | the value improves offline (AUC 0.834 → 0.859), the ranker and the search do not |
 | A prior per theorem (k-NN premise selection) | 2026-10-22 | the strongest feature (37% of the gain); first 81.8% → 83.6%; where the step brings 3+ variables 66% → 71%; set.mm **89** at 1 s and **105** at 5 s with the value, the best so far |
 | `order`, the cheap version: a scoped sub-search at order goals | 2026-10-22 | nothing, on set.mm and on peano |
+| The prior tuned by itself (`prove prior`: term pairs, a self vote, 1,000 neighbours by the 4th power of similarity) | 2026-10-22 | used assertions in the prior's first 100: 47% → 55%; the ranker m3: first 83.6% → 84.6%, with 3+ new variables 70.5% → 74.9%; set.mm **87** at 1 s (83), **119** at 5 s (104) with `learned` alone; naive Bayes loses |
 
 ## 1. The engine without guidance
 
@@ -474,8 +475,26 @@ assertions each):
 The pairs are the largest single gain; many neighbours voting by a power of their
 similarity add coverage without blurring the top; naive Bayes loses whatever its constants.
 The chosen prior gains as much on the other files (in the first 100: mm0 55 → 66%, peano
-60 → 68%, hello_mmc 58 → 71%). The ranker was trained again on data exported with it
-(`m3`); the search with it: see below.
+60 → 68%, hello_mmc 58 → 71%).
+
+The ranker trained again on data exported with it (`m3`) follows: the prior carries 44% of
+its gain (37%); on set.mm's test part the known step is first at 84.6% (m2 83.6%, before
+the prior 81.8%), in the first 5 at 96.6% (95.8%); where it brings three or more new
+variables, first at 74.9% (70.5%, 66.2%), in 5 at 92.9% (90.1%); mm0 69.4% (67.9%),
+hello_mmc 74.1% (73.4%). In search, against m2 (both with the value v3):
+
+| | m2 | m3 |
+|---|---|---|
+| set.mm test (618), `learned`, 1 s | 83 | **87** |
+| `learned(value=4)`, 1 s | 89 | **91** |
+| `learned`, 5 s | 104 | **119** (19 gained, 4 lost) |
+| `learned(value=4)`, 5 s | 105 | 108 |
+| mm0 `congruent`, peano, hello_mmc, 1 s | 249, 113, 505 | 249, 107, 505 |
+
+The gain at 5 s is of three- and four-step proofs that m2 did not reach in time. The
+value v3, trained on the trees of an older ranker, now costs at 5 s what it gives at 1 s;
+it is trained again on m3's trees, with the prior's goal features (below). Peano loses 6
+of 113: it is not among the training files, and the prior's scale changed under it.
 
 **`order`, the cheap version:** a breadth-first sub-search at every order goal among the
 order lemmas (`at`), before `learned`'s search: on peano's subgoals 1,178 against 1,179,
