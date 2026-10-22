@@ -2914,6 +2914,39 @@ the two 5 s logs (m3; `learned` 119, `learned(value=4)` 112, 19 lost and 12 gain
   nearest steps, not a cost that can put a step out of reach — the engine's fairness
   (`search`'s rounds by cost) must stay in charge of what is reached at all.
 
+### Where the time goes (2026-10-22)
+
+Every gain of the learned layer came from reaching more in the same time, so the search
+was profiled (callgrind on two 5 s searches of set.mm's test theorems: a typical one and
+one that ran 25 s past its limit), against the raw rate of a plain breadth-first search.
+
+- **The learned search runs at a third of the raw rate.** Over set.mm's test theorems at
+  5 s, `bfs` makes 280,000 assertion nodes a second a job, `learned` 97,000; and the
+  learned runs overran the limit by 75% on average, because a round's work is done before
+  the time is checked.
+- **Nine tenths of the search's own time is the rank of variants.** `Places.get`, which
+  ranks all the variants of a goal the first time one of them needs its place: the
+  features 36–46% of the search (`Env.variantFeatures`, mostly instantiating the variant's
+  new goals and asking the index of premises whether each unifies), the model's hundred
+  trees 30–48% (`Tree.eval`), the sort 12%. The expansion itself — the index of
+  assertions, the unifiers, the nodes — is under a tenth. A 5 s search ranks some 400,000
+  variants, at some 90,000 instructions each.
+- **Three exact changes** (the same expansions in the same order, as the tests and the
+  proofs found, node for node, confirm): the leaves are grouped by the known cost of
+  their goal, and their own place and value are found only for the groups that can still
+  be the least — the goals at the frontier are not ranked at all; the tree walk is a loop
+  of its own rather than a `for` with a `break`; a goal's unifiability with the premises
+  is asked once, for `goals_closable` and `closable_meta` together. Together 15–25% less
+  time a theorem, and 10–75% more work within the limit — modest, because the search
+  dives: a new goal's first variants come into play a round later, so nearly every goal's
+  variants are ranked anyway.
+- **The way to a multiple is a two-stage rank:** a cheap model, of the twenty features
+  that need no instantiation (the rule, its uses and recency, the goal, the prior), over
+  all the variants of a goal, and the full model over its first N only; the rest keep the
+  cheap order. Whether the known step stays within the cheap model's first N is measured
+  on set.mm's test goals with all their variants (`EXPERIMENTS.md`, "Where the time
+  goes").
+
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
 **What the experiments left** ("The agent bench", "Whitehead as a gap filler", "The

@@ -83,17 +83,21 @@ structure Tree where
 
 instance : Repr Tree := ⟨fun t _ => s!"<a tree of {t.feature.size} nodes>"⟩
 
-/-- The value of tree `t` at `x`. -/
-def Tree.eval (t : Tree) (x : FloatArray) : Float := Id.run do
-  if t.feature.isEmpty then return t.leaves.get! 0
-  let mut i : Int := 0
-  for _ in [0:t.feature.size + 1] do
-    if i < 0 then break
-    let k := i.toNat
+/-- The walk of `Tree.eval` from node `k`; `fuel` bounds it (a tree read from a file). A
+loop of its own, not a `for` with a `break`: a search scores hundreds of thousands of
+variants with a hundred trees each (`docs/DESIGN.md`, "Where the time goes"). -/
+def Tree.walk (t : Tree) (x : FloatArray) (k : Nat) (fuel : Nat) : Float :=
+  match fuel with
+  | 0 => 0
+  | fuel + 1 =>
     let v := x.get! t.feature[k]!
     let goLeft := if t.missingZero[k]! && v.abs ≤ 1e-35 then t.defaultLeft[k]! else v ≤ t.threshold.get! k
-    i := if goLeft then t.left[k]! else t.right[k]!
-  return t.leaves.get! (-i - 1).toNat
+    let i : Int := if goLeft then t.left[k]! else t.right[k]!
+    if i < 0 then t.leaves.get! (-i - 1).toNat else t.walk x i.toNat fuel
+
+/-- The value of tree `t` at `x`. -/
+def Tree.eval (t : Tree) (x : FloatArray) : Float :=
+  if t.feature.isEmpty then t.leaves.get! 0 else t.walk x 0 (t.feature.size + 1)
 
 inductive Model where
   | linear (mean scale weights : Array Float)

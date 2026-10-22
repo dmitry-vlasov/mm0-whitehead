@@ -12,7 +12,8 @@ trained on the files of `prove export` and compared on their test parts:
 
 With --sample-train, only that share of the training theorems of the first file (the
 large one) is trained on, drawn by the theorem's number, to train faster; the other
-files, the tuning and the test parts are whole. With --weights, each file's nodes weigh
+files, the tuning and the test parts are whole. With --zero a,b, the named features are
+zeroed, so the model does without them. With --weights, each file's nodes weigh
 so that the file's total weight is its number of nodes (none), its square root (sqrt), or
 the same for every file (equal). With --extra, the rows of `prove export --search` (the
 proofs a search found: expert iteration) of file `NAME.*.tsv` are added to the training
@@ -155,11 +156,20 @@ def main():
         i = args.index('--extra')
         extras.append(args[i + 1])
         del args[i:i + 2]
+    # --zero a,b: these features are zeroed, so the model does without them (a cheap model
+    # for a first rank of all the variants of a goal, DESIGN.md "Where the time goes")
+    zero = []
+    if '--zero' in args:
+        i = args.index('--zero')
+        zero = args[i + 1].split(',')
+        del args[i:i + 2]
     out, paths = args[0], args[1:]
     os.makedirs(out, exist_ok=True)
     d = load(paths, sample, extras)
     feats = d['features']
     fi = {n: i for i, n in enumerate(feats)}
+    for n in zero:
+        d['X'][:, fi[n]] = 0
     X = d['X']
     train, tune, test = (select(d, d['part'] == k) for k in range(3))
     print(f"rows: train {len(train['label'])}, tune {len(tune['label'])}, test {len(test['label'])}")

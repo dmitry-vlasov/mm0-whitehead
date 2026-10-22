@@ -190,9 +190,13 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
       if Node.isVar n && !acc.contains (Node.varId n) then acc.push (Node.varId n) else acc
   let allVars := goalVars.foldl (init := (#[] : Array Nat)) fun acc vs => vs.foldl (init := acc) fun acc v => if acc.contains v then acc else acc.push v
   let sharedVars := (allVars.filter fun v => (goalVars.filter (·.contains v)).size ≥ 2).size
-  let closableMeta := (Array.range goals.size).filter fun i =>
+  -- the goals, not bare, that a premise unifies with: asked of the index once a goal, for
+  -- `closable` (all of them, as `VariantView.closable` counts) and `closable_meta` (those
+  -- with variables)
+  let closable := (Array.range goals.size).filter fun i =>
     let g := goals[i]!
-    !g.isVar && !goalVars[i]!.isEmpty && !(env.premises.unify g).isEmpty
+    !g.isVar && !(env.premises.unify g).isEmpty
+  let closableMeta := closable.filter fun i => !goalVars[i]!.isEmpty
   -- the rule's own part: from the file's table, or for an unfolding's rule, found here
   let ri := match prop.step with
     | .assertion a => stats.rules[a]?.getD (stats.ruleInfo prop.rule)
@@ -213,7 +217,7 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
     n goals.size,
     n (goals.filter (·.isVar)).size,
     n (goals.filter (!isVar ·)).size,
-    n v.closable.get,
+    n closable.size,
     n (goals.foldl (init := 0) (· + ·.size)),
     n (goals.foldl (init := 0) fun m g => max m g.size),
     n newVars.size,

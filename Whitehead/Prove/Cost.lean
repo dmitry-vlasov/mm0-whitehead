@@ -248,35 +248,28 @@ def Strategy.search (c : Cost) : Strategy SearchState where
       let mut memo := (st.cost, st.places, st.values)
       let mut best : Option Nat := none
       let mut round := #[]
-      -- with a value, the leaves by their cost without their own value term: that term is
-      -- found only for those that can still be the least, the cheapest first
+      -- the leaves by the cost of their goal, which is known: a leaf's own terms (its
+      -- place, and its value) are found only for those that can still be the least, the
+      -- cheapest goals first. The place of a leaf ranks all the variants of its goal, so
+      -- this is where the search spends its time (`docs/DESIGN.md`, "Where the time goes"):
+      -- the goals of the frontier, whose variants are never reached, are not ranked at all
       let mut byBase : Std.HashMap Nat (Array Nat) := {}
       for p in env.leafs do
         if env.props[p]!.expanded then continue
         let h := env.props[p]!.parent
         let (k, (cost, pl, vs)) := rankedCost env marks penalty rank width value absolute cap memo h
-        let (r, pl) := placeOf env pl rank width p
         memo := (cost, pl, vs)
-        let k := k + r / width
-        if value.isSome then
-          byBase := byBase.alter k fun ps => some ((ps.getD #[]).push p)
-          continue
-        match best with
-        | none =>
-          best := some k
-          round := #[p]
-        | some b =>
-          if k < b then
-            best := some k
-            round := #[p]
-          else if k == b then round := round.push p
+        byBase := byBase.alter k fun ps => some ((ps.getD #[]).push p)
       for k in (byBase.toArray.map (·.1)).qsort (· < ·) do
         if best.any (· < k) then break
         for p in byBase[k]! do
           let (cost, pl, vs) := memo
-          let (v, pl, vs) := valueOf env value absolute cap rank width pl vs p
+          let (r, pl) := placeOf env pl rank width p
+          let t := k + r / width
+          -- the value only where the place leaves the leaf in the running
+          let (v, pl, vs) := if best.any (· < t) then (0, pl, vs) else valueOf env value absolute cap rank width pl vs p
           memo := (cost, pl, vs)
-          let t := k + v
+          let t := t + v
           match best with
           | none =>
             best := some t
