@@ -711,8 +711,11 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    `learned(value=4)` with `--model` and `--value`. The search profiled (`DESIGN.md`,
    "Where the time goes"): nine tenths of its time ranks every variant of each expanded
    goal; three exact speedups (frontier goals not ranked, a tighter tree walk, one unify
-   a goal) give **97 at 1 s and 122 at 5 s**, the best so far; a two-stage rank (a cheap
-   model over all variants, the full one over its first N) is being measured. `order` as a scoped
+   a goal) give **97 at 1 s and 122 at 5 s**, the best so far. A two-stage rank (a cheap
+   model over all variants, the full one over its first 128; `--cheap FILE`) is 1.7×
+   faster a node and proves the same theorems: speed no longer limits; the rank against
+   all the variants does (the known step first at 23%, not the 84% the sampled data
+   showed). Being measured: the ranker trained on hard negatives (`prove export --hard`). `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the

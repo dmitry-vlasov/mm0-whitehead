@@ -2951,7 +2951,14 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   their variants (`EXPERIMENTS.md`, "Where the time goes"): the full model has the known
   step in its first 128 at 95.0%, the cheap model of 10 trees at 93.7%, so the two stages
   lose little; and against all the variants (a median of 1,076 a goal) the known step is
-  first at 23%, not the 84% the exported data with fifty negatives a node showed.
+  first at 23%, not the 84% the exported data with fifty negatives a node showed. In
+  search the two stages are 1.7× faster a node at 1 s and 1.5× at 5 s, with 18% more
+  expansions, and prove the same theorems within the noise (95–97 at 1 s, 122–124 at 5 s,
+  for `top` 64 to 256): the cheap stage's misses at the top cost what the speed buys.
+  **Speed is no longer what limits the search at these budgets; the rank's quality against
+  all the variants is.** Hence `prove export --hard`: rows whose negatives are half the
+  variants the cheap model scores highest — the ones the ranker confuses the known step
+  with, which fifty drawn among a thousand rarely are.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

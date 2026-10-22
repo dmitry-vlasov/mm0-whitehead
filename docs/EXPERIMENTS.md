@@ -42,6 +42,7 @@ head of each.
 | The value's prior (three goal features of the theorem's prior) | 2026-10-22 | AUC 0.856 → 0.860, search the same; with m3 the value is +4 at 1 s and −7 at 5 s |
 | The value at 5 s: its term capped (`cap=2`) | 2026-10-22 | the value prunes rather than reorders (it dives: 3,098 single-goal expansions on one theorem); capped at two levels of cost, **91 at 1 s and 120 at 5 s** (87, 119 without the value; 91, 112 uncapped) |
 | Where the time goes: the search profiled, three exact speedups | 2026-10-22 | nine tenths of the search is ranking every variant of each expanded goal (`learned` runs at a third of `bfs`'s node rate); frontier goals not ranked, a tighter tree walk, one unify a goal: set.mm **97 at 1 s** (91), 122 at 5 s (120) |
+| The rank against all the variants; a two-stage rank | 2026-10-22 | over all variants of a goal (median 1,076) the known step is first at **23%**, not the 84% the sampled data showed; a cheap model's first 128 hold it at 93.7% against the full model's 95.0%; two stages 1.7× faster a node, the same theorems (95–97 at 1 s, 122–124 at 5 s): the rank's quality, not speed, now limits |
 
 ## 1. The engine without guidance
 
@@ -589,6 +590,25 @@ are worth a point or two at the top and half a point at 64**: the cheap model's 
 hold the known step at 94.6% against the full model's 95.0%. A two-stage rank with a
 10-tree cheap model and `top=128` keeps 93.7% of the known steps in the full model's
 hands and scores a median goal's thousand variants at a tenth of the cost.
+
+In search (set.mm's test theorems, m3 and v4, `learned(value=4)`; `--cheap` the 10-tree
+model unless said):
+
+| | 1 s | 5 s | nodes a second a job |
+|---|---|---|---|
+| one stage (the exact speedups) | 97 | 122 | 114,000 / 105,000 |
+| two stages, `top=128` | 95 | 124 | 196,000 / 159,000 |
+| `top=128`, the 30-tree cheap model | 95 | 122 | |
+| `top=256` | 95 | 123 | |
+| `top=64` | 97 | 123 | |
+
+The two stages make the search 1.7× faster a node at 1 s and 1.5× at 5 s, with 18% more
+expansions, and prove the same theorems within the noise of two: the cheap stage's misses
+at the top (1.3% of the known steps it drops from the first 128) cost what the speed buys.
+So speed is no longer what limits the search at these budgets; the rank's quality against
+all the variants is — a known step first at 23%. The two stages stay as an option (less
+latency at equal results); the next lever is the ranker trained on the negatives it
+confuses the known step with (`prove export --hard`).
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5
