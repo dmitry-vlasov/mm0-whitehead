@@ -55,7 +55,8 @@ def usage : String :=
                                  the data of the learned ranking layer: for each theorem, along
                                  its known proof, a row for each variant of each goal node, with
                                  its features and whether the known proof chose it (TSV);
-                                 --negatives: the others kept a node (50; 0 for all); --search:
+                                 --negatives: the others kept a node (50; 0 for all); --hard: half
+                                 of them the ones the cheap model (--cheap) scores highest; --search:
                                  along the proof that tactic T finds in --search-ms (1000) ms
                                  instead, for the theorems where it is not the known one's shape;
                                  --goals: the data of the value of goals instead, a row for each
@@ -599,6 +600,8 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   let last := numOption args "--to" 1000000000
   let every := max 1 (numOption args "--every" 1)
   let negatives := numOption args "--negatives" 50
+  -- --hard: half the negatives are the ones the cheap model (--cheap) scores highest
+  let hardNegatives := args.contains "--hard"
   let limits : Prove.Limits :=
     { maxProps := numOption args "--max-nodes" 500000, maxMs := numOption args "--ms" 20000,
       maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
@@ -644,11 +647,15 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   let searchLimits : Prove.Limits := { maxProps := 20000000, maxMs := numOption args "--search-ms" 1000,
                                        maxTuples := limits.maxTuples, maxWork := limits.maxWork }
   let found ← IO.mkRef (0, 0, 0)
+  let hard : Option Prove.Model := if hardNegatives then cheap else none
+  if hardNegatives && hard.isNone then
+    IO.eprintln "prove export: --hard needs the cheap model (--cheap FILE)"
+    return 2
   let rowsFor (k : Nat) : IO (Option (Array String)) := do
     let i := todo[k]!
     let thmPrior := prior.query file.stmts[i]!.index
     match searchTactic with
-    | none => Prove.datasetRows db index limits uses stats negatives i thmPrior
+    | none => Prove.datasetRows db index limits uses stats negatives i thmPrior hard
     | some text =>
       let thm := file.stmts[i]!.index
       let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, cheap, value }
@@ -673,7 +680,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
         | some sk =>
           found.modify fun (a, b, c) => (a + 1, b + (if known then 1 else 0), c)
           if known then return none
-          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk thmPrior)
+          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk thmPrior hard)
   let results ← Prove.runJobs jobs todo.size rowsFor progress memLimit logLine
   let h ← IO.FS.Handle.mk out .write
   h.putStrLn (if goals then Prove.goalHeader else Prove.datasetHeader)

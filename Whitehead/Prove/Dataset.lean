@@ -17,6 +17,7 @@ value from its own searches.
 -/
 import Whitehead.Prove.Features
 import Whitehead.Prove.Measure
+import Whitehead.Prove.Model
 import Whitehead.Prove.Prior
 
 namespace Whitehead.Prove
@@ -44,7 +45,8 @@ partial def ProofTree.skeleton? : ProofTree → Option Skeleton
 /-- The rows of statement `i` of the file, a theorem, along the proof `skel`; `prior` is
 the theorem's (`Prior.query`). -/
 def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
-    (negatives : Nat) (i : Nat) (skel : Skeleton) (prior : Std.HashMap Nat Float := {}) : IO (Array String) := do
+    (negatives : Nat) (i : Nat) (skel : Skeleton) (prior : Std.HashMap Nat Float := {})
+    (hard : Option Model := none) : IO (Array String) := do
     let s := db.file.stmts[i]!
     let env := { Env.init db index (db.task s.index) with uses, prior }
     let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
@@ -57,8 +59,21 @@ def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) 
       seen := seen.insert prop.parent
       let kids := env.hyps[prop.parent]!.children
       let others := kids.filter (· != p)
-      let chosen := if negatives == 0 || others.size ≤ negatives then others
+      let drawn := if negatives == 0 || others.size ≤ negatives then others
         else (others.qsort fun a b => mixHash prop.parent a < mixHash prop.parent b).extract 0 negatives
+      -- with a model, half the negatives are the hardest: those it scores highest, by its
+      -- cheap features (`DESIGN.md`, "Where the time goes"); the other half are drawn
+      let chosen := match hard with
+        | none => drawn
+        | some m =>
+          if negatives == 0 || others.size ≤ negatives then others
+          else
+            let gi := env.goalInfo prop.parent
+            let scores := others.foldl (init := ({} : Std.HashMap Nat Float)) fun (acc : Std.HashMap Nat Float) q =>
+              acc.insert q (m.score (env.variantFeatures stats gi q true))
+            let hardest := (others.qsort fun a b => scores[a]! > scores[b]! || scores[a]! == scores[b]! && a < b).extract 0 (negatives / 2)
+            let rest := drawn.filter (!hardest.contains ·)
+            hardest ++ rest.extract 0 (negatives - hardest.size)
       -- in the order the variants were made, the engine's own, which breaks its ties
       for q in kids.filter fun q => q == p || chosen.contains q do
         let a : Int := match env.props[q]!.step with
@@ -74,10 +89,11 @@ def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) 
 proof the skeleton reader leaves out (a shared conversion). With `negatives` 0, every
 variant of a node. -/
 def datasetRows (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
-    (negatives : Nat) (i : Nat) (prior : Std.HashMap Nat Float := {}) : IO (Option (Array String)) := do
+    (negatives : Nat) (i : Nat) (prior : Std.HashMap Nat Float := {}) (hard : Option Model := none) :
+    IO (Option (Array String)) := do
   match db.skeleton db.file.stmts[i]! with
   | .error _ | .ok none => return none
-  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel prior)
+  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel prior hard)
 
 /-- The header of the goal rows: the theorem by number and name, the goal node, the label
 (1 if the search proved it), the assertion whose premise the goal is (-1 for the root or
