@@ -2939,7 +2939,9 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   is asked once, for `goals_closable` and `closable_meta` together. Together 15–25% less
   time a theorem, and 10–75% more work within the limit — modest, because the search
   dives: a new goal's first variants come into play a round later, so nearly every goal's
-  variants are ranked anyway.
+  variants are ranked anyway. In theorems: set.mm's test part with `learned(value=4)` goes
+  from 91 to **97 at 1 s** and from 120 to 122 at 5 s — the tight budget is where speed
+  pays.
 - **The way to a multiple is a two-stage rank:** a cheap model, of the twenty features
   that need no instantiation (the rule, its uses and recency, the goal, the prior), over
   all the variants of a goal, and the full model over its first N only; the rest keep the

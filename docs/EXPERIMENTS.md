@@ -41,6 +41,7 @@ head of each.
 | The prior tuned by itself (`prove prior`: term pairs, a self vote, 1,000 neighbours by the 4th power of similarity) | 2026-10-22 | used assertions in the prior's first 100: 47% → 55%; the ranker m3: first 83.6% → 84.6%, with 3+ new variables 70.5% → 74.9%; set.mm **87** at 1 s (83), **119** at 5 s (104) with `learned` alone; naive Bayes loses |
 | The value's prior (three goal features of the theorem's prior) | 2026-10-22 | AUC 0.856 → 0.860, search the same; with m3 the value is +4 at 1 s and −7 at 5 s |
 | The value at 5 s: its term capped (`cap=2`) | 2026-10-22 | the value prunes rather than reorders (it dives: 3,098 single-goal expansions on one theorem); capped at two levels of cost, **91 at 1 s and 120 at 5 s** (87, 119 without the value; 91, 112 uncapped) |
+| Where the time goes: the search profiled, three exact speedups | 2026-10-22 | nine tenths of the search is ranking every variant of each expanded goal (`learned` runs at a third of `bfs`'s node rate); frontier goals not ranked, a tighter tree walk, one unify a goal: set.mm **97 at 1 s** (91), 122 at 5 s (120) |
 
 ## 1. The engine without guidance
 
@@ -545,6 +546,28 @@ setting differ by one theorem: that is the noise of these numbers. On the other 
 1 s the capped value loses nothing: mm0 233 against 231 with `learned` alone (`congruent`,
 without a value, 249), peano 109 against 107, hello_mmc 505 both. So `learned(value=4)`,
 with `--model` and `--value`, is the tactic to use at any budget.
+
+**Where the time goes** (`DESIGN.md`, "Where the time goes"): the search profiled
+(callgrind, two 5 s searches of set.mm's test theorems) against the raw rate of `bfs`.
+At 5 s over the test theorems `bfs` makes 280,000 assertion nodes a second a job and
+`learned` 97,000, and the learned runs overran the limit by 75% on average. Nine tenths of
+the learned search's own time is ranking all the variants of each expanded goal: the
+features 36–46% (instantiating the new goals and asking the premises' index), the trees
+30–48%, the sort 12%; the expansion itself is under a tenth. Three exact changes (the same
+expansions in the same order, confirmed node for node on 31 theorems): the goals at the
+frontier are not ranked (a leaf's place is found only where its goal's cost can still be
+the least), the tree walk is a loop of its own, and a goal's unifiability with the
+premises is asked once. On the 31 theorems 15–25% less time, 10–75% more work within the
+limit; on the test theorems with `learned(value=4)`, m3 and v4:
+
+| | before | exact speedups |
+|---|---|---|
+| set.mm test, 1 s | 91 | **97** |
+| 5 s | 120 | **122** |
+
+The budget at 1 s is where speed pays. The rank of a goal's variants is still what the
+search spends its time on: the two-stage rank (a cheap model over all variants, the full
+model over its first N) follows below.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5
