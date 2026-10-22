@@ -7,8 +7,10 @@
 -- value K, a step also costs K times -ln V of each of its new goals, V the learned
 -- probability that a goal is proved (--value FILE), less that of its goal's best first
 -- variant; with absolute=1, not less (stronger on set.mm, weaker on mm0's long chains);
--- with cap=C, a step's value term is at most C.
-learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0, cap=0) =
+-- with cap=C, a step's value term is at most C levels of cost: the value reorders the
+-- nearest steps and prunes none (DESIGN.md, "The value at 5 s"; 2 keeps the value's gain
+-- at 1 s and its loss at 5 s goes).
+learned(close=10, open=1, upto=1, penalty=2, width=5, value=0, absolute=0, cap=2) =
   seq(
     bfs(filter=premises(0), depth=1),
     first(

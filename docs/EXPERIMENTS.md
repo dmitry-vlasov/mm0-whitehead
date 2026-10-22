@@ -40,6 +40,7 @@ head of each.
 | `order`, the cheap version: a scoped sub-search at order goals | 2026-10-22 | nothing, on set.mm and on peano |
 | The prior tuned by itself (`prove prior`: term pairs, a self vote, 1,000 neighbours by the 4th power of similarity) | 2026-10-22 | used assertions in the prior's first 100: 47% → 55%; the ranker m3: first 83.6% → 84.6%, with 3+ new variables 70.5% → 74.9%; set.mm **87** at 1 s (83), **119** at 5 s (104) with `learned` alone; naive Bayes loses |
 | The value's prior (three goal features of the theorem's prior) | 2026-10-22 | AUC 0.856 → 0.860, search the same; with m3 the value is +4 at 1 s and −7 at 5 s |
+| The value at 5 s: its term capped (`cap=2`) | 2026-10-22 | the value prunes rather than reorders (it dives: 3,098 single-goal expansions on one theorem); capped at two levels of cost, **91 at 1 s and 120 at 5 s** (87, 119 without the value; 91, 112 uncapped) |
 
 ## 1. The engine without guidance
 
@@ -515,6 +516,28 @@ and the search by nothing at 1 s. With the sharper ranker the value is now worth
 (`value=2`) 90 and 112, so it is not the scale: the value's guidance competes with the
 rank at longer budgets. Kept as features (they cost nothing); the default for a 5 s search
 is `learned` alone.
+
+**The value at 5 s** (`DESIGN.md`, "The value at 5 s"): why the value loses at 5 s what it
+gains at 1 s, and two remedies. From the 5 s logs, the value's search expands more goals
+(101,430 against 61,991 over the test theorems) but smaller ones (310 million assertion
+nodes against 528 million), and dives: on one lost theorem 3,098 single-goal expansions
+and no join. A step whose new goals the model doubts costs K·Σ −ln V on top of its place
+(two goals at V = 0.05: 24 levels), so the alternatives are out of reach — the value prunes
+rather than reorders, and the model, trained on what 1 s proved, doubts the goals a 5 s
+search proves. Measured, set.mm's test theorems with m3 and v4:
+
+| tactic | 1 s | 5 s |
+|---|---|---|
+| `learned` | 87 | 119 |
+| `learned(value=4)` | 91 | 112 |
+| `learned(value=4, absolute=1)` | | 104 |
+| `learned(value=4, cap=4)` | | 113 |
+| **`learned(value=4, cap=2)`** | **91** | **120** |
+
+With the term capped at two levels of cost the value keeps its gain at 1 s and loses
+nothing at 5 s: it reorders the nearest steps and prunes none. `cap=2` is now the default
+of `learned` (it matters only with a value). Still to come: `cap=1`, and the value
+trained on the goal rows of 5 s searches (`v5`).
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5
