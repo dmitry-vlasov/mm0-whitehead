@@ -706,7 +706,9 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    m3's trees): AUC 0.856 → 0.860, the search the same; with m3 the value was +4 at 1 s
    (91) and −7 at 5 s (112) because it prunes rather than reorders; with its term capped
    at two levels of cost (`cap=2`, now the default) **91 at 1 s and 120 at 5 s**, the best
-   so far. `order` as a scoped
+   so far, and nothing lost on mm0 (233 against 231), peano (109 against 107) or
+   hello_mmc; a value trained on 5 s searches adds nothing to the cap. The tactic to use at
+   any budget: `learned(value=4)` with `--model` and `--value`. `order` as a scoped
    sub-search at order goals: nothing, on either file. Open: `order` as a procedure
    (about 1% of the subgoals); numeral arithmetic for `ring`; `taut` and set algebra;
    the combinators `within`, `then`, `alt`, run-time calls; labels as tags; `auto` at the

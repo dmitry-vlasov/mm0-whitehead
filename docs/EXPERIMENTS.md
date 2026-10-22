@@ -541,7 +541,10 @@ nothing at 5 s: it reorders the nearest steps and prunes none; at one level it n
 gains at 1 s. `cap=2` is now the default of `learned` (it matters only with a value). The
 value trained on the goal rows of 5 s searches (every 8th set.mm theorem, mm0 every 4th)
 does not add to the cap: the labels were not what was missing. Two runs of the same
-setting differ by one theorem: that is the noise of these numbers.
+setting differ by one theorem: that is the noise of these numbers. On the other files at
+1 s the capped value loses nothing: mm0 233 against 231 with `learned` alone (`congruent`,
+without a value, 249), peano 109 against 107, hello_mmc 505 both. So `learned(value=4)`,
+with `--model` and `--value`, is the tactic to use at any budget.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5
