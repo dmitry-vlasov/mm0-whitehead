@@ -41,14 +41,22 @@ def load(paths, sample=1.0, extras=()):
     """The rows of the files, each theorem once (by name, the first file that has it), with
     the part of each row (0 train, 1 tune, 2 test) and its file. With `sample`, only that
     share of a file's training theorems, drawn by the theorem's number. The rows of
-    `extras` join the training part of their file, for all its training theorems."""
-    seen, parts, trained = set(), [], {}
+    `extras` join the training part of their file, for all its training theorems, and the
+    tuning part for its tuning theorems.
+
+    Two passes, so that the rows fit in memory once: the first reads the meta columns
+    alone and decides which rows are kept and in which part; the second reads each file's
+    features and writes the kept rows into one preallocated matrix, the training rows
+    first, then the tuning, then the test — so a part is a slice (`part_view`), not a
+    copy."""
+    META_COLS = ['thm', 'node', 'label', 'variants']
+    seen, plans, trained = set(), [], {}
+    # pass 1: which rows, which part
     for fi, p in enumerate(paths):
-        d = data.read(p)
+        d = data.read(p, columns=['thm', 'node', 'label', 'variants', 'name_code', 'names'])
         if not FEATS:
             FEATS.append(d['features'])
         part = data.split(d)
-        # the theorems of this file, by number, with their names
         thm_names = {}
         for t, c in zip(*np.unique(np.stack([d['thm'], d['name_code']]), axis=1)):
             thm_names[int(t)] = str(d['names'][c])
@@ -56,39 +64,63 @@ def load(paths, sample=1.0, extras=()):
         seen |= {thm_names[t] for t in new}
         keep_thm = np.array(sorted(new), dtype=np.int64)
         keep = np.isin(d['thm'], keep_thm)
-        # the theorems trained on, before the sample: the extra rows of all of them are used;
-        # and the theorems tuned on, whose extra rows join the tuning part
         trained[os.path.basename(p)] = (fi, np.unique(d['thm'][keep & (part == 0)]), np.unique(d['thm'][keep & (part == 1)]))
         if sample < 1 and fi == 0:
             h = (d['thm'] * 2654435761 + fi * 40503) % 1000
             keep &= (part != 0) | (h < sample * 1000)
-        sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
-        sub['part'] = part[keep]
-        sub['file'] = np.full(int(keep.sum()), fi)
-        parts.append((os.path.basename(p), sub))
+        plans.append((p, fi, keep, part, 0))
         print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, {len(new)} theorems of {len(thm_names)}',
               flush=True)
         del d
     for p in extras:
         base = os.path.basename(p).split('.')[0] + '.tsv'
         fi, thms, tune_thms = trained[base]
-        d = data.read(p)
+        d = data.read(p, columns=['thm'])
         keep = np.isin(d['thm'], thms) | np.isin(d['thm'], tune_thms)
-        sub = {k: d[k][keep] for k in ['thm', 'node', 'label', 'variants', 'X']}
-        # the nodes of another tree of the theorem: numbers of their own
-        sub['node'] = sub['node'] + 5_000_000
-        sub['part'] = np.where(np.isin(sub['thm'], tune_thms), 1, 0).astype(np.int64)
-        sub['file'] = np.full(int(keep.sum()), fi)
-        parts.append((os.path.basename(p), sub))
+        part = np.where(np.isin(d['thm'], tune_thms), 1, 0).astype(np.int64)
+        plans.append((p, fi, keep, part, 5_000_000))
         print(f'{os.path.basename(p)}: {int(keep.sum())} rows of {len(keep)}, '
-              f'{len(np.unique(sub["thm"]))} theorems ({int((sub["part"] == 1).sum())} rows tuning), added to {base}',
+              f'{len(np.unique(d["thm"][keep]))} theorems ({int((part[keep] == 1).sum())} rows tuning), added to {base}',
               flush=True)
         del d
     feats = FEATS[0]
-    cat = {k: np.concatenate([s[k] for _, s in parts]) for k in ['thm', 'node', 'label', 'variants', 'part', 'file', 'X']}
+    # the rows of each part, over the files
+    counts = [sum(int((keep & (part == k)).sum()) for _, _, keep, part, _ in plans) for k in range(3)]
+    total = sum(counts)
+    bounds = [(sum(counts[:k]), sum(counts[:k + 1])) for k in range(3)]
+    cat = {'X': np.empty((total, len(feats)), dtype=np.float32), 'thm': np.empty(total, dtype=np.int64),
+           'node': np.empty(total, dtype=np.int64), 'label': np.empty(total, dtype=np.int64),
+           'variants': np.empty(total, dtype=np.int64), 'part': np.empty(total, dtype=np.int64),
+           'file': np.empty(total, dtype=np.int64)}
+    # pass 2: the features, a file at a time
+    pos = [b[0] for b in bounds]
+    for p, fi, keep, part, node_offset in plans:
+        d = data.read(p, columns=META_COLS + ['X'])
+        for k in range(3):
+            rows = keep & (part == k)
+            n = int(rows.sum())
+            if n == 0:
+                continue
+            a = pos[k]
+            cat['X'][a:a + n] = d['X'][rows]
+            for c in META_COLS:
+                cat[c][a:a + n] = d[c][rows]
+            cat['node'][a:a + n] += node_offset
+            cat['part'][a:a + n] = k
+            cat['file'][a:a + n] = fi
+            pos[k] = a + n
+        del d
     cat['features'] = feats
-    cat['files'] = [n for n, _ in parts][:len(paths)]
+    cat['files'] = [os.path.basename(p) for p in paths]
+    cat['bounds'] = bounds
     return cat
+
+
+def part_view(d, k):
+    """The rows of part `k` (0 train, 1 tune, 2 test) of `load`'s data, as views."""
+    a, b = d['bounds'][k]
+    out = {key: (v[a:b] if isinstance(v, np.ndarray) else v) for key, v in d.items()}
+    return out
 
 
 def select(d, mask):
@@ -178,7 +210,7 @@ def main():
     for n in zero:
         d['X'][:, fi[n]] = 0
     X = d['X']
-    train, tune, test = (select(d, d['part'] == k) for k in range(3))
+    train, tune, test = (part_view(d, k) for k in range(3))
     print(f"rows: train {len(train['label'])}, tune {len(tune['label'])}, test {len(test['label'])}")
 
     def report(name, score_of):

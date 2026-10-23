@@ -16,14 +16,16 @@ META = ['thm', 'name', 'node', 'label', 'assertion', 'variants']
 FILES = ['setmm', 'hello_mmc', 'mm0', 'hello_assembler', 'hol', 'set']
 
 
-def read(path):
+def read(path, columns=None):
     """The rows of one file: the meta columns as arrays, and the features as a float32
     matrix. The first read leaves a binary copy beside the file (`.npz`), which later ones
-    use."""
+    use. With `columns`, only those (and `features`) are read from the copy: the meta
+    columns alone cost nothing next to `X`."""
     cache = path + '.npz'
     if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(path):
         z = np.load(cache, allow_pickle=False)
-        d = {k: z[k] for k in z.files}
+        keys = z.files if columns is None else [k for k in z.files if k in columns or k == 'features']
+        d = {k: z[k] for k in keys}
         d['features'] = list(d['features'])
         return d
     import pyarrow as pa
