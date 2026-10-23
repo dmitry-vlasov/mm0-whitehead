@@ -88,23 +88,29 @@ def load(paths, sample=1.0, extras=()):
     counts = [sum(int((keep & (part == k)).sum()) for _, _, keep, part, _ in plans) for k in range(3)]
     total = sum(counts)
     bounds = [(sum(counts[:k]), sum(counts[:k + 1])) for k in range(3)]
+    # the numbers of theorems and nodes take part in the keys of `group_bounds`, so they stay
+    # 64-bit; the rest are narrow, since 120 million rows of 8 bytes a column add up
     cat = {'X': np.empty((total, len(feats)), dtype=np.float32), 'thm': np.empty(total, dtype=np.int64),
-           'node': np.empty(total, dtype=np.int64), 'label': np.empty(total, dtype=np.int64),
-           'variants': np.empty(total, dtype=np.int64), 'part': np.empty(total, dtype=np.int64),
-           'file': np.empty(total, dtype=np.int64)}
-    # pass 2: the features, a file at a time
+           'node': np.empty(total, dtype=np.int64), 'label': np.empty(total, dtype=np.int8),
+           'variants': np.empty(total, dtype=np.int32), 'part': np.empty(total, dtype=np.int8),
+           'file': np.empty(total, dtype=np.int8)}
+    # pass 2: the features, a file at a time, the kept rows copied in chunks so that no
+    # large temporary stands beside the file's matrix and the result
     pos = [b[0] for b in bounds]
+    chunk = 2_000_000
     for p, fi, keep, part, node_offset in plans:
         d = data.read(p, columns=META_COLS + ['X'])
         for k in range(3):
-            rows = keep & (part == k)
-            n = int(rows.sum())
+            idx = np.flatnonzero(keep & (part == k))
+            n = len(idx)
             if n == 0:
                 continue
             a = pos[k]
-            cat['X'][a:a + n] = d['X'][rows]
-            for c in META_COLS:
-                cat[c][a:a + n] = d[c][rows]
+            for i in range(0, n, chunk):
+                sel = idx[i:i + chunk]
+                cat['X'][a + i:a + i + len(sel)] = d['X'][sel]
+                for c in META_COLS:
+                    cat[c][a + i:a + i + len(sel)] = d[c][sel]
             cat['node'][a:a + n] += node_offset
             cat['part'][a:a + n] = k
             cat['file'][a:a + n] = fi
@@ -130,7 +136,7 @@ def select(d, mask):
 
 
 def group_bounds(d):
-    key = (d['file'] * 10_000_000 + d['thm']) * 10_000_000 + d['node']
+    key = (d['file'].astype(np.int64) * 10_000_000 + d['thm']) * 10_000_000 + d['node']
     starts = np.flatnonzero(np.r_[True, key[1:] != key[:-1]])
     return starts, np.r_[starts[1:], len(key)]
 
