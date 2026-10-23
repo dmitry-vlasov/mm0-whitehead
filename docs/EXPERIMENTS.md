@@ -46,6 +46,7 @@ head of each.
 | Hard negatives (`prove export --hard`), two rounds | 2026-10-22 | half the negatives the cheap model's highest-scored; round 1 stopped at 35 trees (tuned on the old rows); round 2, tuned on hard rows too: over all variants worse (in 10: 54% against 63.5%, the model unlearns the prior the sampler uses), in search a little better: m5 with cheap5 98 at 1 s, 127 at 5 s (m3: 97, 122) |
 | More negatives, drawn evenly (200 a node, every 3rd theorem, tuning rows alike) | 2026-10-22 | the honest measure moves half a point (first 23.8%); in search the day's largest gain: m6 with cheap6 in two stages **104 at 1 s, 128 at 5 s** (m3: 97, 122); the search is the judge, the offline measure a check |
 | Still more negatives (500 a node, every 7th theorem) | 2026-10-22 | saturated: m7a 98 and 127 alone, 96 and 130 with cheap6 — within the noise of m6; the training with both sets of extras was killed by the kernel at 58 GB of 61, the cheap model's did not fit under a 45 GB cap; m6 stays |
+| Contexts per assertion (the 2013 paper's E⁺/E⁻ as three features) | 2026-10-23 | offline 10% of the gain and the honest measure a hair better (first 24.6% against 23.8%); in search worse at a time budget (94 and 120 against 104 and 128 in two stages), the features costing 15–40% of the node rate; the node-budget run decides the rank's own worth |
 
 ## 1. The engine without guidance
 
@@ -690,6 +691,31 @@ search it is 2 behind at 1 s and 2 ahead at 5 s with the two stages, 4–6 behin
 alone: within the noise, and no clear gain. **The negatives have saturated between 50 and
 200**: four times more gave +7 and +6, ten times more gave nothing further, and the data at
 500 does not fit the machine. m6 with cheap6 stays the default (`models/`).
+
+**Contexts per assertion** (`DESIGN.md`, "Contexts per assertion"; 2026-10-23): the
+2013 paper's E⁺/E⁻ split as three features — a variant's goal against the goals where
+the assertion was used in earlier proofs, against a sample of the goals it unified with
+and was not used, and their rival similarity. The contexts of every file built by `prove
+contexts` (set.mm: the known proofs replayed with every variant), every export made again
+with them (the features changed), the ranker `m8` and the cheap `cheap8` trained as m6
+was (the usual data plus the 200-negative extras; the training needed a two-pass loader
+to fit a 45 GB cap). Offline the features take: 10% of the trees' gain (`ctx_pos` 5%,
+`ctx_rival` 5%; the prior keeps 54%), and over all the variants of the test goals the
+known step is first at 24.6% (m6 23.8%), in 10 at 64.5% (63.7%), in 128 at 94.9%
+(95.1%). In search they lose:
+
+| set.mm test, `learned(value=4)`, v4 | 1 s | 5 s | nodes a second a job, 1 s |
+|---|---|---|---|
+| m6 | 100 | 126 | 114,000 |
+| m8 (contexts) | 89 | 111 | 68,000 |
+| m6, two stages (cheap6) | 104 | 128 | 191,000 |
+| m8, two stages (cheap8) | 94 | 120 | 162,000 |
+
+The features cost what they bring and more: a variant's contexts are searched (up to 256
+positive and 256 negative vectors), which is 40% of the node rate when every variant is
+scored and 15% when the full model scores the first 128 only. A node-budget run (300,000
+assertion nodes a theorem, the time generous) separates the rank's quality from its cost;
+its outcome is below.
 
 **The search's width and penalty with m3** (the ranker is sharper, so the search might
 trust its top more): on set.mm's test theorems at 1 s, `learned` alone, width 2, 3, 5

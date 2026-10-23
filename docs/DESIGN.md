@@ -3012,7 +3012,11 @@ positive contexts (`ctx_pos`) and to its negative ones (`ctx_neg`), of theorems 
 task's, and their rival similarity (`ctx_rival`); full features only, since a variant's
 costs a search of the assertion's contexts. A model's features may now be a prefix of the
 program's, so the models trained before keep loading. Measured by the usual pipeline
-(`EXPERIMENTS.md`, "Contexts per assertion").
+(`EXPERIMENTS.md`, "Contexts per assertion"): offline the features take 10% of the trees'
+gain and move the honest measure by under a point (first 24.6% against 23.8%); in search
+at a time budget they lose (94 and 120 against 104 and 128 in two stages), because a
+variant's contexts are searched — up to 512 vectors — at a cost of 15–40% of the node
+rate. The node-budget run separates the rank's worth from its cost.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
