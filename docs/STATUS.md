@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-16.
+Last updated: 2026-10-23.
 
 ## Phase
 
@@ -9,6 +9,23 @@ Last updated: 2026-10-16.
 **Phase 3 — prover**: done; accepted on 2026-10-13, with both acceptance tests passed
 (report below). Two known gaps are carried under "Next steps": shared conversions in
 the replay reader, and the checking of a proof found for a task with metavariables.
+**Where it stands (2026-10-23).** Phases 1–3 are done and accepted; phase 4 built the
+session, the filters, the tactic language, intermediate goals, the MCP server and the gap
+filler, the rails, the learned layer (a ranker, a cheap first stage, a value, a prior per
+theorem), the procedures `congr` and `ring` as replayed guides, and the measures
+(`prove subgoals`, `prove prior`, `learn/recall.py`). The theory package proved the
+reference engine sound, generally and complete for MM0 (`THEORY.md`), and the verifier
+correct end to end with a verified `certify` (`VERIFIER-THEORY.md`). The search proves
+104 of 618 of set.mm's test theorems at 1 s and 128 at 5 s (55% of propositional
+calculus at 1 s on day one), with the best setting the default of the front-ends
+(`models/`). **Refuted**: the agent bench's hypothesis, an LLM agent proving through the
+engine step by step (26 of 30 at $19.87 against the MM1 agent's 30 of 30 at $3.69), and
+the engine as a gap filler for that agent (12 of 53 holes). **Exhausted as levers**: raw
+speed, the number of negatives, hand features of the current kind. **Open in
+Whitehead**: the contexts-of-use experiment (`DESIGN.md`, "Contexts per assertion"), the
+value retrained on the current ranker's trees, phase 3's two carried gaps. **Next
+system**: Ramsey, the engine inside Lean 4, whose startup plan is `docs/RAMSEY.md`.
+
 **Phase 4 — the interaction layer**: started on 2026-10-13 as pattern mining and
 ranking, and paused the same day. Redesigned on 2026-10-16 around how humans and AI
 agents use the prover: they choose variants by refining composable filters, and they
@@ -680,11 +697,15 @@ toolchain (the default toolchain is unchanged), and GHC 8.6.5 through `stack`.
    rank, by uses; two pilots, seven theorems proved by an agent, the second with the
    names hidden; and the replay of subproofs as rails, +54% proved on set.mm at 1 s.
    The composable tactics are built, and ranks for the rails that leave goals open:
-   `guided`, +40% over breadth-first on set.mm at 5 s. Next: the human front-end;
-   and a pilot at a larger scale, with counts per decision, for the dataset. Open: how a human moves
-   about in a huge tree; whether a session is recorded as a file; whether an
-   intermediate goal should be usable before it is proved; whether a choice at one
-   sibling should narrow the variants shown at the others.
+   `guided`, +40% over breadth-first on set.mm at 5 s. The agent bench then refuted the
+   layer's purpose as an LLM's workbench (`DESIGN.md`, "The agent bench"; "Whitehead as a
+   gap filler"): no human front-end and no larger pilot follow. The session, the
+   filters and the language stay as the engine's API, which the MCP server and
+   `prove goal` use with the learned models by default. Open, and not to be answered
+   here: how a human moves about in a huge tree; whether a session is recorded as a
+   file; whether an intermediate goal should be usable before it is proved; whether a
+   choice at one sibling should narrow the variants shown at the others. These are
+   questions for Ramsey's front-ends (`docs/RAMSEY.md`).
 5. The tactics system (`DESIGN.md`, "The tactics system: decision procedures as guides",
    the plan of 2026-10-21): decision procedures as guides whose skeletons the engine
    replays. Done: `at`, `range`, the subgoal bench (`prove subgoals`: `learned` closes

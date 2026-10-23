@@ -3,7 +3,12 @@
 Tooling for [Metamath Zero](https://github.com/digama0/mm0) in Lean 4: readers for the
 `.mm0` and `.mmb` formats, an independent verifier, and an automated prover ported from
 the [Russell](https://github.com/dmitry-vlasov/russell-flow) prover. The plan and its phases are in [CLAUDE.md](CLAUDE.md); the current
-state is in [docs/STATUS.md](docs/STATUS.md).
+state is in [docs/STATUS.md](docs/STATUS.md); the experiments and their numbers in
+[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md); the design in [docs/DESIGN.md](docs/DESIGN.md).
+The learned models the prover uses by default are in [models/](models/README.md), trained
+by the scripts of [learn/](learn/). Whitehead is the second system of the route Russell →
+Whitehead → Ramsey; the plan for Ramsey, the engine inside Lean 4, is
+[docs/RAMSEY.md](docs/RAMSEY.md).
 
 ## Build and test
 

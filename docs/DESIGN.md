@@ -2986,6 +2986,34 @@ one that ran 25 s past its limit), against the raw rate of a plain breadth-first
   training with both sets of extras was killed by the kernel): the negatives have
   saturated between 50 and 200, and `m6` with `cheap6` stays the default (`models/`).
 
+### Contexts per assertion (2026-10-23)
+
+The author's unpublished paper of 2013 (*Russell — a pure logical framework*) proposes to
+learn the use of each assertion from its *experience*: E⁺(a), the proof steps where `a`
+was used, and E⁻(a), the steps where `a` unified with the goal but another assertion was
+used; a candidate's weight is the rival similarity of the current context to the two
+(FRiS), with a metric on expressions by factor-unification and contexts as neighbourhoods
+in the tree. Read against the learned layer: the FRiS weights, the hand-tuned factors, the
+metric and the fork factor are superseded by gradient-boosted trees over features, and the
+paper's "fitness on pre-built trees" is the offline measure, which disagrees with search in
+both directions. But the E⁺/E⁻ split per assertion is a signal the features lack: the
+ranker is trained on that split pooled over all assertions, with the assertion entering
+only through its uses, its recency and the theorem prior. The measured weakness is the goal
+with metavariables where thousands of lemmas unify and the choice is *which lemma*; the
+prior answers "theorems like this used `a`", and an assertion's contexts answer "goals like
+this were proved by `a`, and goals like that were not".
+
+**Built** (`Contexts.lean`; `prove contexts`; `--contexts FILE`): for each assertion, the
+goals of the earlier proofs where it was used, and a sample of the goals it unified with
+where another was used (two a node, drawn by the node; at most 256 of each an assertion,
+a hash choosing which beyond that), as weighted term and pair vectors with the prior's
+weights. Three features of a variant: the goal's best similarity to the assertion's
+positive contexts (`ctx_pos`) and to its negative ones (`ctx_neg`), of theorems before the
+task's, and their rival similarity (`ctx_rival`); full features only, since a variant's
+costs a search of the assertion's contexts. A model's features may now be a prefix of the
+program's, so the models trained before keep loading. Measured by the usual pipeline
+(`EXPERIMENTS.md`, "Contexts per assertion").
+
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 
 **What the experiments left** ("The agent bench", "Whitehead as a gap filler", "The
