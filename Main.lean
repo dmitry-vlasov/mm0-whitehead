@@ -28,7 +28,7 @@ def usage : String :=
                                  sessions, and the definitions of DIR (tactics/ by default:
                                  here, or in the repository the program was built in)
   mcp <file.mm0> <file.mmb> [--log FILE] [--anonymous] [--tactics DIR] [--export DIR]
-               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--value FILE]
+               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--contexts FILE] [--value FILE]
                                  the MCP server for an AI agent, on stdin and stdout: sessions
                                  to prove the theorems of the file; --log: a trace of every
                                  message; --anonymous: assertions are shown as A and their
@@ -54,7 +54,7 @@ def usage : String :=
                                  --dump: every one that fits, with its features and how far it
                                  agrees, a row each
   prove export <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--ms T]
-               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--cheap FILE] [--value FILE] [--mm0 F]
+               [--max-nodes N] [--search T [--tactics DIR] [--model FILE] [--cheap FILE] [--contexts FILE] [--value FILE] [--mm0 F]
                [--search-ms T] [--goals [--max-goals N]]]
                                  the data of the learned ranking layer: for each theorem, along
                                  its known proof, a row for each variant of each goal node, with
@@ -67,12 +67,17 @@ def usage : String :=
                                  goal node of the tree the search grew (at most N, 200, drawn),
                                  with its features and whether the search proved it
   prove subgoals <file.mmb> --tactic T [--ms T] [--from A] [--to B] [--every K] [--tactics DIR]
-               [--model FILE] [--cheap FILE] [--value FILE] [--mm0 F] [--max-nodes N]
+               [--model FILE] [--cheap FILE] [--contexts FILE] [--value FILE] [--mm0 F] [--max-nodes N]
                                  the subgoal bench of the tactics system: each goal node on a
                                  known proof's path (not the root, nor one a premise proves) is a
                                  task of its own under the theorem's premises, which tactic T gets
                                  --ms (100) ms for; the share closed, by depth and by the head of
                                  the statement; --dump FILE: a line a subgoal, with its statement
+  prove contexts <file.mmb> -o OUT [--from A] [--to B] [--every K] [--negatives N] [--cap N]
+                                 the contexts of use of the assertions (Contexts.lean): the goals
+                                 of the known proofs where each was used, and a sample of the
+                                 goals it unified with where it was not; --contexts OUT gives them
+                                 to the rank of prove export, search, subgoals and goal
   prove prior <file.mmb> [--from A] [--to B] [--every K] [--k N] [--vote sim|count|norm]
                [--self X] [--power X] [--pairs] [--nb] [--absent X] [--present X]
                                  how well the prior per theorem alone ranks the assertions the
@@ -82,7 +87,7 @@ def usage : String :=
                                  the scores of a model of the learned ranking layer for the rows
                                  of a file of `prove export`, one a line
   prove goal <file.mm0> <file.mmb> --theorem NAME --statement TEXT [--tactic T] [--ms T]
-               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--value FILE]
+               [--models DIR | --no-models] [--model FILE] [--cheap FILE] [--contexts FILE] [--value FILE]
              [--max-nodes N] [--tactics DIR]
                                  a proof of TEXT, in the notation of the specification, under the
                                  hypotheses of theorem NAME, from the assertions before it,
@@ -343,6 +348,16 @@ def loadModels (args : List String) (defaults : Bool) :
   let cheap ← load "--cheap" "cheap.json" Prove.featureNames
   let value ← load "--value" "value.json" Prove.goalFeatureNames
   return do pure (← model, ← cheap, ← value)
+
+/-- The contexts of use of a file's assertions (`Contexts.lean`), from the file that
+`prove contexts` wrote (`--contexts FILE`): their weights are the prior's. -/
+def loadContexts (args : List String) (prior : Prove.Prior) (asserts : Nat) : IO (Option Prove.Contexts) := do
+  let some path := strOption args "--contexts" | return none
+  let lines := ((← IO.FS.readFile path).splitOn "\n").toArray.filter (· != "")
+  let c := (Prove.Contexts.ofPrior prior).withLines lines asserts
+  let (np, nn, na) := c.counts
+  IO.eprintln s!"{path}: {np} positive and {nn} negative contexts of {na} assertions"
+  return some c
 
 /-- The number of processors (`nproc`); 1 if it cannot be found. -/
 def processors : IO Nat := do
@@ -614,6 +629,55 @@ def provePrior (path : String) (args : List String) : IO UInt32 := do
     1000: {pct (within 1000)}; median place {median.toUInt64}"
   return 0
 
+/-- `prove contexts`: the contexts of use of the file's assertions (`Contexts.lean`): for
+each theorem of the range, its known proof replayed with every variant of each goal; each
+goal is a positive context of the assertion the proof applies and a negative one of
+`--negatives` (2) of the other variants; at most `--cap` (256) of each an assertion. Written
+to `-o OUT`, read back by `--contexts OUT`. -/
+def proveContexts (path : String) (args : List String) : IO UInt32 := do
+  let some out := strOption args "-o"
+    | IO.eprintln "prove contexts: -o OUT is needed"; return 2
+  let file ←
+    match Mmb.MmbFile.parse (← IO.FS.readBinFile path) with
+    | .ok f => pure f
+    | .error e =>
+      IO.eprintln (e.format path)
+      return 1
+  let db ←
+    match Prove.Db.ofFile file with
+    | .ok db => pure db
+    | .error msg =>
+      IO.eprintln s!"{path}: {msg}"
+      return 1
+  let (jobs, progress, memLimit) ← jobOptions args
+  let first := numOption args "--from" 0
+  let last := numOption args "--to" 1000000000
+  let every := max 1 (numOption args "--every" 1)
+  let negatives := numOption args "--negatives" 2
+  let cap := numOption args "--cap" 256
+  let limits : Prove.Limits :=
+    { maxProps := numOption args "--max-nodes" 500000, maxMs := numOption args "--ms" 20000,
+      maxTuples := numOption args "--max-tuples" 300000, maxWork := numOption args "--max-work" 20000000 }
+  let todo := (Array.range file.stmts.size).filter fun i =>
+    let s := file.stmts[i]!
+    (match s.kind with | .thm _ => true | _ => false) && s.index ≥ first && s.index < last && s.index % every == 0
+  let index := db.index
+  let uses := Prove.Uses.ofFile file db.asserts.size
+  let stats := Prove.SymbolStats.ofDb db
+  let c := Prove.Contexts.ofPrior (Prove.Prior.ofDb db stats uses)
+  let start ← IO.monoMsNow
+  let results ← Prove.runJobs jobs todo.size (fun k => Prove.contextRecords db index limits uses c negatives todo[k]!)
+    progress memLimit logLine
+  let records := results.foldl (· ++ ·) #[]
+  let c := c.withRecords records db.asserts.size cap
+  let (np, nn, na) := c.counts
+  let h ← IO.FS.Handle.mk out .write
+  for l in c.toLines do h.putStrLn l
+  h.flush
+  logLine s!"{path}: {todo.size} theorems, {records.size} records; kept {np} positive and {nn} negative contexts \
+    of {na} assertions (at most {cap} each), written to {out}, in {(← IO.monoMsNow) - start} ms"
+  return 0
+
 /-- `prove export`: the data of the learned ranking layer (`Prove/Dataset.lean`): for each
 theorem of the range, a row for each variant of each goal node of its known proof's
 path, with its features and whether the known proof chose it. -/
@@ -689,11 +753,12 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
   if hardNegatives && hard.isNone then
     IO.eprintln "prove export: --hard needs the cheap model (--cheap FILE)"
     return 2
+  let contexts ← loadContexts args prior db.asserts.size
   let rowsFor (k : Nat) : IO (Option (Array String)) := do
     let i := todo[k]!
     let thmPrior := prior.query file.stmts[i]!.index
     match searchTactic with
-    | none => Prove.datasetRows db index limits uses stats negatives i thmPrior hard
+    | none => Prove.datasetRows db index limits uses stats negatives i thmPrior hard contexts
     | some text =>
       let thm := file.stmts[i]!.index
       let ctx : Prove.Dsl.Ctx := { db, spec := nt, thm, rails := some rails, defs, model, cheap, value }
@@ -702,7 +767,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
         if k == 0 then IO.eprintln (Prove.Dsl.ParseError.show text e)
         return none
       | .ok t =>
-        let env := { Prove.Env.init db index (db.task thm) hypIndexes with uses, prior := thmPrior }
+        let env := { Prove.Env.init db index (db.task thm) hypIndexes with uses, prior := thmPrior, contexts }
         let r ← Prove.searchWith (Prove.accept vc) env t.strategy searchLimits
         if goals then
           if r.proof.isSome then found.modify fun (a, b, c) => (a + 1, b, c)
@@ -718,7 +783,7 @@ def proveExport (path : String) (args : List String) : IO UInt32 := do
         | some sk =>
           found.modify fun (a, b, c) => (a + 1, b + (if known then 1 else 0), c)
           if known then return none
-          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk thmPrior hard)
+          return some (← Prove.datasetRowsOf db index limits uses stats negatives i sk thmPrior hard contexts)
   let results ← Prove.runJobs jobs todo.size rowsFor progress memLimit logLine
   let h ← IO.FS.Handle.mk out .write
   h.putStrLn (if goals then Prove.goalHeader else Prove.datasetHeader)
@@ -815,6 +880,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
   let uses := Prove.Uses.ofFile file db.asserts.size
   let hypIndexes := db.hypIndexes
   let prior := Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) uses
+  let contexts ← loadContexts args prior db.asserts.size
   -- the terms by which the statements are grouped, through assertions whose conclusions
   -- are known to have them: `->` from ax-1, `=` from eqid, `e.` from vex, `<->` from biid,
   -- and a class relation from breq1
@@ -874,7 +940,7 @@ def proveSubgoals (path : String) (args : List String) : IO UInt32 := do
           skipped.modify fun (m, p) => (m + 1, p)
           continue
         let task := { db.task thm with goal := e }
-        let env' := { Prove.Env.init db index task hypIndexes with uses, prior := thmPrior }
+        let env' := { Prove.Env.init db index task hypIndexes with uses, prior := thmPrior, contexts }
         let t0 ← IO.monoMsNow
         -- a subgoal is not a statement of the file, so the verifier cannot check it: as
         -- `prove goal`, any proof of the tree counts
@@ -1198,6 +1264,8 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
       return 1
   let some (db, nt) ← withSpecNames db file args | return 1
   let (jobs, progress, memLimit) ← jobOptions args
+  let prior := Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) (Prove.Uses.ofFile file db.asserts.size)
+  let contexts ← loadContexts args prior db.asserts.size
   let opts : Prove.SearchOptions :=
     { first := numOption args "--from" 0, last := numOption args "--to" 1000000000,
       every := max 1 (numOption args "--every" 1),
@@ -1209,7 +1277,7 @@ def proveSearch (path : String) (args : List String) : IO UInt32 := do
                     else numOption args "--join-cap" 4 },
       metas := numsOption args "--meta",
       verbose := args.contains "--verbose", jobs, progress, memLimit,
-      prior := some (Prove.Prior.ofDb db (Prove.SymbolStats.ofDb db) (Prove.Uses.ofFile file db.asserts.size)) }
+      prior := some prior, contexts }
   -- the marks must fit every theorem of the range
   for a in db.asserts do
     if a.id ≥ opts.first && a.id < opts.last && a.id % opts.every == 0 then
@@ -1408,7 +1476,8 @@ def proveGoal (mm0 mmb : String) (args : List String) : IO UInt32 := do
     (names.findIdx? (· == distinct[k]!)).bind fun j =>
       byHole[Prove.freshBase + j]?.map fun ty => Prove.Node.var (Prove.freshBase + k) ty
   let task := { db.task thm with goal, metas, consts := (db.task thm).consts ++ extraConsts }
-  let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses, prior := c.prior.query thm }
+  let contexts ← loadContexts args c.prior db.asserts.size
+  let env := { Prove.Env.init db c.index task c.hypIndexes with uses := c.uses, prior := c.prior.query thm, contexts }
   let (model, cheap, value) ← match ← loadModels args true with
     | .ok ms => pure ms
     | .error e => IO.eprintln e; return 1
@@ -1500,6 +1569,7 @@ def main (args : List String) : IO UInt32 := do
   | "prove" :: "goal" :: mm0 :: mmb :: rest => proveGoal mm0 mmb rest
   | "prove" :: "export" :: path :: rest => proveExport path rest
   | "prove" :: "prior" :: path :: rest => provePrior path rest
+  | "prove" :: "contexts" :: path :: rest => proveContexts path rest
   | "prove" :: "score" :: path :: rest => proveScore path rest
   | "prove" :: "featbench" :: path :: rest => proveFeatbench path rest
   | "prove" :: "subgoals" :: path :: rest => proveSubgoals path rest

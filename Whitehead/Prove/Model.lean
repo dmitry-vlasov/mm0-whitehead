@@ -137,10 +137,11 @@ partial def addNode (j : Json) (t : Tree) : Except String (Int × Tree) := do
   let (rc, t) ← addNode r t
   return (k, { t with left := t.left.set! k lc, right := t.right.set! k rc })
 
-/-- The features a model names must be `expected`. -/
+/-- The features a model names must be the first of `expected`, in their order: a model
+trained before a feature was added still reads, the features after its own unread. -/
 def checkFeatures (names : Array Json) (expected : Array String) : Except String Unit := do
   let ns := names.filterMap fun n => match n with | .str s => some s | _ => none
-  if ns != expected then
+  if ns.size > expected.size || ns != expected.extract 0 ns.size then
     throw s!"the model's features are not those of this program: {ns.size} against {expected.size}"
 
 /-- A model from its JSON, of the features `expected`. -/

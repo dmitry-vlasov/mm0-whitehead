@@ -46,9 +46,9 @@ partial def ProofTree.skeleton? : ProofTree → Option Skeleton
 the theorem's (`Prior.query`). -/
 def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
     (negatives : Nat) (i : Nat) (skel : Skeleton) (prior : Std.HashMap Nat Float := {})
-    (hard : Option Model := none) : IO (Array String) := do
+    (hard : Option Model := none) (contexts : Option Contexts := none) : IO (Array String) := do
     let s := db.file.stmts[i]!
-    let env := { Env.init db index (db.task s.index) with uses, prior }
+    let env := { Env.init db index (db.task s.index) with uses, prior, contexts }
     let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
     let env := r.env
     let mut seen : Std.HashSet Nat := {}
@@ -89,11 +89,11 @@ def datasetRowsOf (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) 
 proof the skeleton reader leaves out (a shared conversion). With `negatives` 0, every
 variant of a node. -/
 def datasetRows (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (stats : SymbolStats)
-    (negatives : Nat) (i : Nat) (prior : Std.HashMap Nat Float := {}) (hard : Option Model := none) :
-    IO (Option (Array String)) := do
+    (negatives : Nat) (i : Nat) (prior : Std.HashMap Nat Float := {}) (hard : Option Model := none)
+    (contexts : Option Contexts := none) : IO (Option (Array String)) := do
   match db.skeleton db.file.stmts[i]! with
   | .error _ | .ok none => return none
-  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel prior hard)
+  | .ok (some skel) => return some (← datasetRowsOf db index limits uses stats negatives i skel prior hard contexts)
 
 /-- The header of the goal rows: the theorem by number and name, the goal node, the label
 (1 if the search proved it), the assertion whose premise the goal is (-1 for the root or
@@ -129,5 +129,64 @@ def goalRows (env : Env) (stats : SymbolStats) (thm : Nat) (proved : Bool) (cap 
     "\t".intercalate ([toString thm, env.db.asserts[thm]!.name, toString h, if label then "1" else "0",
       toString a, toString g.children.size] ++
       ((env.goalFeatures stats ti g.expr (env.goalDepth h) siblings).map featureText).toList)
+
+/-! ### The contexts of use -/
+
+/-- The contexts that the known proof of statement `i` gives (`Contexts.lean`): for each
+goal node on its path, the goal's vector as a positive context of the assertion the proof
+applies there, and as a negative context of `negatives` of the other variants, drawn by
+the node. -/
+def contextRecords (db : Db) (index : Index Nat) (limits : Limits) (uses : Uses) (c : Contexts)
+    (negatives : Nat) (i : Nat) : IO (Array (Nat × Bool × Context)) := do
+  let .ok (some skel) := db.skeleton db.file.stmts[i]! | return #[]
+  let s := db.file.stmts[i]!
+  let env := { Env.init db index (db.task s.index) with uses }
+  let r ← searchWith acceptAny env (oracleAll skel (some 0)) limits
+  let env := r.env
+  let mut seen : Std.HashSet Nat := {}
+  let mut out := #[]
+  for p in [0:env.props.size] do
+    let prop := env.props[p]!
+    if !prop.expanded || seen.contains prop.parent then continue
+    seen := seen.insert prop.parent
+    let .assertion a := prop.step | continue
+    let v := c.vectorOf env.hyps[prop.parent]!.expr
+    if v.isEmpty then continue
+    out := out.push (a, true, (s.index, v))
+    let kids := env.hyps[prop.parent]!.children
+    let others := kids.filter fun q => q != p && (match env.props[q]!.step with | .assertion _ => true | _ => false)
+    let chosen := if others.size ≤ negatives then others
+      else (others.qsort fun x y => mixHash prop.parent x < mixHash prop.parent y).extract 0 negatives
+    for q in chosen do
+      if let .assertion b := env.props[q]!.step then out := out.push (b, false, (s.index, v))
+  return out
+
+/-- The contexts `c` with `records` added, at most `cap` positive and `cap` negative an
+assertion: beyond the cap, a record replaces one drawn by its hash, so that every part of
+the file stays represented. The records are sorted by theorem at the end. -/
+def Contexts.withRecords (c : Contexts) (records : Array (Nat × Bool × Context)) (asserts cap : Nat) : Contexts := Id.run do
+  let mut pos : Array (Array Context) := Array.replicate asserts #[]
+  let mut neg : Array (Array Context) := Array.replicate asserts #[]
+  let mut seenPos : Array Nat := Array.replicate asserts 0
+  let mut seenNeg : Array Nat := Array.replicate asserts 0
+  for (a, p, ctx) in records do
+    if a ≥ asserts then continue
+    if p then
+      let n := seenPos[a]!
+      seenPos := seenPos.set! a (n + 1)
+      if n < cap then pos := pos.modify a (·.push ctx)
+      else
+        let k := mixHash ctx.1 a % (n + 1)
+        if k < cap then pos := pos.modify a (·.set! k ctx)
+    else
+      let n := seenNeg[a]!
+      seenNeg := seenNeg.set! a (n + 1)
+      if n < cap then neg := neg.modify a (·.push ctx)
+      else
+        let k := mixHash (ctx.1 + 7919) a % (n + 1)
+        if k < cap then neg := neg.modify a (·.set! k ctx)
+  pos := pos.map fun cs => cs.qsort fun x y => x.1 < y.1
+  neg := neg.map fun cs => cs.qsort fun x y => x.1 < y.1
+  return { c with pos, neg }
 
 end Whitehead.Prove

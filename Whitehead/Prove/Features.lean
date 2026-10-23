@@ -35,16 +35,8 @@ structure SymbolStats where
   heads : Array Nat := #[]
   deriving Inhabited
 
-/-- The terms that occur in `e`, each once. -/
-def Exp.terms (e : Exp) : Array Nat := Id.run do
-  let mut out : Array Nat := #[]
-  for n in e.nodes do
-    if !Node.isVar n && !Node.isConst n then
-      let t := Node.appId n
-      if !out.contains t then out := out.push t
-  return out
-
-/-- The terms of a rule's statement: of its conclusion and its hypotheses. -/
+/-- The terms of a rule's statement: of its conclusion and its hypotheses (`Exp.terms`,
+`Exp.lean`). -/
 def Assertion.terms (a : Assertion) : Array Nat :=
   (a.hyps.push a.concl).foldl (init := #[]) fun acc e =>
     e.terms.foldl (init := acc) fun acc t => if acc.contains t then acc else acc.push t
@@ -83,6 +75,8 @@ structure GoalInfo where
   hasVar : Bool := false
   depth : Nat := 1
   variants : Nat := 0
+  /-- The goal as a vector, for the contexts of use (`Contexts.lean`), when there are any. -/
+  vec : Std.HashMap Nat Float := {}
   deriving Inhabited
 
 def Env.goalInfo (env : Env) (h : Nat) : GoalInfo := Id.run do
@@ -99,7 +93,10 @@ def Env.goalInfo (env : Env) (h : Nat) : GoalInfo := Id.run do
     | none => break
   return { terms := goal.terms.foldl (init := {}) (·.insert ·),
            vars := (goal.nodes.filter Node.isVar).foldl (init := {}) fun acc n => acc.insert (Node.varId n),
-           size := goal.size, hasVar := goal.nodes.any Node.isVar, depth, variants := goalNode.children.size }
+           size := goal.size, hasVar := goal.nodes.any Node.isVar, depth, variants := goalNode.children.size,
+           vec := match env.contexts with
+             | some c => Contexts.lookup (c.vectorOf goal)
+             | none => {} }
 
 /-- The names of the features, in the order of `Env.features`. -/
 def featureNames : Array String := #[
@@ -136,7 +133,12 @@ def featureNames : Array String := #[
   -- the theorem's prior (`Prior.lean`): the earlier theorems like this one, by their
   -- statements, and what their proofs use
   "prior_knn",      -- the sum of the similarities of the near theorems whose proofs use the assertion
-  "prior_hit"       -- 1 if one does
+  "prior_hit",      -- 1 if one does
+  -- the contexts of use (`Contexts.lean`, 2026-10-23): the goals of earlier proofs where
+  -- the assertion was used, and a sample of those it unified with where it was not
+  "ctx_pos",        -- the goal's best similarity to the goals where the assertion was used
+  "ctx_neg",        -- its best similarity to the goals where it unified and was not used
+  "ctx_rival"       -- (ctx_pos − ctx_neg) / (ctx_pos + ctx_neg), 0 with neither
 ]
 
 /-- `f` to four significant digits: what the data keeps, and so what a model is given in
@@ -163,8 +165,9 @@ def featureText (f : Float) : String :=
 /-- The features of variant `p`, in the order of `featureNames`; `gi` is its goal's
 (`Env.goalInfo`). With `cheap`, the features that need the variant's new goals
 instantiated (`goals_*`, `new_vars`, `meta_goals`, `shared_vars`, `closable_meta`,
-`max_goal_vars`) are 0, as a model trained with them zeroed expects (`train.py --zero`): the
-first stage of a two-stage rank (`docs/DESIGN.md`, "Where the time goes"). -/
+`max_goal_vars`) and the contexts of use (`ctx_*`) are 0, as a model trained with them
+zeroed expects (`train.py --zero`): the first stage of a two-stage rank (`docs/DESIGN.md`,
+"Where the time goes"). -/
 def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : Nat) (cheap : Bool := false) :
     Array Float := Id.run do
   let prop := env.props[p]!
@@ -180,6 +183,10 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
   let prior := match prop.step with
     | .assertion a => env.prior.getD a 0
     | _ => 0
+  -- the contexts of use: the full features only (a search of the contexts a variant)
+  let (ctxPos, ctxNeg) := match env.contexts, prop.step with
+    | some c, .assertion a => if cheap then (0, 0) else c.best a thm gi.vec
+    | _, _ => ((0 : Float), (0 : Float))
   -- the new goals: not instantiated for the cheap features, which are 0 where they would read them
   let goals := if cheap then #[] else v.goals.get
   let isVar (e : Exp) : Bool := e.nodes.any Node.isVar
@@ -243,7 +250,10 @@ def Env.variantFeatures (env : Env) (stats : SymbolStats) (gi : GoalInfo) (p : N
     n closableMeta.size,
     n (goalVars.foldl (init := 0) fun m vs => max m vs.size),
     prior,
-    b (prior > 0)
+    b (prior > 0),
+    ctxPos,
+    ctxNeg,
+    Contexts.rival ctxPos ctxNeg
   ]
 
 /-- The features of variant `p`, in the order of `featureNames`. -/

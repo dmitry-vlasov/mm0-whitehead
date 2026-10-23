@@ -6,6 +6,7 @@ strategy may restrict is passed to the functions that expand.
 -/
 import Whitehead.Prove.Tree
 import Whitehead.Prove.Uses
+import Whitehead.Prove.Contexts
 
 namespace Whitehead.Prove
 
@@ -127,6 +128,9 @@ structure Env where
   how much the proofs of the earlier theorems like this one use it; empty unless a
   front-end gives it. -/
   prior : Std.HashMap Nat Float := {}
+  /-- The contexts of use of the assertions (`Contexts.lean`), for the rank of variants:
+  shared, only read, and only for theorems before the task's. -/
+  contexts : Option Contexts := none
   /-- The goal nodes of the intermediate goals, in the order they were offered: nodes
   without a parent, expanded backward like the root (`offerHint`). -/
   hints : Array Nat := #[]

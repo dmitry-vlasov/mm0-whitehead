@@ -353,6 +353,8 @@ structure SearchOptions where
   verbose : Bool := false
   /-- The prior of the file, for the rank of variants: each theorem's is asked of it. -/
   prior : Option Prior := none
+  /-- The contexts of use of the assertions, for the rank of variants (`Contexts.lean`). -/
+  contexts : Option Contexts := none
   /-- How many theorems are searched at once, progress lines, the memory limit: as in
   `ReplayOptions`. With several jobs the time limit of a theorem is wall-clock time
   shared with the others. -/
@@ -398,7 +400,8 @@ def searchAll (db : Db) (opts : SearchOptions) (log : String → IO Unit)
       | _ => 0
     let start ← IO.monoMsNow
     let task := db.task s.index opts.metas
-    let env := { Env.init db index task hypIndexes with uses, prior := (opts.prior.map (·.query s.index)).getD {} }
+    let thmPrior := (opts.prior.map (·.query s.index)).getD {}
+    let env := { Env.init db index task hypIndexes with uses, prior := thmPrior, contexts := opts.contexts }
     -- with metavariables what is proved is an instance of the theorem: nothing to check
     -- against, and no body for the file
     let accept := if task.metas.isEmpty then accept vc else acceptAny

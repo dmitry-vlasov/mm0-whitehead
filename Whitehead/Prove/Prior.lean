@@ -18,6 +18,7 @@ the prior alone and asks where the ones the known proof uses come (`docs/EXPERIM
 -/
 import Whitehead.Prove.Features
 import Whitehead.Prove.Uses
+import Whitehead.Prove.Contexts
 
 namespace Whitehead.Prove
 
@@ -73,25 +74,18 @@ structure Prior where
   postings : Array (Array (Nat × Float)) := #[]
   /-- For each theorem, the assertions its proof uses. -/
   used : Array (Array Nat) := #[]
+  /-- The pairs' numbers (after the terms) and the weights of the features, for the
+  contexts of use, which vectorize goals as the prior does statements (`Contexts.lean`);
+  a feature too common has weight 0. -/
+  pairIds : Std.HashMap (Nat × Nat) Nat := {}
+  termIdf : Array Float := #[]
+  pairIdf : Array Float := #[]
   deriving Inhabited
 
 namespace Prior
 
-/-- The parent–child term pairs of `e`: for each application, its term with the term of
-each of its arguments that is an application. -/
-def Exp.termPairs (e : Exp) : Array (Nat × Nat) := Id.run do
-  let mut out : Array (Nat × Nat) := #[]
-  for i in [0:e.nodes.size] do
-    let n := e.nodes[i]!
-    if Node.isVar n || Node.isConst n then continue
-    for j in e.argStarts i do
-      let m := e.nodes[j]!
-      if Node.isVar m || Node.isConst m then continue
-      let p := (Node.appId n, Node.appId m)
-      if !out.contains p then out := out.push p
-  return out
-
-/-- The pairs of a statement: of its conclusion and its hypotheses. -/
+/-- The pairs of a statement: of its conclusion and its hypotheses (`Exp.termPairs`,
+`Contexts.lean`). -/
 def Assertion.termPairs (a : Assertion) : Array (Nat × Nat) :=
   (a.hyps.push a.concl).foldl (init := #[]) fun acc e =>
     (Exp.termPairs e).foldl (init := acc) fun acc p => if acc.contains p then acc else acc.push p
@@ -141,7 +135,9 @@ def ofDb (db : Db) (stats : SymbolStats) (uses : Uses) (opts : PriorOptions := {
   for a in [0:uses.byAssertion.size] do
     for thm in uses.byAssertion[a]! do
       if thm < n then used := used.modify thm (·.push a)
-  return { opts, vectors, norms, postings, used }
+  let termIdf := (Array.range db.terms.size).map fun t => if (stats.df[t]?.getD 0) ≤ common then stats.idf t else 0
+  let pairIdf := pairDf.map fun df => if df ≤ common then idfOf df else 0
+  return { opts, vectors, norms, postings, used, pairIds, termIdf, pairIdf }
 
 /-- The theorems before `thm` by their similarity to it, the nearest first. Only theorems
 with a proof read count: the others have nothing to vote for. -/
@@ -225,5 +221,11 @@ def query (p : Prior) (thm : Nat) : Std.HashMap Nat Float :=
   if p.opts.nb then p.nb thm else p.knn thm
 
 end Prior
+
+/-- The contexts of use with the prior's weights and pair numbers, and no records yet
+(`contextRecords` and `Contexts.withRecords` in `Dataset.lean` add them). With the prior's
+`pairs` off, the pairs are empty and the contexts read terms alone. -/
+def Contexts.ofPrior (p : Prior) : Contexts :=
+  { idf := p.termIdf, pairIds := p.pairIds, pairIdf := p.pairIdf }
 
 end Whitehead.Prove

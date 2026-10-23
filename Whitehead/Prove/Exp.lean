@@ -125,6 +125,15 @@ def mkApp (id ty : Nat) (args : Array Exp) : Exp := Id.run do
     nodes := nodes ++ a.nodes
   return ⟨nodes⟩
 
+/-- The terms that occur in `e`, each once. -/
+def terms (e : Exp) : Array Nat := Id.run do
+  let mut out : Array Nat := #[]
+  for n in e.nodes do
+    if !Node.isVar n && !Node.isConst n then
+      let t := Node.appId n
+      if !out.contains t then out := out.push t
+  return out
+
 /-- The nodes where the arguments of the application at `i` start, in order. -/
 def argStarts (e : Exp) (i : Nat) : Array Nat := Id.run do
   let stop := i + 1 + Node.len e.nodes[i]!

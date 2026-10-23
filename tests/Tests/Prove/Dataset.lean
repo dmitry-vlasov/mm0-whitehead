@@ -176,6 +176,18 @@ def modelTests : TestM Unit := do
             check "model: a search with a capped value of goals proves syl" (r.ending == .proved)
           checkEq "model: cap is a parameter of depth"
             ((Dsl.parseTactic { ctx with value := some v } "search(depth(by=model, width=1, value=2, cap=x))").toOption.isNone) true
+          -- the contexts of use: a goal's similarity to where an assertion was used and where
+          -- it was not, of theorems before the limit only
+          let cx : Contexts := { idf := #[1, 1, 1], pos := #[#[(3, #[(0, 1.0)]), (9, #[(1, 1.0)])]], neg := #[#[(3, #[(1, 1.0)])]] }
+          let g := Contexts.lookup #[(0, 0.6), (1, 0.8)]
+          let (cp, cn) := cx.best 0 5 g
+          check "contexts: the best positive similarity, before the limit" (cp > 0.59 && cp < 0.61)
+          check "contexts: the best negative similarity" (cn > 0.79 && cn < 0.81)
+          let (cp9, _) := cx.best 0 10 g
+          check "contexts: a later theorem's context counts with a later limit" (cp9 > 0.79)
+          checkEq "contexts: no contexts, no similarity" (cx.best 1 10 g) (0, 0)
+          check "contexts: the rival similarity" ((Contexts.rival 0.6 0.8 + 0.142857).abs < 0.001)
+          checkEq "contexts: lines round-trip" ((cx.withLines (cx.toLines) 2).counts) (2, 1, 1)
           -- a two-stage rank: a cheap model orders all the variants, the model the first `top`
           match Dsl.parseTactic { ctx with cheap := ctx.model } "search(depth(by=model, width=1, top=2))" with
           | .error e => check "model: a two-stage rank in a search" false e.msg
