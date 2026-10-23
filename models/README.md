@@ -13,5 +13,8 @@ at 5 s with `learned(value=4)`.
 | `cheap.json` | the first stage of the rank (`--cheap`): 10 trees of the features that need no instantiation of the variant's new goals; it orders all the variants, the ranker the first `top` (128) | `cheap6`: the same data, `--zero` on the other ten features |
 | `value.json` | the value of goals (`value=K`): a binary model, 100 trees of `goalFeatureNames` | `v4`: `learn/train_value.py` on the goal rows of 1 s searches with the ranker `m3` (`prove export --search learned --goals`) |
 
-A model names its features; the program refuses one whose features are not its own
-(`Model.load`). Retrain after a change of `featureNames` or `goalFeatureNames`.
+A model names its features; the program refuses one whose features are not the first of
+its own, in their order (`Model.load`): a model trained before a feature was added still
+reads, the later features unread. These three were trained on the 30 features before the
+contexts of use (`ctx_pos`, `ctx_neg`, `ctx_rival`, 2026-10-23) and read none of them;
+retrain after a change of an existing feature of `featureNames` or `goalFeatureNames`.
