@@ -107,16 +107,16 @@ needs no new foundation.
    with Whitehead's `THEORY.md` as the template. Proved later; stated early, since the
    statements fix what "relative" means.
 6. **Guidance, only when the engine is there**: the prior per theorem (the lemmas the
-   proofs of similar theorems use), the contexts of use per lemma, the cheap and the full
-   rank, trained on Mathlib's proof terms as Whitehead's were on set.mm's proofs. The
-   recipe transfers whole; the models do not.
+   proofs of similar theorems use), the cheap and the full rank, trained on Mathlib's
+   proof terms as Whitehead's were on set.mm's proofs. The recipe transfers whole; the
+   models do not. Not the contexts of use per lemma: measured in Whitehead, they say
+   nothing in search that the uses, the recency and the prior do not.
 
 ## What stays in Whitehead
 
 Whitehead remains the bench and the laboratory: the measurements, the recipe, the
 theory package and the verified checker. Its MM0-specific work — front-ends, features of
-the current kind, speed, the number of negatives — is finished (`STATUS.md`). What is
-left there is the contexts-of-use experiment (`DESIGN.md`, "Contexts per assertion"), the
-value retrained on the current ranker's trees, and the two carried gaps of phase 3
-(shared conversions in the replay reader; checking a proof found for a task with
-metavariables).
+the current kind, speed, the number of negatives, the contexts of use per assertion — is
+finished (`STATUS.md`). What is left there is the value retrained on the current ranker's
+trees, and the two carried gaps of phase 3 (shared conversions in the replay reader;
+checking a proof found for a task with metavariables).

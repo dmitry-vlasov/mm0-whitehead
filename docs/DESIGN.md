@@ -3016,7 +3016,12 @@ program's, so the models trained before keep loading. Measured by the usual pipe
 gain and move the honest measure by under a point (first 24.6% against 23.8%); in search
 at a time budget they lose (94 and 120 against 104 and 128 in two stages), because a
 variant's contexts are searched — up to 512 vectors — at a cost of 15–40% of the node
-rate. The node-budget run separates the rank's worth from its cost.
+rate; and at a node budget they lose too (102 against 110 at 300,000 nodes a theorem), so
+the rank itself is worse in search where the honest measure called it a hair better. The
+line is closed: the contexts of an assertion say nothing in search that its uses, its
+recency and the theorem prior do not; the paper's split was a sound reading of the data,
+superseded by the pooled model with the prior. The code stays as a measured negative;
+`models/` keeps m6, cheap6 and v4, which read none of the three features.
 
 ### The tactics system: decision procedures as guides (the plan of 2026-10-21)
 

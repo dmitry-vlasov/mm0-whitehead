@@ -21,10 +21,11 @@ calculus at 1 s on day one), with the best setting the default of the front-ends
 (`models/`). **Refuted**: the agent bench's hypothesis, an LLM agent proving through the
 engine step by step (26 of 30 at $19.87 against the MM1 agent's 30 of 30 at $3.69), and
 the engine as a gap filler for that agent (12 of 53 holes). **Exhausted as levers**: raw
-speed, the number of negatives, hand features of the current kind. **Open in
-Whitehead**: the contexts-of-use experiment (`DESIGN.md`, "Contexts per assertion"), the
-value retrained on the current ranker's trees, phase 3's two carried gaps. **Next
-system**: Ramsey, the engine inside Lean 4, whose startup plan is `docs/RAMSEY.md`.
+speed, the number of negatives, hand features of the current kind, and the contexts of
+use per assertion (the 2013 paper's split; `DESIGN.md`, "Contexts per assertion": worse
+in search at a time budget and at a node budget). **Open in Whitehead**: the value
+retrained on the current ranker's trees, phase 3's two carried gaps. **Next system**:
+Ramsey, the engine inside Lean 4, whose startup plan is `docs/RAMSEY.md`.
 
 **Phase 4 — the interaction layer**: started on 2026-10-13 as pattern mining and
 ranking, and paused the same day. Redesigned on 2026-10-16 around how humans and AI
