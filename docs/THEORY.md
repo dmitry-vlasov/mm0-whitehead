@@ -57,6 +57,11 @@ record of the decisions; the formal development is the Lake package `theory/`.
   Theorem 6.6.
 - The talk *From Russell to Lean 4* (ARGO, 2026-10-08): the roadmap, "formalize
   completeness first — for Whitehead".
+- `docs/CORRESPONDENCE.md` (2026-10-27): the 2017 paper against the Lean, declaration
+  by declaration — statements in both notations, the lemmas each proof uses and a
+  sketch over their names; every place where the Lean differs from the paper; the
+  lemma dependency graphs of the three theorems (`docs/correspondence/`); the reading
+  order of `theory/Theory`.
 - `DESIGN.md`, "MM0 as a deductive system of the paper" and "Where MM0 differs: bound
   variables": the instance, and the rule for the conditions on bound variables — a
   tree may be discarded only when a condition is violated for every instantiation.

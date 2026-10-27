@@ -207,6 +207,11 @@ reference entry's filtered (`KeyedExact.lean`, `keyed_sound_ex`, `keyed_complete
 unifier). Found on the way and fixed in both engines: the settled test of a condition
 ignored the images of the metavariables, where a name a node above can still replace
 may sit. All sixteen milestones are reached; `cd theory && lake build` has no `sorry`.
+`docs/CORRESPONDENCE.md` (2026-10-27) reads the theory against the 2017 paper:
+the declaration for each definition and theorem of the paper, the differences
+(24, two of them questions for the paper), the lemma dependency graphs of the three
+theorems and the reading order, generated from the compiled package by
+`theory/tools/Extract.lean` and `theory/tools/correspondence.py`.
 **The verification of the verifier** (`docs/VERIFIER-THEORY.md`, started 2026-10-14):
 the MM0 semantics of `mm0-lean/mm0/mm0.lean` ported to Lean 4 (`theory/Spec/Mm0.lean`,
 with four deviations recorded: `conv'.trans`, the corrections of `safe_subst` and

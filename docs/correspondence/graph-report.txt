@@ -1,0 +1,311 @@
+## soundness  (closure 141 theorems, backbone 54)
+direct deps: close_isProof, soundness_valid
+
+backbone nodes (fan-in within closure | own theorem closure | file:line):
+    7 |   4 | Subst.lean:92            Subst.apply_comp
+    4 |   0 | Spt.lean:183             StateInv.vars_lt
+    3 |   0 | Spt.lean:170             StateInv.base_eq
+    3 |   0 | Spt.lean:173             StateInv.stride_pos
+    3 |   0 | Spt.lean:177             StateInv.parent_lt
+    3 |   0 | Spt.lean:179             StateInv.up_lt
+    3 |   0 | Spt.lean:186             StateInv.tried_spec
+    3 |   0 | Spt.lean:195             StateInv.parent_lt_children
+    3 |  11 | Preserve.lean:34         ANodeInv.mono
+    3 |   0 | Preserve.lean:121        getElem!_modify
+    2 |   1 | Subst.lean:142           Subst.ty_apply
+    2 |   0 | Subst.lean:148           Subst.apply_isName
+    2 |   0 | Subst.lean:197           Subst.vars_apply
+    2 |   6 | Subst.lean:236           Subst.comp_assoc
+    2 |   2 | Deduction.lean:143       PTree.stepConds_restrict
+    2 |   2 | Closing.lean:29          vars_closing_apply
+    1 |   1 | Term.lean:194            Consts.app_not_mem_names
+    1 |   4 | Subst.lean:154           Subst.Typed.comp
+    1 |   1 | Subst.lean:160           Subst.Typed.restrict
+    1 |   2 | Subst.lean:176           Subst.restrict_apply
+    1 |   0 | Subst.lean:214           Subst.consts_apply
+    1 |  19 | Deduction.lean:283       Shape.subst
+    1 |   4 | Spt.lean:15              Subst.solves_eqs_iff
+    1 |   9 | Spt.lean:37              joinAll_absorbs
+    1 |   3 | Spt.lean:57              joinAll_typed
+    1 |   7 | Spt.lean:88              Absorbs.of_comp
+    1 |   3 | Spt.lean:121             joinAll_idem
+    1 |   0 | Spt.lean:149             ANodeInv.is_mgu
+    1 |   0 | Spt.lean:155             ANodeInv.children_eq
+    1 |   0 | Spt.lean:157             ANodeInv.parent_vars_lt
+    1 |   3 | Spt.lean:210             stepSub_apply
+    1 |   5 | Spt.lean:237             stepSub_typed
+    1 |  23 | Spt.lean:260             shape_of_inv
+    1 |  11 | Spt.lean:311             conds_proofOf
+    1 |  36 | Spt.lean:339             valid_of_inv
+    1 |  28 | Preserve.lean:54         StateInv.mono
+    1 |   0 | Preserve.lean:203        mem_vars_rename
+    1 |  46 | Preserve.lean:222        addNode_inv
+    1 |  28 | Preserve.lean:427        recordAt_inv
+    1 |  49 | Preserve.lean:502        tryAssertion_inv
+    1 |  32 | Preserve.lean:539        mark_inv
+    1 |  60 | Preserve.lean:548        expandNode_inv
+    1 |  61 | Preserve.lean:560        expandAll_inv
+    1 |   3 | Preserve.lean:596        init_inv
+    1 |  66 | Preserve.lean:646        run_inv
+    1 |  26 | Preserve.lean:678        anodeEntries_inv
+    1 |  30 | Preserve.lean:738        sptE_inv
+    1 |   3 | Closing.lean:21          closing_typed
+    1 |   2 | Closing.lean:38          consts_closing_apply
+    1 |  11 | Closing.lean:52          holds_closing
+    1 |  12 | Closing.lean:92          allVars_close
+    1 |   2 | Closing.lean:110         conds_name
+    1 |  44 | Closing.lean:129         close_isProof
+    1 | 109 | Theorems.lean:27         soundness_valid
+
+backbone edges:
+  Subst.Typed.comp -> Subst.apply_isName, Subst.ty_apply
+  Subst.comp_assoc -> Subst.apply_comp
+  Shape.subst -> Subst.Typed.comp, Subst.Typed.restrict, Subst.apply_comp, Subst.restrict_apply
+  joinAll_absorbs -> Subst.comp_assoc, Subst.solves_eqs_iff
+  Absorbs.of_comp -> Subst.apply_comp, Subst.comp_assoc
+  stepSub_typed -> Subst.apply_isName, Subst.ty_apply
+  shape_of_inv -> Subst.apply_comp, stepSub_apply, stepSub_typed
+  valid_of_inv -> conds_proofOf, shape_of_inv
+  ANodeInv.mono -> ANodeInv.children_eq, ANodeInv.is_mgu, ANodeInv.parent_vars_lt
+  StateInv.mono -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  addNode_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt, Subst.vars_apply, mem_vars_rename
+  recordAt_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  tryAssertion_inv -> StateInv.vars_lt, addNode_inv, recordAt_inv
+  mark_inv -> StateInv.mono, getElem!_modify
+  expandNode_inv -> mark_inv, tryAssertion_inv
+  expandAll_inv -> expandNode_inv
+  run_inv -> expandAll_inv, init_inv
+  anodeEntries_inv -> Absorbs.of_comp, Subst.apply_comp, joinAll_absorbs, joinAll_idem, joinAll_typed
+  sptE_inv -> anodeEntries_inv
+  vars_closing_apply -> Subst.vars_apply
+  consts_closing_apply -> Subst.consts_apply
+  holds_closing -> Consts.app_not_mem_names, consts_closing_apply, vars_closing_apply
+  allVars_close -> PTree.stepConds_restrict, vars_closing_apply
+  close_isProof -> PTree.stepConds_restrict, Shape.subst, Subst.apply_comp, allVars_close, closing_typed, conds_name, holds_closing
+  soundness_valid -> run_inv, sptE_inv, valid_of_inv
+  soundness -> close_isProof, soundness_valid
+
+lemmas in the closure that are not in the backbone (plumbing), by file:
+  Term: 4: Consts.mem_names, Ty.fits_refl, Ty.fits_trans, Var.code_injective
+  Subst: 9: Subst.Typed.id, Subst.apply_const, Subst.apply_var, Subst.comp_id, Subst.ext, Subst.f_eq_of_not_mem, Subst.hdom, Subst.restrict_dom_subset, Subst.restrict_f_of_mem
+  Unification: 4: Unification.idem, Unification.range_sub, Unification.solves, Unification.typed
+  Deduction: 16: Assertion.WF.concl_vars, Assertion.WF.hyps_vars, Assertion.WF.pairs_bound, Assertion.WF.pairs_vars, PTree.cond_mem_exprs, PTree.condsList_eq_flatMap, PTree.conds_subst, PTree.expr_subst, PTree.exprs_subst, PTree.mem_allVars, PTree.mem_condsList, PTree.substList_eq_map, Statement.subst_subst, Var.dummy_injective, getElem!_map', stepConds_comp
+  Spt: 27: ANodeInv.assertion, ANodeInv.children, ANodeInv.children_len, ANodeInv.conds, ANodeInv.idem, ANodeInv.parent_lt, ANodeInv.typed, ANodeInv.unifies, EntryInv.absorbs, EntryInv.at_, EntryInv.conds, EntryInv.holds, EntryInv.typed, SptTree.condsList_eq_flatMap, StateInv.anodes, StateInv.expanded_tried, StateInv.fresh_gt, StateInv.root_expr, StateInv.root_lt, StateInv.stride_gt, StateInv.tried_fresh, StateInv.tried_lt, StateInv.up_children, flatMap_congr_mem, getElem!_of_getElem?, proofsOf_eq_map, stepSub_f_of_mem
+  Preserve: 25: Cond.apply_comp, Problem.vars_single, addNode_anode_new, addNode_anode_old, addNode_anodes_size, addNode_enode_new, addNode_enode_new_parent, addNode_enode_none, addNode_enode_old, addNode_enodes_size, expr_modify, foldl_inv, foldl_tried, getElem!_map, getElem!_map_range, le_foldl_max, le_foldl_max.init_le_foldl_max, mem_aChildren, mem_hyps_vars, mem_tuples, parent_modify, size_le_tryAssertion, tried_le_tryAssertion, tryAssertion_cases, tryAssertion_records
+  Closing: 2: closing_f_of_mem, closing_f_of_not_mem
+
+## generality  (closure 133 theorems, backbone 49)
+direct deps: generality'
+
+backbone nodes (fan-in within closure | own theorem closure | file:line):
+    6 |   4 | Subst.lean:92            Subst.apply_comp
+    6 |   0 | Spt.lean:179             StateInv.up_lt
+    4 |   0 | Spt.lean:170             StateInv.base_eq
+    4 |   0 | Spt.lean:173             StateInv.stride_pos
+    4 |   0 | Spt.lean:183             StateInv.vars_lt
+    4 |   1 | Generality.lean:82       chain_eq
+    3 |   6 | Subst.lean:236           Subst.comp_assoc
+    3 |   0 | Spt.lean:155             ANodeInv.children_eq
+    3 |   0 | Spt.lean:177             StateInv.parent_lt
+    3 |   0 | Spt.lean:186             StateInv.tried_spec
+    3 |   0 | Spt.lean:195             StateInv.parent_lt_children
+    3 |  11 | Preserve.lean:34         ANodeInv.mono
+    3 |   0 | Preserve.lean:121        getElem!_modify
+    3 |   7 | General.lean:14          Subst.comp_eq_of_instance
+    2 |   4 | Spt.lean:15              Subst.solves_eqs_iff
+    2 |   3 | Spt.lean:121             joinAll_idem
+    2 |   0 | Spt.lean:149             ANodeInv.is_mgu
+    2 |  30 | Preserve.lean:738        sptE_inv
+    2 |   7 | Generality.lean:153      mem_chain_of_at
+    1 |   0 | Subst.lean:197           Subst.vars_apply
+    1 |   9 | Spt.lean:37              joinAll_absorbs
+    1 |   3 | Spt.lean:57              joinAll_typed
+    1 |   7 | Spt.lean:88              Absorbs.of_comp
+    1 |   0 | Spt.lean:157             ANodeInv.parent_vars_lt
+    1 |  28 | Preserve.lean:54         StateInv.mono
+    1 |   0 | Preserve.lean:203        mem_vars_rename
+    1 |  46 | Preserve.lean:222        addNode_inv
+    1 |  28 | Preserve.lean:427        recordAt_inv
+    1 |  49 | Preserve.lean:502        tryAssertion_inv
+    1 |  32 | Preserve.lean:539        mark_inv
+    1 |  60 | Preserve.lean:548        expandNode_inv
+    1 |  61 | Preserve.lean:560        expandAll_inv
+    1 |   3 | Preserve.lean:596        init_inv
+    1 |  66 | Preserve.lean:646        run_inv
+    1 |  26 | Preserve.lean:678        anodeEntries_inv
+    1 |  13 | General.lean:19          joinAll_mostGeneral
+    1 |   6 | General.lean:82          stepSub_comp
+    1 |  12 | General.lean:95          proofOf_subst
+    1 |   9 | Generality.lean:213      le_of_mem_enodes
+    1 |  11 | Generality.lean:220      sibling_disjoint
+    1 |  17 | Generality.lean:262      anodes_nodup
+    1 |   0 | Generality.lean:300      matches_of_congruent
+    1 |   1 | Generality.lean:372      assign_keys
+    1 |   0 | Generality.lean:456      build_f_lt
+    1 |   1 | Generality.lean:460      build_f_renamed
+    1 |   2 | Generality.lean:477      build_typed
+    1 |  26 | Generality.lean:537      sim
+    1 |  36 | Generality.lean:644      entry_mostGeneral
+    1 | 132 | Generality.lean:723      generality'
+
+backbone edges:
+  Subst.comp_assoc -> Subst.apply_comp
+  joinAll_absorbs -> Subst.comp_assoc, Subst.solves_eqs_iff
+  Absorbs.of_comp -> Subst.apply_comp, Subst.comp_assoc
+  ANodeInv.mono -> ANodeInv.children_eq, ANodeInv.is_mgu, ANodeInv.parent_vars_lt
+  StateInv.mono -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  addNode_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt, Subst.vars_apply, mem_vars_rename
+  recordAt_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  tryAssertion_inv -> StateInv.vars_lt, addNode_inv, recordAt_inv
+  mark_inv -> StateInv.mono, getElem!_modify
+  expandNode_inv -> mark_inv, tryAssertion_inv
+  expandAll_inv -> expandNode_inv
+  run_inv -> expandAll_inv, init_inv
+  anodeEntries_inv -> Absorbs.of_comp, Subst.apply_comp, joinAll_absorbs, joinAll_idem, joinAll_typed
+  sptE_inv -> anodeEntries_inv
+  Subst.comp_eq_of_instance -> Subst.comp_assoc
+  joinAll_mostGeneral -> Subst.comp_eq_of_instance, Subst.solves_eqs_iff, joinAll_idem
+  stepSub_comp -> Subst.apply_comp
+  proofOf_subst -> Subst.apply_comp, stepSub_comp
+  mem_chain_of_at -> StateInv.up_lt, chain_eq
+  le_of_mem_enodes -> StateInv.up_lt, chain_eq, mem_chain_of_at
+  sibling_disjoint -> ANodeInv.children_eq, StateInv.up_lt, chain_eq, mem_chain_of_at
+  anodes_nodup -> ANodeInv.children_eq, le_of_mem_enodes, sibling_disjoint
+  sim -> ANodeInv.is_mgu, StateInv.base_eq, Subst.apply_comp, Subst.comp_eq_of_instance
+  entry_mostGeneral -> Subst.comp_eq_of_instance, joinAll_mostGeneral, sptE_inv
+  generality' -> StateInv.stride_pos, anodes_nodup, assign_keys, build_f_lt, build_f_renamed, build_typed, entry_mostGeneral, matches_of_congruent, proofOf_subst, run_inv, sim, sptE_inv
+  generality -> generality'
+
+lemmas in the closure that are not in the backbone (plumbing), by file:
+  Term: 1: Ty.fits_refl
+  Subst: 7: Subst.Typed.id, Subst.apply_const, Subst.apply_var, Subst.comp_id, Subst.ext, Subst.f_eq_of_not_mem, Subst.hdom
+  Unification: 5: Unification.idem, Unification.mostGeneral, Unification.range_sub, Unification.solves, Unification.typed
+  Deduction: 4: Assertion.WF.concl_vars, Assertion.WF.hyps_vars, PTree.substList_eq_map, getElem!_map'
+  Spt: 26: ANodeInv.assertion, ANodeInv.children, ANodeInv.children_len, ANodeInv.conds, ANodeInv.idem, ANodeInv.parent_lt, ANodeInv.typed, ANodeInv.unifies, EntryInv.absorbs, EntryInv.at_, EntryInv.conds, EntryInv.idem, SptTree.condsList_eq_flatMap, StateInv.anodes, StateInv.expanded_tried, StateInv.fresh_gt, StateInv.root_expr, StateInv.root_lt, StateInv.stride_gt, StateInv.tried_fresh, StateInv.tried_lt, StateInv.up_children, flatMap_congr_mem, getElem!_of_getElem?, proofsOf_eq_map, stepSub_f_of_mem
+  Preserve: 25: Cond.apply_comp, Problem.vars_single, addNode_anode_new, addNode_anode_old, addNode_anodes_size, addNode_enode_new, addNode_enode_new_parent, addNode_enode_none, addNode_enode_old, addNode_enodes_size, expr_modify, foldl_inv, foldl_tried, getElem!_map, getElem!_map_range, le_foldl_max, le_foldl_max.init_le_foldl_max, mem_aChildren, mem_hyps_vars, mem_tuples, parent_modify, size_le_tryAssertion, tried_le_tryAssertion, tryAssertion_cases, tryAssertion_records
+  Generality: 16: SptTree.anodesList_eq_flatMap, SptTree.enodesList_eq_flatMap, anc_fuel, anodes_lt, apply_congr_vars, apply_rename_eq, assignList_keys, assign_typed, chain_lt, chain_nil, chain_suffix, look_mem, look_of_nodup, mem_assignList, nodup_flatMap_index, parent_mem_enodes
+
+## completeness  (closure 194 theorems, backbone 69)
+direct deps: completeness'
+
+backbone nodes (fan-in within closure | own theorem closure | file:line):
+    8 |   4 | Subst.lean:92            Subst.apply_comp
+    6 |   0 | Spt.lean:179             StateInv.up_lt
+    5 |   0 | Spt.lean:170             StateInv.base_eq
+    5 |   0 | Preserve.lean:121        getElem!_modify
+    5 |   7 | General.lean:14          Subst.comp_eq_of_instance
+    4 |   0 | Spt.lean:155             ANodeInv.children_eq
+    4 |   0 | Spt.lean:173             StateInv.stride_pos
+    4 |   0 | Spt.lean:183             StateInv.vars_lt
+    4 |   0 | Spt.lean:186             StateInv.tried_spec
+    4 |   1 | Generality.lean:82       chain_eq
+    4 |   9 | Completeness.lean:47     State.Le.trans
+    3 |   6 | Subst.lean:236           Subst.comp_assoc
+    3 |   3 | Spt.lean:121             joinAll_idem
+    3 |   0 | Spt.lean:149             ANodeInv.is_mgu
+    3 |   0 | Spt.lean:177             StateInv.parent_lt
+    3 |   0 | Spt.lean:195             StateInv.parent_lt_children
+    3 |  11 | Preserve.lean:34         ANodeInv.mono
+    2 |   0 | Subst.lean:197           Subst.vars_apply
+    2 |   4 | Spt.lean:15              Subst.solves_eqs_iff
+    2 |   9 | Spt.lean:37              joinAll_absorbs
+    2 |   0 | Spt.lean:157             ANodeInv.parent_vars_lt
+    2 |   3 | Preserve.lean:596        init_inv
+    2 |  66 | Preserve.lean:646        run_inv
+    2 |  30 | Preserve.lean:738        sptE_inv
+    2 |  13 | General.lean:19          joinAll_mostGeneral
+    2 |   7 | Generality.lean:153      mem_chain_of_at
+    2 |  36 | Generality.lean:644      entry_mostGeneral
+    2 |  27 | Completeness.lean:119    run_le_of_le
+    2 |  30 | Completeness.lean:244    run_expanded_iff
+    1 |   0 | Subst.lean:214           Subst.consts_apply
+    1 |   3 | Spt.lean:57              joinAll_typed
+    1 |   7 | Spt.lean:88              Absorbs.of_comp
+    1 |  11 | Spt.lean:311             conds_proofOf
+    1 |  28 | Preserve.lean:54         StateInv.mono
+    1 |   0 | Preserve.lean:203        mem_vars_rename
+    1 |  46 | Preserve.lean:222        addNode_inv
+    1 |  28 | Preserve.lean:427        recordAt_inv
+    1 |  49 | Preserve.lean:502        tryAssertion_inv
+    1 |  32 | Preserve.lean:539        mark_inv
+    1 |  60 | Preserve.lean:548        expandNode_inv
+    1 |  61 | Preserve.lean:560        expandAll_inv
+    1 |  26 | Preserve.lean:678        anodeEntries_inv
+    1 |   5 | General.lean:39          mem_names_apply
+    1 |   9 | General.lean:72          holds_of_instance
+    1 |   6 | General.lean:82          stepSub_comp
+    1 |  12 | General.lean:95          proofOf_subst
+    1 |   9 | Generality.lean:213      le_of_mem_enodes
+    1 |  11 | Generality.lean:220      sibling_disjoint
+    1 |  17 | Generality.lean:262      anodes_nodup
+    1 |   1 | Generality.lean:372      assign_keys
+    1 |   0 | Generality.lean:456      build_f_lt
+    1 |   1 | Generality.lean:460      build_f_renamed
+    1 |   2 | Generality.lean:477      build_typed
+    1 |  26 | Generality.lean:537      sim
+    1 |   3 | Completeness.lean:132    expanded_tryAssertion
+    1 |  29 | Completeness.lean:231    expandAll_expanded_iff
+    1 |  30 | Completeness.lean:272    expandAll_tried
+    1 |  39 | Completeness.lean:279    tried_of_lt
+    1 |   5 | Completeness.lean:296    anodes_tryAssertion
+    1 |  30 | Completeness.lean:347    anodes_foldl_expandNode
+    1 |  33 | Completeness.lean:379    anode_round
+    1 |  42 | Completeness.lean:402    children_lt_of_parent
+    1 |   5 | Completeness.lean:470    fuel_le
+    1 |   9 | Completeness.lean:536    override_solves
+    1 | 126 | Completeness.lean:598    treeOf_at
+    1 |   3 | Completeness.lean:723    sptE_mono
+    1 |  46 | Completeness.lean:754    entry_exists
+    1 |   0 | Completeness.lean:895    congruent_of_matches
+    1 | 193 | Completeness.lean:915    completeness'
+
+backbone edges:
+  Subst.comp_assoc -> Subst.apply_comp
+  joinAll_absorbs -> Subst.comp_assoc, Subst.solves_eqs_iff
+  Absorbs.of_comp -> Subst.apply_comp, Subst.comp_assoc
+  ANodeInv.mono -> ANodeInv.children_eq, ANodeInv.is_mgu, ANodeInv.parent_vars_lt
+  StateInv.mono -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  addNode_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt, Subst.vars_apply, mem_vars_rename
+  recordAt_inv -> ANodeInv.mono, StateInv.base_eq, StateInv.parent_lt, StateInv.parent_lt_children, StateInv.stride_pos, StateInv.tried_spec, StateInv.up_lt, StateInv.vars_lt
+  tryAssertion_inv -> StateInv.vars_lt, addNode_inv, recordAt_inv
+  mark_inv -> StateInv.mono, getElem!_modify
+  expandNode_inv -> mark_inv, tryAssertion_inv
+  expandAll_inv -> expandNode_inv
+  run_inv -> expandAll_inv, init_inv
+  anodeEntries_inv -> Absorbs.of_comp, Subst.apply_comp, joinAll_absorbs, joinAll_idem, joinAll_typed
+  sptE_inv -> anodeEntries_inv
+  Subst.comp_eq_of_instance -> Subst.comp_assoc
+  joinAll_mostGeneral -> Subst.comp_eq_of_instance, Subst.solves_eqs_iff, joinAll_idem
+  mem_names_apply -> Subst.consts_apply, Subst.vars_apply
+  holds_of_instance -> Subst.apply_comp, mem_names_apply
+  stepSub_comp -> Subst.apply_comp
+  proofOf_subst -> Subst.apply_comp, stepSub_comp
+  mem_chain_of_at -> StateInv.up_lt, chain_eq
+  le_of_mem_enodes -> StateInv.up_lt, chain_eq, mem_chain_of_at
+  sibling_disjoint -> ANodeInv.children_eq, StateInv.up_lt, chain_eq, mem_chain_of_at
+  anodes_nodup -> ANodeInv.children_eq, le_of_mem_enodes, sibling_disjoint
+  sim -> ANodeInv.is_mgu, StateInv.base_eq, Subst.apply_comp, Subst.comp_eq_of_instance
+  entry_mostGeneral -> Subst.comp_eq_of_instance, joinAll_mostGeneral, sptE_inv
+  run_le_of_le -> State.Le.trans, getElem!_modify
+  expandAll_expanded_iff -> State.Le.trans, expanded_tryAssertion, getElem!_modify
+  run_expanded_iff -> expandAll_expanded_iff
+  expandAll_tried -> State.Le.trans, getElem!_modify
+  tried_of_lt -> State.Le.trans, expandAll_tried, getElem!_modify, run_expanded_iff
+  anodes_foldl_expandNode -> State.Le.trans, anodes_tryAssertion, getElem!_modify
+  anode_round -> State.Le.trans, anodes_foldl_expandNode, getElem!_modify
+  children_lt_of_parent -> anode_round, run_expanded_iff, run_le_of_le
+  fuel_le -> ANodeInv.children_eq
+  treeOf_at -> ANodeInv.is_mgu, ANodeInv.parent_vars_lt, StateInv.base_eq, StateInv.tried_spec, Subst.apply_comp, Subst.comp_eq_of_instance, children_lt_of_parent, override_solves, run_inv, run_le_of_le, tried_of_lt
+  entry_exists -> Subst.apply_comp, Subst.comp_eq_of_instance, entry_mostGeneral, holds_of_instance, joinAll_absorbs, joinAll_idem, joinAll_mostGeneral, sptE_inv
+  completeness' -> StateInv.stride_pos, anodes_nodup, assign_keys, build_f_lt, build_f_renamed, build_typed, conds_proofOf, congruent_of_matches, entry_exists, entry_mostGeneral, fuel_le, init_inv, proofOf_subst, run_inv, sim, sptE_mono, treeOf_at
+  completeness -> completeness'
+
+lemmas in the closure that are not in the backbone (plumbing), by file:
+  Term: 2: Consts.mem_names, Ty.fits_refl
+  Subst: 7: Subst.Typed.id, Subst.apply_const, Subst.apply_var, Subst.comp_id, Subst.ext, Subst.f_eq_of_not_mem, Subst.hdom
+  Unification: 5: Unification.idem, Unification.mostGeneral, Unification.range_sub, Unification.solves, Unification.typed
+  Deduction: 6: Assertion.WF.concl_vars, Assertion.WF.hyps_vars, Assertion.WF.pairs_vars, PTree.condsList_eq_flatMap, PTree.substList_eq_map, getElem!_map'
+  Spt: 26: ANodeInv.assertion, ANodeInv.children, ANodeInv.children_len, ANodeInv.conds, ANodeInv.idem, ANodeInv.parent_lt, ANodeInv.typed, ANodeInv.unifies, EntryInv.absorbs, EntryInv.at_, EntryInv.conds, EntryInv.idem, SptTree.condsList_eq_flatMap, StateInv.anodes, StateInv.expanded_tried, StateInv.fresh_gt, StateInv.root_expr, StateInv.root_lt, StateInv.stride_gt, StateInv.tried_fresh, StateInv.tried_lt, StateInv.up_children, flatMap_congr_mem, getElem!_of_getElem?, proofsOf_eq_map, stepSub_f_of_mem
+  Preserve: 25: Cond.apply_comp, Problem.vars_single, addNode_anode_new, addNode_anode_old, addNode_anodes_size, addNode_enode_new, addNode_enode_new_parent, addNode_enode_none, addNode_enode_old, addNode_enodes_size, expr_modify, foldl_inv, foldl_tried, getElem!_map, getElem!_map_range, le_foldl_max, le_foldl_max.init_le_foldl_max, mem_aChildren, mem_hyps_vars, mem_tuples, parent_modify, size_le_tryAssertion, tried_le_tryAssertion, tryAssertion_cases, tryAssertion_records
+  Generality: 16: SptTree.anodesList_eq_flatMap, SptTree.enodesList_eq_flatMap, anc_fuel, anodes_lt, apply_congr_vars, apply_rename_eq, assignList_keys, assign_typed, chain_lt, chain_nil, chain_suffix, look_mem, look_of_nodup, mem_assignList, nodup_flatMap_index, parent_mem_enodes
+  Completeness: 38: PTree.height_child, SptTree.fuelList_le, SptTree.fuel_child, State.Le.anode, State.Le.asize, State.Le.esize, State.Le.expanded, State.Le.expr, State.Le.freshBase, State.Le.parent, State.Le.refl, State.Le.stride, State.Le.tried, anodes_expandAll, anodes_expandNode, anodes_foldl_tryAssertion, expanded_expandNode_iff, expanded_foldl_expandNode_iff, expanded_foldl_tryAssertion, findNode_some, findNode_some_of_mem, le_addNode, le_expandAll, le_expandNode, le_foldl, le_mark, le_recordAt, le_tryAssertion, mem_condsList_of_index, mem_tuples_of_index, override_f_lt, override_f_renamed, override_typed, run_le, run_zero_unexpanded, treeOfList_getElem, treeOfList_length, tried_foldl_expandNode
